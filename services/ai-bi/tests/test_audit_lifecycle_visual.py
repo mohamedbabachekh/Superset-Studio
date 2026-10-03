@@ -69,6 +69,7 @@ def test_the_fingerprint_does_not_care_how_the_engine_spells_empty():
     dashboard was refused as « changed after validation »."""
     validated = asset_version(_export("dashboard_export_1", expression=None))
     assert validated == asset_version(_export("dashboard_export_2", expression=""))
+    assert validated == asset_version(_export("dashboard_export_2", expression="{}"))     # « {} », as text
     assert validated != asset_version(_export("dashboard_export_2", expression="date::date"))
 
 
@@ -119,8 +120,10 @@ def test_what_a_person_changes_still_changes_the_fingerprint():
 def test_the_sign_in_token_is_read_from_the_form_as_the_engine_writes_it():
     """The attribute sits on its own line in 6.1's page; the browser no longer visits that page at all."""
     html = '<form>\n  <input type="hidden"\n      name="csrf_token"\n      id="csrf_token"\n      value="IjVm.as-Ef_9"\n  />'
-    assert VisualQaAgent._CSRF.search(html).group(1) == "IjVm.as-Ef_9"
-    assert VisualQaAgent._CSRF.search("<form><input name='username'></form>") is None
+    from aibi.superset_adapter import CSRF_FIELD
+
+    assert CSRF_FIELD.search(html).group(1) == "IjVm.as-Ef_9"
+    assert CSRF_FIELD.search("<form><input name='username'></form>") is None
 
 
 def test_the_fingerprint_follows_content_not_export_time_or_promotion_marks():

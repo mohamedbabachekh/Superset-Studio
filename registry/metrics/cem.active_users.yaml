@@ -17,8 +17,8 @@ metric:
     is that day's count.
   synonyms: [active users, active subscribers, users]
   valid_range: [0, null]
-  higher_is_better: true
   distribution_column: active_users
+  additive: true
   lineage:
     datasets: [cem.qoe_daily]
     columns: [active_users, date]

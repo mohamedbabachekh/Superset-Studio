@@ -16,6 +16,12 @@ Classification = Literal["public", "internal", "confidential", "sensitive", "pii
 RESTRICTED_CLASSIFICATIONS = ("sensitive", "pii")
 
 
+def tidy(name: str) -> str:
+    """A column's name as a person reads it: `rat` is RAT, `site_id` is Site id."""
+    words = name.replace("_", " ")
+    return words.upper() if len(words) <= 3 else words.capitalize()
+
+
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -39,6 +45,11 @@ class ColumnDef(Strict):
     range: Optional[list[Optional[float]]] = None
     accepted_values: Optional[list[str]] = None
     geo: Optional[GeoRef] = None
+    # what the column is called where people read it (a table header, a filter); default: its name, tidied
+    label: Optional[str] = None
+    # for a column a join added: the key(s) it is a function of. `region_iso` is determined by `region`, so
+    # whatever may be broken down by region may be broken down by its code.
+    determined_by: Optional[list[str]] = None
 
 
 class DatasetDef(Strict):
@@ -67,6 +78,10 @@ class DatasetDef(Strict):
     environment: Literal["prod", "dev"] = "prod"
     # where it physically is — read from the dbt manifest, never typed by hand
     db_schema: Optional[str] = None
+
+    def label(self, column: str) -> str:
+        body = self.columns.get(column)
+        return (body.label if body is not None and body.label else None) or tidy(column)
 
     def columns_with_role(self, role: str) -> list[str]:
         return [name for name, col in self.columns.items() if col.role == role]
@@ -101,8 +116,11 @@ class MetricDef(Strict):
     documentation: str = ""
     synonyms: list[str] = Field(default_factory=list)
     valid_range: Optional[list[Optional[float]]] = None
-    higher_is_better: Optional[bool] = None
     distribution_column: Optional[str] = None
+    # Do its values for the parts add up to its value for the whole? Users per region do; a score or a rate
+    # per region does not, and a pie of sixteen rates shows each as a « share » of a sum that means nothing.
+    # False unless said otherwise: the safe side is to refuse the pie.
+    additive: bool = False
     lineage: MetricLineage
 
     @property

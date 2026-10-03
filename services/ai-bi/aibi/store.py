@@ -59,6 +59,12 @@ class Store:
                        "body = excluded.body, updated_at = excluded.updated_at",
                        (project_id, json.dumps(body, ensure_ascii=False), updated_at))
 
+    def delete_project(self, project_id: str) -> None:
+        """The project and its versions. Its runs stay: what was attempted is history, not state."""
+        with self._lock, self._connect() as db:
+            db.execute("delete from versions where project_id = ?", (project_id,))
+            db.execute("delete from projects where project_id = ?", (project_id,))
+
     def list_projects(self) -> list[dict[str, Any]]:
         with self._connect() as db:
             rows = db.execute("select body from projects order by updated_at desc").fetchall()

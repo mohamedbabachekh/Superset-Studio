@@ -15,8 +15,8 @@ metric:
     level and over any period.
   synonyms: [degraded rate, degradation rate, share of degraded users]
   valid_range: [0, 1]
-  higher_is_better: false
   distribution_column: null
+  additive: false
   lineage:
     datasets: [cem.qoe_daily]
     columns: [degraded_users, active_users]

@@ -45,12 +45,14 @@ class LifecycleError(Exception):
 
 
 def _meaningful(value: Any) -> Any:
-    """A document without its empties. The BI engine writes « nothing » three ways — null, an empty string,
-    an empty list — and moves between them on its own: refreshing a dataset turned every column's
-    `expression: null` into `expression: ''`, and a dashboard nobody had touched was reported as changed."""
+    """A document without its empties. The BI engine writes « nothing » five ways — null, an empty string,
+    an empty list, an empty mapping, and the TEXT « {} » — and moves between them on its own: refreshing a
+    dataset turned every column's `expression: null` into `expression: ''`, copying a dashboard gave it
+    `default_filters: '{}'` and importing it took that away again. Each time, a dashboard nobody had touched
+    was reported as changed."""
     if isinstance(value, dict):
         kept = {k: _meaningful(v) for k, v in value.items()}
-        return {k: v for k, v in kept.items() if v not in (None, "", [], {})}
+        return {k: v for k, v in kept.items() if v not in (None, "", [], {}, "{}", "[]")}
     if isinstance(value, list):
         return [_meaningful(v) for v in value]
     return value
@@ -121,7 +123,8 @@ def canonical_assets(bundle: bytes) -> dict[str, Any]:
                                   if target else target for target in flt.get("targets") or []]
                 filters.append(flt)
             metadata["native_filter_configuration"] = filters
-            told[f"dashboard {body.get('slug')}"] = {**body, "position": position, "metadata": metadata}
+            told[f"dashboard {body.get('slug') or body.get('dashboard_title')}"] = {
+                **body, "position": position, "metadata": metadata}
         elif kind == "charts":
             place = place_by_uuid.get(doc.get("uuid"), f"{doc.get('slice_name')} ({doc.get('viz_type')})")
             params = {k: v for k, v in (body.get("params") or {}).items()
@@ -223,13 +226,23 @@ class Lifecycle:
         _dump(folder / "semantic" / "lineage.yaml", lineage)
 
         identity = ctx.identity
+        policy = self.tools.policy
+        used = [self.registry.dataset(ds) for ds in spec.datasets()]
+        audience = policy.audience(used)
         _dump(folder / "security" / "access.yaml", {
             "requested_by": identity.user, "tenant": identity.tenant, "roles": list(identity.roles),
+            # who the dashboard is for, and the rows each of them sees — as SharpSight's RBAC says it
+            "audience": audience,
             "datasets": {d.id: {"tenant": d.tenant,
                                 "classifications": {name: col.classification for name, col in d.columns.items()},
-                                "row_level_policy": self.tools.policy.row_policies(identity, d.id)}
+                                "row_level_policies": {role: clause for role in audience
+                                                       if (clause := policy.role_row_policy(role, d))}}
                          for d in datasets},
-            "bi_engine_connection": {"name": self.tools._bi_database[0], "read_only": True}})
+            # the same, as it was set in the BI engine
+            "bi_engine": {"connection": {"name": self.tools._bi_database[0], "read_only": True},
+                          "dashboard_roles": [self.tools.engine_role(r) for r in audience],
+                          "row_level_rules": [self.tools.rule_name(r["role"], r["dataset"])
+                                              for r in policy.row_rules(used)]}})
 
         # the BI engine's own export: charts and dashboards where a reviewer expects them, the rest together
         bundle = self.superset.export_dashboard(body["engine"]["dashboard"]["id"])
@@ -404,6 +417,13 @@ class Lifecycle:
             if changed:
                 raise LifecycleError(f"unvalidated assets are not deployed: {changed}. Regenerate, or restore "
                                      f"version {record.version}.")
+            # who may open it is not in an export, so it is checked on its own: roles and row-level rules
+            # set by hand in the BI engine are as unvalidated as a chart edited by hand
+            access = self.tools.access_differences(self.store.get_project(project_id))
+            if access:
+                raise LifecycleError("unvalidated assets are not deployed: the access set in the BI engine is not "
+                                     "what SharpSight grants — " + "; ".join(access)
+                                     + f". Restore version {record.version}.")
             if target == "PROD":
                 if not confirm or not comment.strip():
                     raise LifecycleError("production needs an explicit approval: confirm=true and a comment "
@@ -428,9 +448,27 @@ class Lifecycle:
                      "certified_by": f"{identity.user} (SharpSight)",
                      "certification_details": f"SharpSight BI project {project_id} v{record.version} — PROD. "
                                               f"Package sha256 {record.package['sha256'][:16]}…"}
-            for chart in self.tools.live_charts(self.store.get_project(project_id)["engine"]).values():
+            project = self.store.get_project(project_id)
+            charts = list(self.tools.live_charts(project["engine"]).values())
+            for chart in charts:
                 self.superset.update_chart(chart["id"], {"is_managed_externally": True})
             self.superset.update_dashboard(dashboard_id, marks)
+            # Published, the dashboard's grants take effect — so THIS is the moment to ask the BI engine who it
+            # lets in. If the answer is not SharpSight's, the dashboard is withdrawn and nothing is recorded.
+            asked = self.who_gets_in(project)
+            if asked["problems"]:
+                self.superset.update_dashboard(dashboard_id, {"published": False, "is_managed_externally": False,
+                                                              "certified_by": "", "certification_details": ""})
+                for chart in charts:
+                    self.superset.update_chart(chart["id"], {"is_managed_externally": False})
+                reason = ("the dashboard was published and withdrawn again: the BI engine does not enforce the "
+                          "access SharpSight grants — " + "; ".join(asked["problems"]))
+                self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id,
+                                  actor="human", project_id=project_id, outcome="refused",
+                                  deployment={"target": target, "version": record.version, "access": asked["probes"]},
+                                  detail={"reason": reason})
+                raise LifecycleError(reason)
+            marks["access_verified"] = asked["probes"]
 
         record.approvals.append(Approval(target=target, decision="approved", by=identity.user, comment=comment))
         record.state = target
@@ -450,6 +488,28 @@ class Lifecycle:
                                       "tag": tag, "package": record.package, "comment": comment})
         return record
 
+    def who_gets_in(self, project: dict[str, Any]) -> dict[str, Any]:
+        """Ask the BI engine, role by role: an account with no SharpSight role must be refused; an account
+        holding one of the dashboard's roles must be served, with exactly the rows the data gateway gives
+        that role. Only meaningful once the dashboard is published — a draft is its owner's alone."""
+        tools = self.tools
+        spec = DashboardSpec(**project["spec"])
+        datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
+        probes, problems = {}, []
+        outsider = tools.probe_access(project, None)
+        probes["(no role)"] = outsider
+        if not tools.refused(outsider):
+            problems.append(f"an account with no SharpSight role got dashboard → {outsider['dashboard']}, "
+                            f"data → {outsider['data']}")
+        for role in tools.policy.audience(datasets):
+            probe = tools.probe_access(project, role)
+            probes[role] = probe
+            if not tools.served(probe):
+                unequal = [ds for ds, rows in probe["rows"].items() if not rows["same"]]
+                problems.append(f"{role}: dashboard → {probe['dashboard']}, data → {probe['data']}"
+                                + (f", rows differ from the data gateway's on {', '.join(unequal)}" if unequal else ""))
+        return {"probes": probes, "problems": problems}
+
     def reject(self, identity: Identity, project_id: str, comment: str, request_id: str) -> ProjectVersion:
         record = self.store.latest_version(project_id)
         if record is None:
@@ -465,6 +525,51 @@ class Lifecycle:
                           project_id=project_id, outcome="rejected",
                           deployment={"target": target, "version": record.version, "comment": comment})
         return record
+
+    # ── discard ─────────────────────────────────────────────────────────────────────────────────────────────
+    def discard(self, identity: Identity, project_id: str, request_id: str) -> dict[str, Any]:
+        """A project still in DEV — or one whose promotion was rejected — taken away: its dashboard and charts
+        in the BI engine, the datasets it generated, its place among the projects. A project standing in UAT
+        or PROD is not discarded: it is superseded, by a version.
+
+        What stays, on purpose: the commits in the bi-projects repository and the branch in the dbt one
+        (history), the governed datasets in the BI engine (other projects use them), and the generated table
+        in the development schema (the next production build of that name would replace it anyway)."""
+        self.tools.policy.require(identity, "bi.generate")
+        project = self.store.get_project(project_id)
+        latest = self.store.latest_version(project_id)
+        if latest is not None and latest.state != "DEV" and latest.review_status != "REJECTED":
+            raise LifecycleError(f"{project_id} v{latest.version} is in {latest.state}: only a project still in "
+                                 "DEV, or one whose promotion was rejected, can be discarded")
+        engine = project.get("engine", {})
+        removed: list[dict[str, Any]] = []
+        for slot, chart in self.tools.live_charts(engine).items():
+            self.superset.delete_chart(chart["id"])
+            removed.append({"type": "chart", "id": chart["id"], "slot": slot, "action": "deleted"})
+        if engine.get("dashboard"):
+            self.superset.delete_dashboard(engine["dashboard"]["id"])
+            removed.append({"type": "dashboard", "id": engine["dashboard"]["id"], "action": "deleted"})
+        generated = [d for d in self.registry.datasets.values() if d.project == project_id]
+        for dataset in generated:
+            for rule in self.superset.row_rules("sharpsight:"):
+                if rule["name"].split(":", 2)[-1] == dataset.id:
+                    self.superset.delete_row_rule(rule["id"])
+                    removed.append({"type": "row_level_rule", "id": rule["id"], "name": rule["name"], "action": "deleted"})
+            engine_id = engine.get("datasets", {}).get(dataset.id)
+            if engine_id is not None:
+                self.superset.delete_dataset(engine_id)
+                removed.append({"type": "dataset", "id": engine_id, "table": dataset.relation, "action": "deleted"})
+            self.registry.unregister_generated(dataset.id)
+        folder = self.git.project_dir(project_id)
+        shutil.rmtree(folder)
+        self.git.commit_project(project_id, f"{project_id}: discarded by {identity.user}")
+        self.store.delete_project(project_id)
+        self.tools.evidence.pop(project_id, None)
+        self.audit.record(action="discard", user=identity.user, request_id=request_id, actor="human",
+                          project_id=project_id, datasets=[d.id for d in generated], superset_assets=removed,
+                          detail={"version": latest.version if latest else None})
+        return {"project_id": project_id, "discarded": True, "removed_from_bi_engine": len(removed),
+                "generated_datasets": [d.id for d in generated]}
 
     # ── restore ─────────────────────────────────────────────────────────────────────────────────────────────
     def specification_at(self, project_id: str, version: str) -> DashboardSpec:

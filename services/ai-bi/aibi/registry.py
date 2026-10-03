@@ -141,9 +141,17 @@ class Registry:
             placed = [p.id for row in template.layout for p in row.slots]
             if sorted(placed) != sorted(template.slots):
                 problems.append(f"template {tid}: the layout and the slot list do not name the same slots")
+            minimum = template.responsive.min_slot_width
             for row in template.layout:
                 if sum(p.width for p in row.slots) > template.grid.columns:
                     problems.append(f"template {tid}: row {row.row} is wider than the grid")
+                # the narrowest a slot may be, by kind — collapsing only ever widens one, so the check is here
+                for placement in row.slots:
+                    slot = template.slots.get(placement.id)
+                    kind = "kpi" if slot is not None and slot.purpose == "kpi" else "chart"
+                    if placement.width < minimum.get(kind, 1):
+                        problems.append(f"template {tid}: slot {placement.id} is {placement.width} columns wide, "
+                                        f"under the template's own minimum of {minimum[kind]} for a {kind}")
             for slot_id, slot in template.slots.items():
                 for kind in slot.accepts:
                     if kind not in self.visualizations:
@@ -220,3 +228,10 @@ class Registry:
                         encoding="utf-8")
         self.datasets[dataset.id] = dataset
         return path
+
+    def unregister_generated(self, dataset_id: str) -> None:
+        dataset = self.datasets.get(dataset_id)
+        if dataset is None or not dataset.generated_by:
+            raise RegistryError(f"{dataset_id} is not a generated dataset")
+        (self.generated_dir / f"{dataset_id}.yaml").unlink(missing_ok=True)
+        del self.datasets[dataset_id]

@@ -7,6 +7,8 @@
 #   bash ai-bi.sh approve <project> UAT                    as lead.reviewer
 #   bash ai-bi.sh approve <project> PROD "what was checked"   as release.manager — a second person, on purpose
 #   bash ai-bi.sh audit [project]                          the audit trail, and whether its chain is intact
+#   bash ai-bi.sh discard <project>                        a project still in DEV, taken away
+#   bash ai-bi.sh check-adapter <project>                  every road of the Superset adapter, on a copy
 #   bash ai-bi.sh test                                     the engine's own tests, inside its container
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
 #   bash ai-bi.sh --erase      stop the engine and delete ITS two volumes (the kit's are untouched)
@@ -44,6 +46,9 @@ case "${1:-}" in
       cli approve "$project" UAT --user lead.reviewer --comment "${4:-reviewed}"
     fi; exit $? ;;
   audit)    if [ -n "${2:-}" ]; then cli audit --user lead.reviewer --project "$2"; else cli audit --user lead.reviewer; fi; exit $? ;;
+  discard)  cli discard "${2:?usage: ai-bi.sh discard <project>}"; exit $? ;;
+  check-adapter)
+    compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.adapter_check "$@"' check "${2:?usage: ai-bi.sh check-adapter <project>}"; exit $? ;;
   test)     compose exec -T sharpsight-ai-bi sh -c 'cd /app && python -m pytest'; exit $? ;;
   ""|start) ;;
   *) echo "unknown: $1 — see the top of this file" >&2; exit 2 ;;

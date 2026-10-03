@@ -16,8 +16,8 @@ metric:
     period.
   synonyms: [degraded users, degraded subscribers, impacted users]
   valid_range: [0, null]
-  higher_is_better: false
   distribution_column: degraded_users
+  additive: true
   lineage:
     datasets: [cem.qoe_daily]
     columns: [degraded_users, date]

@@ -236,3 +236,46 @@ kit's own Superset. → `ai-bi.sh` builds the engine's image only, then `up -d`.
 **dbt.** 1.10 announces at every run that it is no longer patched; the engine pins 1.12. A generic test's
 inputs go under `arguments:` (`require_generic_test_arguments_property`), or every test warns. And `dbt docs
 generate` rewrites `run_results.json` with its own compile — the build's results must be copied aside first.
+
+### Access, and the roads a generation does not take (same day, second pass)
+
+**A dashboard's roles decide nothing until it is published.** With `DASHBOARD_RBAC`, a draft is its owner's
+alone; published, it is open to whoever holds one of its roles — and those roles need no permission of their
+own, only a name. A chart's data is then given to a role holder when the request is made in the dashboard's
+name (`form_data.dashboardId` and `slice_id`). Measured with accounts holding Superset's base role and exactly
+one other: with no dashboard role, 404 on the dashboard and 403 on its data; with one, 200 on both.
+
+**A row-level rule applies to whoever holds its role, whatever else they hold**, and rules sharing a
+`group_key` are OR-ed. → the data gateway was changed to say the same: an unrestricted role no longer lifts a
+restricted one. Two layers that disagree about which rows a person sees are worse than either rule.
+
+**A policy on a table is not a policy on what is built from it.** The generated map dataset is the mart plus a
+column, in another schema, under another dataset id: Superset would have shown the regional analyst three
+regions on every chart and the whole country on the map. → a policy follows a dataset into everything
+`derived_from` it, and both rules are written.
+
+**`POST /dashboard/<id>/copy/` takes the copy's layout from `positions` INSIDE the metadata it is sent.** Sent
+the original's `json_metadata` as stored, the copy has its charts and no layout. → the adapter puts the
+original's `position_json` there. Found the first time the copy was run at all, by `ai-bi.sh check-adapter`.
+
+**An import is not identical to its export.** The copy carries `default_filters: '{}'`; after export and import
+it is gone. « {} » as TEXT is one more way the engine writes « nothing ». → it counts as empty in the
+fingerprint, with null, `''`, `[]` and `{}`.
+
+**The embedded configuration is accepted with `EMBEDDED_SUPERSET` off.** The flag gates the embedded page, not
+the record: `POST /dashboard/<id>/embedded` answers and can be read back.
+
+**With an ellipsis, ONE pixel of overflow costs the last letters.** « CEM experience Customer Experien… »
+needed 372 px and had 371. A check that tolerated a pixel passed it.
+
+**At 16 px per category the chart engine drops every other label, silently.** Sixteen regions in a slot that
+gave them 16.1 px each: eight names drawn, no error, no scrollbar. At 19.1 px all sixteen. → the threshold is
+18, and the ranking is then cut to what fits (« Top 14 »).
+
+**A table's header is the raw column name** unless the dataset's column has a verbose name — `rat`, on an
+executive dashboard. Setting it means sending back EVERY column with its id: a column left out of the list is
+one Superset deletes.
+
+**A pie of a rate draws, and means nothing.** Sixteen regional rates shown as « shares » of their own sum. No
+engine refuses it. → a metric says whether its parts add up (`additive`), and a share-of-total chart is refused
+for one that does not.

@@ -17,9 +17,9 @@ metric:
     read at any level of region, technology or period without re-weighting.
   synonyms: [qoe score, qoe, quality of experience, experience score]
   valid_range: [1, 5]
-  higher_is_better: true
   # what a distribution of this metric is drawn over
   distribution_column: qoe_score
+  additive: false
   lineage:
     datasets: [cem.qoe_daily]
     columns: [qoe_score, active_users]

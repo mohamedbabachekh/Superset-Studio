@@ -7,6 +7,7 @@
     python -m aibi.cli approve <project id> UAT --user lead.reviewer
     python -m aibi.cli approve <project id> PROD --user release.manager --confirm --comment "…"
     python -m aibi.cli reject <project id> --user lead.reviewer --comment "…"
+    python -m aibi.cli discard <project id>                    a project still in DEV, taken away
     python -m aibi.cli audit [--project <id>] [--request <id>] --user lead.reviewer
 
 It calls the service like any other client: with the gateway's token, and a user named on each call.
@@ -112,14 +113,14 @@ def generate(prompt: str, user: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="aibi", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("demo", "generate", "run", "project", "approve", "reject", "audit", "health"):
+    for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health"):
         command = sub.add_parser(name)
         command.add_argument("--user", default="dev.user")
         if name == "generate":
             command.add_argument("prompt")
         if name == "run":
             command.add_argument("run_id")
-        if name in ("project", "approve", "reject"):
+        if name in ("project", "approve", "reject", "discard"):
             command.add_argument("project_id")
         if name == "approve":
             command.add_argument("target", choices=["UAT", "PROD"])
@@ -152,6 +153,11 @@ def main() -> int:
     elif args.command == "reject":
         record = call("POST", f"/projects/{args.project_id}/reject", args.user, json={"comment": args.comment})
         print(f"{record['project_id']} {record['version']} — {record['state']} · {record['review_status']}")
+    elif args.command == "discard":
+        done = call("POST", f"/projects/{args.project_id}/discard", args.user)
+        print(f"{done['project_id']} discarded — {done['removed_from_bi_engine']} assets removed from the BI engine"
+              + (f", generated datasets unregistered: {', '.join(done['generated_datasets'])}"
+                 if done["generated_datasets"] else ""))
     elif args.command == "audit":
         params = {k: v for k, v in (("project_id", args.project), ("request_id", args.request),
                                     ("limit", args.limit)) if v}

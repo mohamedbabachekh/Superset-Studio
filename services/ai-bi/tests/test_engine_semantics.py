@@ -133,3 +133,74 @@ def test_filters_are_judged_on_the_dashboard_itself(registry, policy):
 
     never_rendered = agent.dashboard_filters(spec, charts, [base], None, None)
     assert not never_rendered.passed
+
+
+# ── what the first renders of the other templates showed ────────────────────────────────────────────────────
+CX = ("Create a CEM experience dashboard using the customer-experience template. Use Degraded Rate and QoE Score. "
+      "Show degraded rate distribution, daily trend and regional ranking. Add region filter.")
+
+
+def test_a_rate_is_never_drawn_as_shares_of_a_whole(registry, dashboards, semantic, policy):
+    """The first customer-experience render had a donut of the degraded RATE by region: sixteen rates shown
+    as « shares » of their own sum. The view is left out and said so; the mandatory slot is filled with what
+    can be drawn."""
+    from aibi.planner import DeterministicParser
+
+    requirement = DeterministicParser(registry).parse(CX)
+    template = registry.template("customer-experience")
+    metrics, _ = semantic.find_metrics(requirement)
+    assert [m.id for m in metrics] == ["cem.degraded_rate", "cem.qoe_score"]
+    drafts, notes = dashboards.draft(requirement, template, metrics)
+    distribution = next(d for d in drafts if d.slot == "distribution_1")
+    assert (distribution.type, distribution.metric.id) == ("histogram", "cem.qoe_score")
+    assert not any(d.type == "pie" for d in drafts)
+    assert any("« degraded rate distribution » left out" in n for n in notes)
+    assert any("distribution_1 is mandatory" in n and "QoE Score" in n for n in notes)
+
+
+def test_a_pie_of_a_non_additive_metric_is_refused_by_the_validator(dashboards, policy, registry):
+    def pie(metric):
+        return DashboardSpec(dashboard={"id": "t", "template": "customer-experience", "title": "T"}, components=[
+            _component(), _component(slot="trend_1", type="line", dimension="date"),
+            _component(slot="distribution_1", type="pie", metric=metric, dimension="region")])
+
+    dev = policy.identify("dev.user")
+    failed = {c.name: c.detail for c in dashboards.validate(pie("cem.degraded_rate"), dev).failures}
+    assert "shares of nothing" in failed["metric's parts add up to its whole"]
+    assert dashboards.validate(pie("cem.active_users"), dev).passed            # users per region DO add up
+    assert registry.metric("cem.active_users").additive and not registry.metric("cem.qoe_score").additive
+
+
+def test_a_column_is_shown_under_the_name_people_read(registry):
+    dataset = registry.dataset("cem.qoe_daily")
+    assert [dataset.label(c) for c in ("date", "region", "rat", "qoe_score", "active_users")] == [
+        "Date", "Region", "RAT", "QoE score", "Active users"]
+    agent, template = ChartAgent(registry), registry.template("telecom-kpi")
+    table = _component(slot="detail_1", type="table", dimension="rat")
+    ranking = _component(slot="ranking_1", type="bar", dimension="region")
+    metric = registry.metric("cem.qoe_score")
+    assert agent.title(table, metric, "detail") == "QoE Score by RAT"          # it read « by rat »
+    assert agent.title(ranking, metric, "ranking") == "QoE Score by region"
+
+
+def test_one_pixel_of_overflow_is_a_clipped_title():
+    """« CEM experience Customer Experien… » needed 372 px and had 371."""
+    from aibi.visual_qa_agent import VisualQaAgent
+
+    agent = VisualQaAgent("http://x", "u", "p", {"visual": {}})
+    spec = DashboardSpec(dashboard={"id": "t", "template": "executive", "title": "T"}, components=[_component()])
+    render = Render(viewport="desktop", width=1440, screenshot="x.png", load_ms=1, components=[
+        {"chart_id": 1, "rect": {"x": 0, "y": 0, "w": 400, "h": 128}, "clipped": [], "error": None, "loading": False,
+         "blank_ratio": 0.9}])
+    render.header = {"text": "CEM experience Customer Experience", "needs": 372, "has": 371}
+
+    class Template:
+        slots = {"kpi_1": type("S", (), {"mandatory": True})()}
+        layout = []
+
+    report = agent.check(render, spec, Template, {"kpi_1": {"id": 1}}, {"kpi_1": {"rowcount": 1, "data": []}})
+    assert [c.code for c in report.warnings] == ["dashboard_title_clipped"]
+
+
+def test_the_label_threshold_is_the_measured_one(registry):
+    assert registry.policies["visual"]["min_px_per_category"] == 18

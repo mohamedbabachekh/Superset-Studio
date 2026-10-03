@@ -53,8 +53,9 @@ data:
 visual:
   # a chart body whose pixels are this uniform has drawn nothing
   blank_ratio: 0.995
-  # fewer pixels than this per category and the labels of a ranking are on top of each other
-  min_px_per_category: 16
+  # Fewer pixels than this per category and the chart engine silently drops every other label of a ranking.
+  # Measured on 2026-10-03: at 16.1 px half of sixteen region names were missing, at 19.1 px all were there.
+  min_px_per_category: 18
   # text drawn smaller than this is not read by anyone
   min_font_px: 9
   max_fix_iterations: 3

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -25,9 +24,9 @@ from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, quote, urlparse
 
 import prison
-import requests
 
 from .models import ComponentOptions, DashboardSpec, TemplateDef, ValidationReport
+from .superset_adapter import sign_in
 
 _COMPONENTS_JS = """
 () => Array.from(document.querySelectorAll('.dashboard-component-chart-holder')).map(holder => {
@@ -36,7 +35,7 @@ _COMPONENTS_JS = """
   const clipped = [];
   holder.querySelectorAll('*').forEach(el => {
     if (el.children.length !== 0 || !el.textContent.trim()) return;
-    if (el.scrollWidth <= el.clientWidth + 1 || el.clientWidth === 0) return;
+    if (el.scrollWidth <= el.clientWidth || el.clientWidth === 0) return;
     const style = getComputedStyle(el);
     if (style.overflowX === 'visible' && style.textOverflow !== 'ellipsis') return;
     clipped.push({text: el.textContent.trim().slice(0, 80), needs: el.scrollWidth, has: el.clientWidth,
@@ -121,27 +120,10 @@ class VisualQaAgent:
         self.policies = policies
 
     # ── signing in ──────────────────────────────────────────────────────────────────────────────────────────
-    _CSRF = re.compile(r'name="csrf_token"[^>]*?value="([^"]+)"')
-
     def session_cookie(self) -> dict[str, Any]:
-        """A signed-in session, obtained WITHOUT a browser, for the browser to carry.
-
-        The first version typed the password into the sign-in page. That page fires requests of its own
-        before anyone is signed in (its event log, the language pack); when one of them is answered AFTER the
-        sign-in, its `Set-Cookie` replaces the fresh session with an anonymous one, and the dashboard request
-        that follows is sent back to the sign-in page. It lost that race once in some twenty-five renders
-        (2026-10-03: a render that waited ninety seconds for charts on a page that was a login form).
-
-        Here nothing is loaded that was not asked for: the form's own token, one POST, one check."""
-        session = requests.Session()
-        form = session.get(f"{self.base_url}/login/", timeout=30)
-        token = self._CSRF.search(form.text)
-        if token is None:
-            raise RuntimeError("the BI engine's sign-in form carries no csrf_token: its sign-in has changed")
-        session.post(f"{self.base_url}/login/", timeout=30, allow_redirects=False,
-                     data={"username": self._username, "password": self._password, "csrf_token": token.group(1)})
-        if session.get(f"{self.base_url}/api/v1/me/", timeout=30).status_code != 200:
-            raise RuntimeError("the BI engine did not accept the service account's sign-in")
+        """The service account's session, for the browser to carry: it never loads the sign-in page
+        (superset_adapter.sign_in says why)."""
+        session = sign_in(self.base_url, self._username, self._password)
         cookie = next(c for c in session.cookies if "session" in c.name)
         return {"name": cookie.name, "value": cookie.value, "url": self.base_url, "httpOnly": True}
 
@@ -277,7 +259,9 @@ class VisualQaAgent:
         # A warning, not a failure: the specification cannot cure it (the title is the template's pattern
         # and the request's subject) and the cut is the engine's own sizing. A reviewer should still know.
         header = render.header
-        if header and header["needs"] > header["has"] + 1:
+        # one pixel is enough: with an ellipsis, a title 1 px too long loses its last letters (« Experien… »
+        # at 372 px needed for 371 given)
+        if header and header["needs"] > header["has"]:
             report.add("visual", "dashboard title is not clipped", "warn", view,
                        f"« {header['text']} » needs {header['needs']} px and the header gives it {header['has']}",
                        code="dashboard_title_clipped")
@@ -410,8 +394,9 @@ class VisualQaAgent:
             elif check.code == "title_clipped" and component.title is None:
                 short = short_names.get(component.metric)
                 if short:
-                    title = short if slot.purpose == "kpi" else (
-                        f"{short} by {component.dimension.replace('_', ' ')}" if component.dimension else short)
+                    words = (component.dimension or "").replace("_", " ")
+                    title = short if slot.purpose == "kpi" or not words else (
+                        f"{short} by {words.upper() if len(words) <= 3 else words}")
                     fixes.append(Fix(check.slot, check.code, f"shorten the title to « {title} »",
                                      lambda s, slot=check.slot, t=title: _set_title(s, slot, t)))
             elif check.code == "text_clipped" and component.type == "big_number" \

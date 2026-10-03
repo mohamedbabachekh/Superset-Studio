@@ -42,11 +42,6 @@ class Draft:
         return Need(purpose=self.purpose, metric=self.metric, column=self.column, role=self.role)
 
 
-def label(column: str) -> str:
-    words = column.replace("_", " ")
-    return words.upper() if len(words) <= 3 else words.capitalize()
-
-
 class DashboardAgent:
     def __init__(self, registry: Registry, policy: PolicyEngine, semantic: SemanticAgent):
         self.registry = registry
@@ -77,22 +72,26 @@ class DashboardAgent:
             if not slots:
                 notes.append(f"template {template.id} has no free slot for « {view.phrase} »")
                 continue
-            slot = slots.pop(0)
             metric = by_id.get(view.metric or "", primary)
-            made = self._draft_for(slot, purpose, template, metric, view.dimension, view.time_grain, view.phrase)
+            made = self._draft_for(slots[0], purpose, template, metric, view.dimension, view.time_grain, view.phrase)
             if made is None:
-                notes.append(f"no approved visualization in slot {slot} can show « {view.phrase} »")
+                # the slot stays free: a mandatory one is then filled with something that CAN be drawn
+                notes.append(f"« {view.phrase} » left out: no visualization approved for slot {slots[0]} can show "
+                             f"{metric.name} that way")
                 continue
+            slots.pop(0)
             drafts.append(made)
 
         # a template's mandatory slots are filled whether or not the request thought of them
         for slot_id, slot in template.slots.items():
             if slot.mandatory and not any(d.slot == slot_id for d in drafts):
-                made = self._draft_for(slot_id, slot.purpose, template, primary, None, None, "")
+                # the first requested metric the slot can actually show
+                made = next((m for m in (self._draft_for(slot_id, slot.purpose, template, candidate, None, None, "")
+                                         for candidate in metrics) if m is not None), None)
                 if made is not None:
                     drafts.append(made)
                     notes.append(f"slot {slot_id} is mandatory in template {template.id}: filled with "
-                                 f"{primary.name} by default")
+                                 f"{made.metric.name} by default")
         return drafts, notes
 
     def _draft_for(self, slot: str, purpose: str, template: TemplateDef, metric: MetricDef,
@@ -103,6 +102,8 @@ class DashboardAgent:
         for kind in template.slots[slot].accepts:
             visualization = self.registry.visualizations.get(kind)
             if kind in skip_types or visualization is None or visualization.status != "available":
+                continue
+            if visualization.needs.get("additive_metric") and not metric.additive:
                 continue
             draft = Draft(slot=slot, purpose=purpose, type=kind, metric=metric, phrase=phrase)
             role = visualization.needs.get("dimension_role")
@@ -220,6 +221,10 @@ class DashboardAgent:
             add("metric is valid on the dataset", valid, subject, f"{metric.id} on {dataset.id}: {why}")
 
             needs = visualization.needs
+            if needs.get("additive_metric"):
+                add("metric's parts add up to its whole", metric.additive, subject,
+                    f"{metric.id} is {metric.aggregation}" + ("" if metric.additive else
+                                                              f": a {component.type} of it would show shares of nothing"))
             if component.type == "histogram":
                 ok = bool(metric.distribution_column) and metric.distribution_column in dataset.columns
                 add("distribution column exists", ok, subject, str(metric.distribution_column))
@@ -239,6 +244,13 @@ class DashboardAgent:
                         f"{column}: " + (f"{body.geo.standard}, {body.geo.country}" if body.geo else "no geography"))
                 add("dimension is not a restricted column", body.classification not in RESTRICTED_CLASSIFICATIONS,
                     subject, f"{column} is classified {body.classification}")
+                # the registry says what a metric may be broken down by; a column a join added counts as the
+                # key it is a function of
+                through = body.determined_by or [column]
+                allowed = set(through) <= set(metric.dimensions)
+                add("metric may be broken down by the dimension", allowed, subject,
+                    f"{metric.id} by {column}" + ("" if allowed else
+                                                   f": its dimensions are {', '.join(metric.dimensions)}"))
 
         used = [self.registry.datasets[ds] for ds in spec.datasets() if ds in self.registry.datasets]
         add("filter count within the template's limit", len(spec.filters) <= template.filters.max,
@@ -341,7 +353,7 @@ class DashboardAgent:
             is_time = holder.columns[column].role == "time"
             filters.append({
                 "id": self.filter_id(spec, column),
-                "name": label(column),
+                "name": holder.label(column),
                 "type": "NATIVE_FILTER",
                 "filterType": "filter_time" if is_time else "filter_select",
                 "targets": [{}] if is_time else [{"datasetId": engine_dataset_ids[holder.id],

@@ -104,6 +104,22 @@ class DbtRunner:
         return None
 
 
+def semantic_layer(target_dir: Path, registry_metric_keys: list[str]) -> dict[str, Any]:
+    """What dbt's OWN semantic layer defines (semantic_manifest.json), set beside SharpSight's registry.
+
+    The registry is the governed metric layer; dbt may also carry metrics. A name defined in both is two
+    definitions of one number, and that is reported so a person reconciles them — the engine never picks."""
+    manifest = DbtRunner.read_artifact(target_dir, "semantic_manifest.json")
+    if not manifest:
+        return {"available": False, "semantic_models": [], "metrics": [], "also_in_registry": []}
+    metrics = [m.get("name") for m in manifest.get("metrics", [])]
+    short = {key.split("__", 1)[-1]: key for key in registry_metric_keys}
+    return {"available": True,
+            "semantic_models": [m.get("name") for m in manifest.get("semantic_models", [])],
+            "metrics": metrics,
+            "also_in_registry": sorted(m for m in metrics if m in registry_metric_keys or m in short)}
+
+
 def lineage_from_artifacts(target_dir: Path, environment: str) -> list[dict[str, Any]]:
     """Every model and seed dbt knows, with what it is built from, its columns as the database has them, and
     how its tests went — what SharpSight keeps as lineage and model metadata."""

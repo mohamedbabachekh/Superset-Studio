@@ -27,7 +27,8 @@ visualizations:
   pie:
     engine_type: pie
     status: available
-    needs: {metric: true, dimension: true}
+    # shares of a whole: only for a metric whose parts add up (metric.additive)
+    needs: {metric: true, dimension: true, additive_metric: true}
   table:
     engine_type: table
     status: available

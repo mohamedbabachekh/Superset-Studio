@@ -29,7 +29,7 @@ from . import __version__
 from .audit import AuditLog
 from .config import Settings, get_settings
 from .data_gateway import DataGateway
-from .dbt_runner import DbtRunner, lineage_from_artifacts
+from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
 from .lifecycle import Lifecycle, LifecycleError
 from .llm import get_parser
@@ -75,9 +75,12 @@ class Service:
         self.git.projects.ensure()
         nodes = lineage_from_artifacts(self.settings.dbt_prod_state_dir, "prod")
         self.store.save_lineage(nodes)
+        self.dbt_semantic_layer = semantic_layer(self.settings.dbt_prod_state_dir,
+                                                 [m.key for m in self.registry.metrics.values()])
         self.audit.record(action="service:start", user="system", request_id="-", actor="system",
                           ai_model=self.parser.name,
                           detail={"version": __version__, "dbt_project_commit": commit, "dbt_models": len(nodes),
+                                  "dbt_semantic_layer": self.dbt_semantic_layer,
                                   "datasets": len(self.registry.datasets), "metrics": len(self.registry.metrics),
                                   "templates": len(self.registry.templates)})
 
@@ -152,7 +155,8 @@ def health() -> dict[str, Any]:
     return {"status": "ok" if all(checks.values()) else "degraded", "version": __version__, **checks,
             "ai_model": service.parser.name,
             "registry": {"datasets": len(service.registry.datasets), "metrics": len(service.registry.metrics),
-                         "templates": len(service.registry.templates)}}
+                         "templates": len(service.registry.templates)},
+            "dbt_semantic_layer": service.dbt_semantic_layer}
 
 
 # ── registries ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -368,6 +372,17 @@ def approve(project_id: str, decision: Decision, identity: Identity = Depends(ca
 def reject(project_id: str, rejection: Rejection, identity: Identity = Depends(caller)) -> Any:
     _project(project_id, identity)
     return service.lifecycle.reject(identity, project_id, rejection.comment, str(uuid.uuid4()))
+
+
+@app.post("/projects/{project_id}/discard")
+def discard(project_id: str, identity: Identity = Depends(caller)) -> Any:
+    _project(project_id, identity)
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is running on this BI engine; try again after it")
+    try:
+        return service.lifecycle.discard(identity, project_id, str(uuid.uuid4()))
+    finally:
+        service.busy.release()
 
 
 @app.post("/projects/{project_id}/restore")

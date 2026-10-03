@@ -41,6 +41,7 @@ columns:
     accepted_values: ["2G", "3G", "4G", "5G"]
   qoe_score:
     type: decimal
+    label: QoE score
     role: measure
     classification: internal
     description: Quality of experience on a 1 to 5 scale, weighted by active users.

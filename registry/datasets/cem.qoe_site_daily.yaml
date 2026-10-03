@@ -40,6 +40,7 @@ columns:
     classification: public
   qoe_score:
     type: decimal
+    label: QoE score
     role: measure
     classification: internal
     range: [1, 5]

@@ -140,7 +140,7 @@ class DbtAgent:
         for join in plan.joins:
             provider = self.registry.dataset(join.dataset)
             for name in join.add_columns:
-                columns[name] = provider.columns[name].model_copy()
+                columns[name] = provider.columns[name].model_copy(update={"determined_by": list(join.on)})
         if catalog_columns:
             absent = [name for name in columns if name not in catalog_columns]
             if absent:

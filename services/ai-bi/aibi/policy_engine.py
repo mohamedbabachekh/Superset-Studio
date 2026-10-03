@@ -59,6 +59,13 @@ _WRITE_NODES = tuple(node for node in (getattr(exp, name, None) for name in (
 _APPROVAL_CAPABILITY = {"UAT": "bi.approve_uat", "PROD": "bi.approve_prod"}
 
 
+def _combine(predicates: list[str], operator: str) -> Optional[str]:
+    unique = list(dict.fromkeys(predicates))
+    if not unique:
+        return None
+    return unique[0] if len(unique) == 1 else f" {operator} ".join(f"({p})" for p in unique)
+
+
 class PolicyEngine:
     def __init__(self, registry: Registry):
         self.registry = registry
@@ -89,6 +96,13 @@ class PolicyEngine:
         if dataset.tenant != identity.tenant:
             return False
         return any(fnmatch.fnmatchcase(dataset.id, pattern) for pattern in identity.dataset_patterns)
+
+    def identity_for_role(self, role_name: str, tenant: str) -> Identity:
+        """A stand-in holding exactly one role — what a probe account in the BI engine is compared against."""
+        role = self.registry.rbac.roles[role_name]
+        return Identity(user=f"role:{role_name}", type="service", tenant=tenant, roles=(role_name,),
+                        capabilities=frozenset(role.capabilities), dataset_patterns=tuple(role.datasets),
+                        classifications=frozenset(role.classifications))
 
     def require_dataset(self, identity: Identity, dataset_id: str) -> DatasetDef:
         dataset = self.registry.dataset(dataset_id)
@@ -198,38 +212,64 @@ class PolicyEngine:
     def secure_sql(self, sql: str, identity: Identity, limit: int) -> str:
         """The statement that actually runs: row-level policies applied, and a hard row cap around it."""
         tree = sqlglot.parse_one(sql, read="postgres")
-        filters = self._row_filters(identity)
-        if filters:
-            cte_names = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+        cte_names = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
 
-            def restrict(node: exp.Expression) -> exp.Expression:
-                if not isinstance(node, exp.Table) or (not node.db and node.name in cte_names):
-                    return node
-                dataset = self.registry.dataset_by_relation(node.db or None, node.name)
-                predicate = filters.get(dataset.id) if dataset else None
-                if predicate is None:
-                    return node
-                inner = exp.select("*").from_(exp.table_(node.name, db=node.db or None)).where(predicate)
-                return inner.subquery(alias=node.alias_or_name)
+        def restrict(node: exp.Expression) -> exp.Expression:
+            if not isinstance(node, exp.Table) or (not node.db and node.name in cte_names):
+                return node
+            dataset = self.registry.dataset_by_relation(node.db or None, node.name)
+            predicate = self.row_policy(identity, dataset) if dataset else None
+            if predicate is None:
+                return node
+            inner = exp.select("*").from_(exp.table_(node.name, db=node.db or None)).where(predicate)
+            return inner.subquery(alias=node.alias_or_name)
 
-            tree = tree.transform(restrict)
-        body = tree.sql(dialect="postgres")
+        body = tree.transform(restrict).sql(dialect="postgres")
         return f"select * from (\n{body}\n) as governed_query limit {int(limit)}"
 
-    def _row_filters(self, identity: Identity) -> dict[str, str]:
-        """dataset id → predicate. A role with no policy on a dataset sees all of it, so one such role lifts
-        the restriction; several restricted roles see the union of what each may see."""
-        declared = self.registry.rbac.row_filters
-        result: dict[str, str] = {}
-        dataset_ids = {ds for role in identity.roles for ds in declared.get(role, {})}
-        for dataset_id in dataset_ids:
-            predicates = [declared.get(role, {}).get(dataset_id) for role in identity.roles]
-            if all(predicates):
-                result[dataset_id] = " or ".join(f"({p})" for p in predicates)
-        return result
+    # ── row-level policies ──────────────────────────────────────────────────────────────────────────────────
+    def grants(self, role_name: str, dataset: DatasetDef) -> bool:
+        role = self.registry.rbac.roles[role_name]
+        return any(fnmatch.fnmatchcase(dataset.id, pattern) for pattern in role.datasets)
+
+    def role_row_policy(self, role_name: str, dataset: DatasetDef) -> Optional[str]:
+        """One role's predicate on a dataset: its own, AND the one it carries on every dataset this one is
+        derived from. A model that joins a column onto a mart must not be a way around the mart's policy —
+        and when the derived dataset no longer has the columns the policy speaks of, the role sees nothing
+        of it rather than everything."""
+        declared = self.registry.rbac.row_filters.get(role_name, {})
+        predicates = [declared[dataset.id]] if dataset.id in declared else []
+        for parent_id in dataset.derived_from:
+            parent = self.registry.datasets.get(parent_id)
+            inherited = self.role_row_policy(role_name, parent) if parent is not None else None
+            if inherited is None:
+                continue
+            columns = {c.name for c in sqlglot.parse_one(inherited, read="postgres").find_all(exp.Column)}
+            predicates.append(inherited if columns <= set(dataset.columns) else "1 = 0")
+        return _combine(predicates, "and")
+
+    def row_policy(self, identity: Identity, dataset: DatasetDef) -> Optional[str]:
+        """What restricts this identity on this dataset: the policies of its roles that grant the dataset,
+        several seeing the union. A role WITHOUT a policy does not lift another role's — which is the BI
+        engine's own rule for row-level security, and the two layers must give the same rows."""
+        return _combine([p for p in (self.role_row_policy(role, dataset)
+                                     for role in identity.roles if self.grants(role, dataset)) if p], "or")
 
     def row_policies(self, identity: Identity, dataset_id: str) -> Optional[str]:
-        return self._row_filters(identity).get(dataset_id)
+        return self.row_policy(identity, self.registry.dataset(dataset_id))
+
+    # ── who a dashboard is for ──────────────────────────────────────────────────────────────────────────────
+    def audience(self, datasets: list[DatasetDef]) -> list[str]:
+        """The roles a dashboard over these datasets may be opened by: those that may read, and are granted
+        EVERY one of its datasets. A role granted three of four would see a dashboard with a hole in it."""
+        return sorted(name for name, role in self.registry.rbac.roles.items()
+                      if "bi.read" in role.capabilities and datasets and all(self.grants(name, d) for d in datasets))
+
+    def row_rules(self, datasets: list[DatasetDef]) -> list[dict[str, str]]:
+        """Every (role, dataset, predicate) the BI engine must enforce for that audience."""
+        return [{"role": role, "dataset": dataset.id, "clause": clause}
+                for role in self.audience(datasets) for dataset in datasets
+                if (clause := self.role_row_policy(role, dataset)) is not None]
 
     # ── generated dbt models ────────────────────────────────────────────────────────────────────────────────
     _REF = re.compile(r"\{\{\s*ref\(\s*['\"]([A-Za-z0-9_]+)['\"]\s*\)\s*\}\}")

@@ -202,3 +202,59 @@ def test_charts_reference_saved_metrics_never_formulas(with_generated, registry,
                                registry.metric("cem.qoe_score"), 8, template, "inwi", "superset_seq_1")
     assert map_form["viz_type"] == "country_map" and map_form["select_country"] == "morocco"
     assert map_form["entity"] == "region_iso"
+
+
+# ── every key a registry file carries is enforced ───────────────────────────────────────────────────────────
+def test_a_metric_is_only_broken_down_by_what_the_registry_allows(with_generated, registry, dashboards, policy):
+    registry.metrics["cem.qoe_score"].dimensions[:] = ["date", "rat"]            # no longer by region
+    dev = policy.identify("dev.user")
+    ranking = _spec(slot="ranking_1", type="bar", metric="cem.qoe_score", dimension="region", dataset="cem.qoe_daily")
+    failed = {c.name: c.detail for c in dashboards.validate(ranking, dev).failures}
+    assert "its dimensions are date, rat" in failed["metric may be broken down by the dimension"]
+    # and the map's code falls with the region it is a function of
+    on_map = _spec(slot="map_1", type="map", metric="cem.qoe_score", dimension="region_iso",
+                   dataset="cem.cem_qoe__qoe_daily_region_iso")
+    assert "metric may be broken down by the dimension" in {c.name for c in dashboards.validate(on_map, dev).failures}
+
+
+def test_a_joined_column_is_allowed_through_the_key_that_determines_it(with_generated, dashboards, policy):
+    assert with_generated.dataset("cem.cem_qoe__qoe_daily_region_iso").columns["region_iso"].determined_by == ["region"]
+    on_map = _spec(slot="map_1", type="map", metric="cem.qoe_score", dimension="region_iso",
+                   dataset="cem.cem_qoe__qoe_daily_region_iso")
+    assert dashboards.validate(on_map, policy.identify("dev.user")).passed
+
+
+def test_a_template_slot_narrower_than_its_own_minimum_stops_the_load(registry_copy):
+    import yaml
+
+    from aibi.registry import Registry, RegistryError
+
+    path = registry_copy / "templates" / "telecom-kpi.yaml"
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["responsive"]["min_slot_width"]["kpi"] = 3              # its KPI slots are 2 wide
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(RegistryError, match="slot kpi_1 is 2 columns wide, under the template's own minimum of 3"):
+        Registry(registry_copy)
+
+
+def test_no_registry_file_carries_a_key_nothing_reads(registry):
+    """`spacing.gutter`, `typography.dashboard_title` and a metric's `higher_is_better` were declared and did
+    nothing. The models forbid unknown keys, so this passing means they are gone from the files too."""
+    for template in registry.templates.values():
+        assert set(template.spacing) <= {"card_padding"}
+        assert set(template.typography) <= {"chart_title", "kpi_value"}
+    assert not hasattr(registry.metric("cem.qoe_score"), "higher_is_better")
+
+
+def test_dbts_own_semantic_layer_is_read_and_set_beside_the_registry(tmp_path, registry):
+    import json
+
+    from aibi.dbt_runner import semantic_layer
+
+    keys = [m.key for m in registry.metrics.values()]
+    assert semantic_layer(tmp_path, keys) == {"available": False, "semantic_models": [], "metrics": [], "also_in_registry": []}
+    (tmp_path / "semantic_manifest.json").write_text(json.dumps({
+        "semantic_models": [{"name": "qoe"}], "metrics": [{"name": "qoe_score"}, {"name": "revenue"}]}))
+    read = semantic_layer(tmp_path, keys)
+    assert read["available"] and read["semantic_models"] == ["qoe"]
+    assert read["also_in_registry"] == ["qoe_score"]          # one number, two definitions: said, not resolved

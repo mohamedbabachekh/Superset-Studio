@@ -28,6 +28,7 @@ columns:
     description: Region name, the join key shared with the marts.
   region_iso:
     type: string
+    label: Region code
     role: geo_region
     classification: public
     description: ISO 3166-2 code, as the bundled country map expects it.

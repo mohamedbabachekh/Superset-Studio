@@ -26,7 +26,9 @@ class ChartAgent:
     def title(self, component: ComponentSpec, metric: MetricDef, purpose: str) -> str:
         if component.title:
             return component.title
-        label = (component.dimension or "").replace("_", " ")
+        # inside a sentence a dimension is lower-case — unless it is an acronym (« by RAT », not « by rat »)
+        words = (component.dimension or "").replace("_", " ")
+        label = words.upper() if len(words) <= 3 else words
         if purpose == "kpi":
             return metric.name
         if purpose == "trend":

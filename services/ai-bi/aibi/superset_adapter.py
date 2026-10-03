@@ -16,6 +16,7 @@ What Superset 6.1 does NOT offer, and what the engine does instead:
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Optional
 
@@ -27,6 +28,35 @@ class SupersetError(Exception):
     def __init__(self, message: str, status: Optional[int] = None):
         super().__init__(message)
         self.status = status
+
+
+CSRF_FIELD = re.compile(r'name="csrf_token"[^>]*?value="([^"]+)"')
+
+
+def sign_in(base_url: str, username: str, password: str, timeout: int = 30) -> requests.Session:
+    """A signed-in BROWSER session, obtained without a browser — for the engine's own browser to carry, and
+    for the probe accounts that ask the BI engine what it lets them see.
+
+    The first version typed the password into the sign-in page. That page fires requests of its own before
+    anyone is signed in (its event log, the language pack); when one of them is answered AFTER the sign-in,
+    its `Set-Cookie` replaces the fresh session with an anonymous one, and the dashboard request that follows
+    is sent back to the sign-in page. It lost that race once in some twenty-five renders (2026-10-03).
+
+    Here nothing is loaded that was not asked for: the form's own token, one POST, one check."""
+    session = requests.Session()
+    form = session.get(f"{base_url}/login/", timeout=timeout)
+    token = CSRF_FIELD.search(form.text)
+    if token is None:
+        raise SupersetError("the BI engine's sign-in form carries no csrf_token: its sign-in has changed")
+    session.post(f"{base_url}/login/", timeout=timeout, allow_redirects=False,
+                 data={"username": username, "password": password, "csrf_token": token.group(1)})
+    if session.get(f"{base_url}/api/v1/me/", timeout=timeout).status_code != 200:
+        raise SupersetError(f"the BI engine did not accept the sign-in of {username}")
+    csrf = session.get(f"{base_url}/api/v1/security/csrf_token/", timeout=timeout)
+    if csrf.status_code == 200:
+        session.headers["X-CSRFToken"] = csrf.json()["result"]
+    session.headers["Referer"] = base_url
+    return session
 
 
 class SupersetAdapter:
@@ -125,6 +155,9 @@ class SupersetAdapter:
     def update_dataset(self, dataset_id: int, payload: dict[str, Any]) -> None:
         self._request("PUT", f"/api/v1/dataset/{dataset_id}", json=payload)
 
+    def delete_dataset(self, dataset_id: int) -> None:
+        self._request("DELETE", f"/api/v1/dataset/{dataset_id}", expect=(200, 404))
+
     def refresh_dataset(self, dataset_id: int) -> None:
         """Re-read the table's columns — needed when a generated model is rebuilt with another shape."""
         self._request("PUT", f"/api/v1/dataset/{dataset_id}/refresh")
@@ -166,11 +199,19 @@ class SupersetAdapter:
         self._request("DELETE", f"/api/v1/dashboard/{dashboard_id}", expect=(200, 404))
 
     def copy_dashboard(self, dashboard_id: int, title: str, duplicate_charts: bool = True) -> int:
+        """A copy with charts of its own. The engine takes the copy's LAYOUT from `positions` inside the
+        metadata it is sent, not from the original: sent the original's metadata as stored, the copy came out
+        with its charts and no layout at all (found by adapter_check, the first time this was run)."""
         source = self.get_dashboard(dashboard_id) or {}
+        metadata = json.loads(source.get("json_metadata") or "{}")
+        metadata["positions"] = json.loads(source.get("position_json") or "{}")
         answer = self._request("POST", f"/api/v1/dashboard/{dashboard_id}/copy/",
                                json={"dashboard_title": title, "duplicate_slices": duplicate_charts,
-                                     "json_metadata": source.get("json_metadata") or "{}"})
+                                     "json_metadata": json.dumps(metadata), "css": source.get("css") or ""})
         return answer["result"]["id"]
+
+    def find_dashboards(self, title: str) -> list[dict[str, Any]]:
+        return self._list("dashboard", [{"col": "dashboard_title", "opr": "eq", "value": title}])
 
     def dashboard_charts(self, dashboard_id: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/api/v1/dashboard/{dashboard_id}/charts").get("result", [])
@@ -193,6 +234,53 @@ class SupersetAdapter:
         self._request("POST", "/api/v1/dashboard/import/", data=data,
                       files={"formData": ("dashboard.zip", bundle, "application/zip")})
 
+    # ── access: roles, row-level rules, accounts ────────────────────────────────────────────────────────────
+    def find_role(self, name: str) -> Optional[int]:
+        found = self._list("security/roles", [{"col": "name", "opr": "eq", "value": name}])
+        return found[0]["id"] if found else None
+
+    def ensure_role(self, name: str) -> int:
+        """A role with no permission of its own: it is a NAME a dashboard can be granted to. What its holders
+        may do in the BI engine at all comes from the base role they also hold."""
+        return self.find_role(name) or self._request("POST", "/api/v1/security/roles/", json={"name": name})["id"]
+
+    def dashboard_roles(self, dashboard_id: int) -> list[str]:
+        return sorted(role["name"] for role in (self.get_dashboard(dashboard_id) or {}).get("roles", []))
+
+    def row_rules(self, prefix: str) -> list[dict[str, Any]]:
+        return self._list("rowlevelsecurity", [{"col": "name", "opr": "sw", "value": prefix}])
+
+    def upsert_row_rule(self, name: str, engine_dataset_id: int, role_id: int, clause: str, group_key: str,
+                        description: str) -> tuple[int, str]:
+        payload = {"name": name, "description": description, "filter_type": "Regular", "clause": clause,
+                   "tables": [engine_dataset_id], "roles": [role_id], "group_key": group_key}
+        existing = next((rule for rule in self.row_rules(name) if rule["name"] == name), None)
+        if existing is None:
+            return self._request("POST", "/api/v1/rowlevelsecurity/", json=payload)["id"], "created"
+        current = (existing["clause"], [t["id"] for t in existing["tables"]], [r["id"] for r in existing["roles"]],
+                   existing["group_key"], existing["filter_type"])
+        if current == (clause, [engine_dataset_id], [role_id], group_key, "Regular"):
+            return existing["id"], "unchanged"
+        self._request("PUT", f"/api/v1/rowlevelsecurity/{existing['id']}", json=payload)
+        return existing["id"], "updated"
+
+    def delete_row_rule(self, rule_id: int) -> None:
+        self._request("DELETE", f"/api/v1/rowlevelsecurity/{rule_id}", expect=(200, 404))
+
+    def ensure_account(self, username: str, role_ids: list[int], password: str, active: bool = True) -> int:
+        found = self._list("security/users", [{"col": "username", "opr": "eq", "value": username}])
+        if found:
+            self._request("PUT", f"/api/v1/security/users/{found[0]['id']}",
+                          json={"roles": role_ids, "password": password, "active": active})
+            return found[0]["id"]
+        return self._request("POST", "/api/v1/security/users/", json={
+            "username": username, "first_name": "SharpSight", "last_name": "access probe",
+            "email": f"{username}@sharpsight.local", "active": active, "password": password,
+            "roles": role_ids})["id"]
+
+    def set_account_active(self, user_id: int, active: bool) -> None:
+        self._request("PUT", f"/api/v1/security/users/{user_id}", json={"active": active})
+
     # ── embedding ───────────────────────────────────────────────────────────────────────────────────────────
     def get_embedded(self, dashboard_id: int) -> Optional[dict[str, Any]]:
         try:
@@ -203,7 +291,8 @@ class SupersetAdapter:
             raise
 
     def set_embedded(self, dashboard_id: int, allowed_domains: list[str]) -> dict[str, Any]:
-        """Needs EMBEDDED_SUPERSET, which this kit leaves off (superset_config.py): a workbench is not embedded."""
+        """The configuration is accepted and kept even with EMBEDDED_SUPERSET off, as it is in this kit
+        (measured by adapter_check): the flag gates the embedded PAGE, not this record."""
         return self._request("POST", f"/api/v1/dashboard/{dashboard_id}/embedded",
                              json={"allowed_domains": allowed_domains})["result"]
 

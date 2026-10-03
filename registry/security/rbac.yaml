@@ -17,6 +17,16 @@ roles:
     capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use]
     datasets: ["cem.*"]
     classifications: [public, internal]
+  # The people a CEM dashboard is FOR. They open it in the BI engine; they generate and approve nothing.
+  cem_analyst:
+    capabilities: [bi.read]
+    datasets: ["cem.*"]
+    classifications: [public, internal]
+  # The same, for one part of the country — see row_filters below.
+  cem_regional_analyst:
+    capabilities: [bi.read]
+    datasets: ["cem.*"]
+    classifications: [public, internal]
   auditor:
     capabilities: [bi.read, audit.read]
     datasets: []
@@ -39,6 +49,14 @@ users:
     type: human
     tenant: default
     roles: [bi_release_manager, auditor]
+  cem.analyst:
+    type: human
+    tenant: default
+    roles: [cem_analyst]
+  east.analyst:
+    type: human
+    tenant: default
+    roles: [cem_regional_analyst]
   guest.user:
     type: human
     tenant: default
@@ -50,7 +68,14 @@ users:
     tenant: default
     roles: [bi_developer]
 
-# Row-level policies, per role and dataset: a SQL predicate over that dataset's columns. The data gateway
-# rewrites every reference to the dataset into a filtered subquery before the query runs.
-# None are declared for the CEM marts, which hold regional aggregates only.
-row_filters: {}
+# Row-level policies, per role and dataset: a SQL predicate over that dataset's columns.
+#
+# ONE declaration, enforced in two places that must agree: the data gateway rewrites every reference to the
+# dataset into a filtered subquery, and the BI engine is given the same predicate as a row-level rule for the
+# role (aibi/tools.py, apply_superset_access). A policy on a dataset follows it into every dataset DERIVED
+# from it — the generated map dataset inherits the mart's.
+#
+# A role without a policy does not lift another role's: someone holding both sees the restricted rows.
+row_filters:
+  cem_regional_analyst:
+    cem.qoe_daily: "region in ('Oriental', 'Fès - Boulemane', 'Taza - Al Hoceima - Taounate')"

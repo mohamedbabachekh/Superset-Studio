@@ -40,13 +40,20 @@ bash ai-bi.sh approve cem-qoe PROD "checked in UAT with the CEM team"   # releas
 bash ai-bi.sh audit cem-qoe                                        # everything that was done, and by whom
 ```
 
+Two more, for housekeeping:
+
+```bash
+bash ai-bi.sh discard <project>          # a project still in DEV, or rejected: taken out of Superset and the store
+bash ai-bi.sh check-adapter <project>    # every road of the Superset adapter, driven on a copy of its dashboard
+```
+
 | | |
 |---|---|
 | The engine's API | `http://127.0.0.1:3003` — loopback only, always (`AIBI_PORT`) |
 | Stop it | `bash ai-bi.sh --stop` — the kit keeps running |
 | Its tests | `bash ai-bi.sh test` |
 | Memory | under 0.1 GB idle, about 0.5 GB while a dashboard is being rendered (measured: 77 and 479 MiB) |
-| Time | the request below takes 70 to 80 seconds, most of it dbt and three page loads (over three minutes once, right after an image build, on a machine short of memory) |
+| Time | the request below takes 70 to 145 seconds, most of it dbt and three page loads (over three minutes once, right after an image build, on a machine short of memory) |
 
 The CEM data in this kit is **synthetic** (`services/ai-bi/sql/bootstrap.sql`): sixteen regions, four sites each,
 four technologies, ninety days ending yesterday, every value a pure function of site, technology and day. With
@@ -71,7 +78,7 @@ changes.
 | 10 | Register the dataset | as `cem.cem_qoe__qoe_daily_region_iso` — generated, **not certified**, this project's own, with its lineage from dbt's artifacts |
 | 11 | Generate the specification | the normalized document of the brief's section 6 |
 | 12 | Validate the specification | template, slots, types, metrics, roles, RBAC, theme. Superset has not been called yet |
-| 13 | Create Superset assets | datasets with their certified metrics saved on them, one chart per slot, the dashboard, its filters |
+| 13 | Create Superset assets | datasets with their certified metrics saved on them, one chart per slot, the dashboard, its filters — and **who may open it**: the roles SharpSight grants, and each role's row-level rule |
 | 14 | Retrieve the dashboard's data | each component's query, through Superset's own query API; each filter is probed |
 | 15 | Validate the query results | data, SQL, BI, security, performance |
 | 16 | Render a screenshot | a headless browser opens the dashboard at each of the template's viewports — and once more with every filter set |
@@ -100,7 +107,7 @@ service.
 | `templates/` | `executive`, `telecom-kpi`, `operational`, `geographic`, `customer-experience`: layout, slots and what each accepts, theme, typography, spacing, colours, KPI formatting, filters, responsive rules |
 | `design/tokens.yaml` | the approved colours, schemes, type scale, spacing, component variants |
 | `visualizations.yaml` | what the AI may select, and what each is in the BI engine |
-| `security/rbac.yaml` | users, roles, dataset grants, row-level policies — a stand-in for the portal's RBAC |
+| `security/rbac.yaml` | users, roles, dataset grants, row-level policies — a stand-in for the portal's RBAC. One declaration, enforced by the data gateway **and** given to Superset |
 | `policies.yaml` | the limits: SQL, dbt, performance budgets, visual thresholds |
 | `lexicon.yaml` | the vocabulary a request is read with |
 
@@ -143,7 +150,7 @@ lists them with JSON schemas. The brief's twenty are there (`get_dataset`, `get_
 `validate_sql`, `generate_dbt_model`, `compile_dbt`, `run_dbt_model`, `run_dbt_test`,
 `create_superset_dataset`, `create_superset_chart`, `create_superset_dashboard`, `update_superset_dashboard`,
 `get_dashboard_data`, `validate_dashboard`, `render_dashboard_screenshot`, `commit_project_version`), plus
-`list_datasets`, `list_dashboard_templates` and `save_dashboard_spec`.
+`list_datasets`, `list_dashboard_templates`, `save_dashboard_spec` and `apply_superset_access`.
 
 The tools that write to Superset take **a slot, or nothing**. What they create is derived from the project's
 saved specification, and they refuse to run until one has been saved and found valid.
@@ -163,11 +170,38 @@ column classified above the requester's clearance. What runs is never what was w
 applied by rewriting each table into a filtered subquery, and the whole thing sits inside a row limit. The
 database then enforces it again — `bi_reader` is read-only in the role itself, with a statement timeout.
 
+### Who may open a dashboard, and which rows they see
+
+SharpSight's RBAC is the only place this is decided; Superset is told, and then asked.
+
+- **The audience** of a dashboard is every role that may read (`bi.read`) and is granted **all** of its
+  datasets. Each becomes a role in Superset (`sharpsight_<role>`) and the dashboard is granted to exactly
+  those. The roles carry no permission of their own: a person also holds Superset's base role, and gets the
+  dashboard — once it is published — because they hold one of its roles.
+- **A row-level policy** (`row_filters`) is written into Superset as a rule for that role on that dataset. It
+  **follows a dataset into anything derived from it**: the generated map dataset inherits the mart's policy,
+  or the regional analyst's map would show the whole country beside charts showing three regions. A derived
+  dataset that no longer has the policy's column shows that role nothing.
+- **A role without a policy does not lift another role's.** That is Superset's own rule, adopted by the data
+  gateway so that the two layers return the same rows.
+- **Then Superset is asked.** The engine keeps accounts of its own — `sharpsight-probe-<role>`, one with no
+  role at all — given a password nobody keeps for as long as a question takes, and switched off again. During
+  validation the account with no role must be refused the dashboard and its data. At promotion to PROD, once
+  the dashboard is published, each role's account must open it, get its data, and get **exactly the rows the
+  data gateway gives that role**; if not, the dashboard is withdrawn and nothing is recorded as PROD.
+
+What the engine does not do is create people: assigning `sharpsight_<role>` to Superset users is an
+administrator's job until identities arrive from Keycloak.
+
 ### The Superset adapter — `aibi/superset_adapter.py`
 
 REST only: authentication, connections, datasets, charts, dashboards (create, update, copy, metadata), data,
-export/import, embedded configuration. **Superset's metadata database is never touched.** The routes and schema
-fields were read out of the kit's own image, not recalled.
+export/import, embedded configuration, roles, row-level rules, accounts. **Superset's metadata database is
+never touched.** The routes and schema fields were read out of the kit's own image, not recalled.
+
+`bash ai-bi.sh check-adapter <project>` drives the roads a generation does not take — copy, export, embedded
+configuration, delete, import — on a copy of a project's dashboard, and removes the copy. Run it after any
+Superset upgrade: it says which of the adapter's assumptions still hold before a generation finds out.
 
 What Superset 6.1 does not offer, and what the engine does instead:
 
@@ -189,7 +223,7 @@ Every check is a measurement, recorded whether it passed or not. One failure kee
 | **Data** | schema (registered columns exist, typed as dbt's catalog says), nulls, duplicates on the grain, freshness against the SLA, row count, declared ranges, accepted values, metric validity (overall and per day) |
 | **SQL** | syntax, allowed database, read-only, timeout, result size, forbidden operations — over every statement the run executed — plus **probes**: nine hostile statements the guard must refuse |
 | **BI** | dataset exists, saved metrics match the registry's expression, each chart's query succeeds, the dashboard's own requests succeed, no empty mandatory chart. **Filters twice**: each one through Superset's query API, and all of them on the dashboard itself — it is opened with the filters set, and every chart in scope must receive something else than it does unfiltered |
-| **Security** | RBAC, row-level policies applied, a user with no grant is refused every dataset, tenant isolation (the same roles in another tenant are refused), the BI connection is read-only |
+| **Security** | RBAC, row-level policies applied, a user with no grant is refused every dataset, tenant isolation (the same roles in another tenant are refused), the BI connection is read-only — and **in Superset itself**: the dashboard's roles and row-level rules are the ones SharpSight grants, and an account with no SharpSight role is refused the dashboard and its data |
 | **Performance** | query duration, dashboard load duration, query count, result size — against `registry/policies.yaml` |
 | **Visual** | screenshot produced, every component on the page, no overlap, layout follows the template, nothing empty, no clipped text, no text under 9 px, labels have room; a clipped dashboard title is a warning |
 
@@ -206,8 +240,8 @@ Every version records `project_id`, `version`, `git_commit`, `dbt_commit`, `supe
 | | Who | Gate |
 |---|---|---|
 | `DEV` | the AI and the developer | a version exists only if validation passed |
-| → `UAT` | a reviewer (`bi.approve_uat`), a person | validation passed **and** the dashboard in Superset is still the one that was validated: its export is fingerprinted, and an edit made by hand afterwards is refused. The `.ssbi` package is built here |
-| → `PROD` | a release manager (`bi.approve_prod`), a **second** person | explicit confirmation and a comment; the package's checksum is verified again. The dashboard is published, certified and locked against editing in Superset |
+| → `UAT` | a reviewer (`bi.approve_uat`), a person | validation passed **and** the dashboard in Superset is still the one that was validated: its content is fingerprinted, its roles and row-level rules are compared with SharpSight's, and anything changed by hand afterwards is refused. The `.ssbi` package is built here |
+| → `PROD` | a release manager (`bi.approve_prod`), a **second** person | explicit confirmation and a comment; the package's checksum is verified again. The dashboard is published, certified and locked against editing — then every role's probe account is asked what it gets, and the publication is withdrawn if Superset's answer is not SharpSight's |
 
 The `.ssbi` package is the project's folder as committed — `manifest.yaml`, `dbt/`, `semantic/`, `datasets/`,
 `metrics/`, `superset/`, `dashboards/`, `charts/`, `security/`, `tests/`, `documentation/` — zipped, with the
@@ -242,7 +276,8 @@ and `GET /audit/verify` says where. Secrets are scrubbed; rows of data never ent
 | `bi_builder` | `dbt-runner` only | build the governed models in `bi` |
 | `aibi_dbt_dev` | the AI service | read `bi`; create in `bi_dev` only |
 | `bi_reader` | the AI service's data gateway, and Superset's BI connection | read `bi` and `bi_dev`; write nothing |
-| the Superset account `sharpsight-ai` | the AI service | Admin **in this DEV Superset** — it must create the BI connection |
+| the Superset account `sharpsight-ai` | the AI service | Admin **in this DEV Superset** — it creates the BI connection, the roles and the row-level rules |
+| the Superset accounts `sharpsight-probe-*` | nobody: a random password is set for the seconds a probe lasts, then the account is switched off | Superset's base role, and at most one `sharpsight_<role>` |
 | `AIBI_API_TOKEN` | whoever calls the API (the portal; here, the CLI) | present a user's identity |
 
 No credential reaches a model: a model's whole interface is the tool layer. The service that would talk to one
@@ -260,7 +295,7 @@ holds nothing that can change a governed table.
 | `GET /runs/<id>` | the run, step by step |
 | `GET /projects` · `/projects/<id>` · `/projects/<id>/versions/<v>` | projects and versions |
 | `GET …/versions/<v>/spec` · `/validation` · `/screenshot?viewport=desktop` · `/package` | what a version is |
-| `POST /projects/<id>/approve` `{target, comment, confirm}` · `/reject` · `/restore` | review |
+| `POST /projects/<id>/approve` `{target, comment, confirm}` · `/reject` · `/restore` · `/discard` | review, and taking a draft away |
 | `GET /datasets` · `/datasets/<id>` · `/datasets/<id>/lineage` · `/metrics` · `/templates` | the registries |
 | `GET /tools` · `POST /tools/<name>` | the tool layer, as a model would use it |
 | `GET /audit` · `/audit/verify` | the trail (`audit.read`) |
@@ -273,9 +308,11 @@ All three are a YAML file in `registry/` and a restart of the service.
 
 - **A dataset** — its dbt model must exist in `dbt/`; give every column a `classification`, name the grain, and
   set `role` on what can be a time axis (`time`), a breakdown (`dimension`), a number (`measure`) or a map key
-  (`geo_region`, with `geo: {standard, country}`).
+  (`geo_region`, with `geo: {standard, country}`). A `label` is what people read in a table header or a filter.
 - **A metric** — an expression over a dataset's columns, the datasets and columns it is valid on (`lineage`),
-  and the words people use for it (`synonyms`): that last line is how a request finds it.
+  what it may be broken down by (`dimensions`, enforced), whether its parts add up to its whole (`additive`:
+  a pie is refused for a score or a rate), and the words people use for it (`synonyms`): that last line is how
+  a request finds it.
 - **A template** — rows of slots on a twelve-column grid, what each slot is for and accepts, and names from
   `design/tokens.yaml`. A name that is not a token fails the load.
 
@@ -288,23 +325,26 @@ platform that was not touched:
 
 | | |
 |---|---|
-| The brief's request, from nothing | all 22 steps; 179 checks, none failed, none warning; version `1.0.0`, `READY_FOR_REVIEW`, committed and tagged. Run from an erased engine four times over the day |
+| The brief's request, from nothing | all 22 steps; 184 checks, none failed, none warning; version `1.0.0`, `READY_FOR_REVIEW`, committed and tagged. Run from an erased engine six times over the day |
 | The generated model | built in `bi_dev` on branch `ai/cem-qoe`: 5 760 rows, the same count as its base, its six tests passing |
 | The picture | looked at by a person, at 1440 and 1180 px, and with the three filters set — which is how four of the entries in [lessons.md](lessons.md) were found |
 | The review path | fifteen cases: no token, an unknown user, a user with no grant, the developer and the AI's own identity trying to approve, PROD before UAT, a chart edited by hand in Superset after validation (refused as drift), restore from git (drift gone), UAT, PROD without confirmation, PROD — and a regeneration refused once in PROD |
 | The package | the eleven entries of the brief, the commit and 32 checksums in its manifest, no secret in any file |
 | The audit trail | every tool call and every statement; the chain verifies; no secret and no row of data in it |
-| The fix loop | **not triggered by the brief's request.** Exercised once on the live stack with the label threshold raised from 16 to 24 px: the ranking failed on both viewports, was cut to « Top 12 », re-rendered, and passed. The other three fixes are unit-tested only |
-| A second template | `operational`, no transformation needed (steps 6–10 skipped), version `1.1.0` on regeneration |
+| The fix loop | **not triggered by the brief's request.** Triggered on its own by the `telecom-kpi` template, whose ranking slot gives sixteen regions 16 px each: cut to « Top 14 », re-rendered, passed. Also exercised once under a threshold raised on purpose. The other three fixes are unit-tested only |
+| All five templates | `executive`, `operational`, `telecom-kpi`, `geographic` (its own generated model, in its own project) and `customer-experience`, each from a request, each looked at. Table and histogram, bar and map were drawn; `area` and `pie` never were — no request here leads to them |
 | A run that cannot pass | forced with a label threshold no chart can meet: one fix tried, the run **failed**, no version was written, and the dashboard — which the attempt had cut to three charts — was put back as `1.0.0`, still matching its validated fingerprint |
-| The engine's rules | 83 tests, no database needed: `bash ai-bi.sh test` |
+| Access, in Superset | an account with no SharpSight role: 404 on the dashboard, 403 on both datasets. Four roles: the dashboard and all 16 regions. The regional analyst: 3 regions on the mart **and** on the generated dataset, the same rows the data gateway returns. Roles removed by hand, then a row-level rule rewritten to `1 = 1`: promotion refused both times, naming the difference |
+| The adapter's other roads | copy, export, embedded configuration, delete, import: all pass on a copy, which is removed. The first run found the copy had no layout, and that an import is not identical to its export until « {} » counts as empty |
+| Discard | a DEV project taken away with its generated dataset; one standing in UAT refused; a reviewer refused |
+| The engine's rules | 100 tests, no database needed: `bash ai-bi.sh test` |
 
 ## 8 · What is not here yet
 
 | | State |
 |---|---|
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
-| **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file |
+| **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file. Consequence in Superset: the engine creates the roles a dashboard is granted to, but **not the people** — giving a Superset user a `sharpsight_<role>` is done by hand |
 | **Airflow** | not running. The `dbt-runner` one-shot builds the governed models at each start |
 | **Separate UAT and PROD environments** | one Superset, one warehouse: promotion is the gate, the package and the record |
 | **`TelecomQoEChart`** (the custom visualization) | not built. It is listed in `registry/visualizations.yaml` as approved-but-not-installed, and a specification asking for it is refused. Building it means compiling Superset's frontend with the plugin |
@@ -312,3 +352,7 @@ platform that was not touched:
 | **An MCP server** | the tool layer has the shape (names, schemas, one audited entry point); nothing serves it over MCP yet |
 | **The offline bundle** | `build-devkit-bundle.sh` does not carry the engine's image yet |
 | **A site-level map** | the geographic view is by region: a map of sites needs tiles from outside, and this kit calls nobody |
+| **Choosing a theme from a request** | a specification may name an approved colour scheme, and the validator holds it to the tokens — but nothing in the planner ever sets one: every dashboard takes its template's |
+| **Other warehouses** | the engine speaks PostgreSQL only (dbt profile, SQL policy dialect, data gateway). The kit's Superset has drivers for SQL Server, Oracle and Hive; the engine does not use them |
+| **Other transformations** | a generated model is one shape: a governed base joined to a governed dimension to add columns. No aggregation to another grain, no filter, no derived column |
+| **A clipped dashboard title** | reported as a warning, not cured: Superset sizes the title field a pixel short for some titles, and a specification cannot change that |

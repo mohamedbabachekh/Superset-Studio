@@ -265,7 +265,7 @@ class ValidationAgent:
 
     # ── security ────────────────────────────────────────────────────────────────────────────────────────────
     def security(self, spec: DashboardSpec, identity: Identity, log: QueryLog,
-                 connection: Optional[dict[str, Any]]) -> ValidationReport:
+                 connection: Optional[dict[str, Any]], access: Optional[dict[str, Any]] = None) -> ValidationReport:
         report = ValidationReport()
         datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
 
@@ -308,6 +308,19 @@ class ValidationAgent:
                    ("datasets of another tenant: " + ", ".join(foreign)) if foreign else
                    ("readable from another tenant: " + ", ".join(crossing)) if crossing else
                    "every dataset belongs to the requester's tenant, and the same roles in another tenant are refused")
+
+        if access is not None:
+            granted = access["granted"]
+            report.add("security", "BI engine access is what SharpSight grants",
+                       "fail" if access["differences"] else "pass", "the dashboard",
+                       "; ".join(access["differences"]) or
+                       f"granted to {', '.join(granted.get('roles', [])) or 'no role'}; "
+                       f"{len(granted.get('row_rules', []))} row-level rule(s) in place")
+            probe = access["outsider"]
+            report.add("security", "the BI engine refuses an account with no SharpSight role",
+                       "pass" if access["outsider_refused"] else "fail", probe["account"],
+                       f"dashboard → {probe['dashboard']}; data → "
+                       + ", ".join(f"{ds}: {status}" for ds, status in probe["data"].items()))
 
         if connection is not None:
             writable = [k for k in ("allow_dml", "allow_ctas", "allow_cvas", "allow_file_upload") if connection.get(k)]

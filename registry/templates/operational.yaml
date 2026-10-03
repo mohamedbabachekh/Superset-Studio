@@ -54,7 +54,6 @@ typography:
   kpi_value: display
 
 spacing:
-  gutter: sm
   card_padding: xs
 
 colors:

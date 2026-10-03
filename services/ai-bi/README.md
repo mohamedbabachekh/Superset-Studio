@@ -13,7 +13,7 @@ The SharpSight AI BI service: a request in, a governed, validated, versioned das
 | `aibi/dataset_agent.py` · `aibi/semantic_agent.py` · `aibi/sql_agent.py` | discovery, governed metrics, the SQL it writes |
 | `aibi/dbt_agent.py` · `aibi/dbt_runner.py` · `aibi/dbt_build.py` | a transformation as a plan; dbt in a workspace; the production build |
 | `aibi/dashboard_agent.py` · `aibi/chart_agent.py` | the specification; one component → one chart |
-| `aibi/superset_adapter.py` | Superset's REST API, and nothing but |
+| `aibi/superset_adapter.py` · `aibi/adapter_check.py` | Superset's REST API, and nothing but; every road of it driven on a copy (`bash ai-bi.sh check-adapter`) |
 | `aibi/validation_agent.py` · `aibi/visual_qa_agent.py` | the validation engine; looking at the result |
 | `aibi/lifecycle.py` · `aibi/git_adapter.py` | versions, the `.ssbi` package, DEV → UAT → PROD, restore |
 | `aibi/audit.py` · `aibi/store.py` | the audit trail; SharpSight's own memory of projects |

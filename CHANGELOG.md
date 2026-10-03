@@ -15,6 +15,13 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
 - **What is governed stays governed**: registries in `registry/`, a real dbt project in `dbt/`, three database
   roles (the service that would talk to a model can write to one schema of drafts and nothing else), every action
   a tool with a policy check and an audit record, an `.ssbi` package built from the commit that was validated.
+- **Who may open a dashboard is SharpSight's decision, enforced in Superset.** The roles granted every dataset
+  of a dashboard become its roles there; a row-level policy becomes a rule, and follows a dataset into what is
+  derived from it. Superset is then asked, by probe accounts holding one role or none, and a promotion to PROD
+  is withdrawn if its answer is not SharpSight's. Roles or rules changed by hand stop a promotion.
+- `ai-bi.sh check-adapter` drives copy, export, embedded configuration, delete and import on a copy — the roads
+  a generation does not take, and the first thing to run after a Superset upgrade. `ai-bi.sh discard` takes a
+  draft project away.
 - **Which language model drives it is left open.** The planner is deterministic today; `aibi/llm.py` is the seam.
 - Verified on a running kit, from an erased engine: the request (four times), fifteen review cases, a forced
   failure that wrote no version and put the reviewed dashboard back, the fix loop once under a stricter policy.
