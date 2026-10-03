@@ -2,7 +2,7 @@
 template:
   id: customer-experience
   name: Customer experience
-  version: "1.0"
+  version: "1.1"
   aliases: [customer-experience, customer experience, cx, cem]
   description: Four KPIs, the distribution beside the trend, then ranking and geography.
   title_pattern: "{subject} Customer Experience"
@@ -75,3 +75,10 @@ responsive:
     - {name: laptop, width: 1180}
   collapse_empty_slots: true
   min_slot_width: {kpi: 2, chart: 4}
+
+# Sections: what the rows are FOR. A dashboard may rename one, describe it, give it an owner, scope a
+# filter to it or hide it; it cannot move a row from one section to another.
+sections:
+  - {id: headline, title: "KPIs", rows: [kpis]}
+  - {id: experience, title: "Experience", rows: [experience]}
+  - {id: breakdown, title: "Regions", rows: [breakdown]}

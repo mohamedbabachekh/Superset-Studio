@@ -1,0 +1,54 @@
+# Chart templates (the BI Studio's « create from template »): the eight ways a chart is started. Each names
+# an approved visualization and what the developer still chooses — a metric, a dimension. Two of them cannot
+# be drawn by this engine yet; they are listed so that the Studio says so, and why, instead of hiding them.
+chart_templates:
+  kpi:
+    name: KPI
+    description: One headline number.
+    visualization: big_number
+    purpose: kpi
+    needs: [metric]
+  time_series:
+    name: Time series
+    description: A metric over time; as a filled area when it is a quantity.
+    visualization: line
+    alternatives: [area]
+    purpose: trend
+    needs: [metric]
+    options: {time_grain: P1D}
+  top_n:
+    name: Top N
+    description: The best (or worst) N of a dimension.
+    visualization: bar
+    purpose: ranking
+    needs: [metric, dimension]
+    options: {row_limit: 10, sort: desc}
+  distribution:
+    name: Distribution
+    description: How values are spread; as shares of a whole when the metric's parts add up.
+    visualization: histogram
+    alternatives: [pie]
+    purpose: distribution
+    needs: [metric]
+  geographic:
+    name: Geographic
+    description: A metric on the map, by region.
+    visualization: map
+    purpose: geo
+    needs: [metric, dimension]
+  detail_table:
+    name: Detail table
+    description: The figures, row by row.
+    visualization: table
+    purpose: detail
+    needs: [metric, dimension]
+  variance:
+    name: Variance
+    description: A period against the one before it.
+    status: not_available
+    reason: it needs a comparison period, and no approved visualization of this engine draws one yet
+  target_vs_actual:
+    name: Target vs actual
+    description: A metric against the target set for it.
+    status: not_available
+    reason: it needs a target for the metric, and the metric registry holds none

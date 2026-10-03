@@ -287,12 +287,13 @@ class ValidationAgent:
         return report
 
     def dashboard_filters(self, spec: DashboardSpec, charts: dict[str, dict[str, Any]], renders: list[Any],
-                          filtered: Optional[Any], applied: Optional[dict[str, Any]]) -> ValidationReport:
+                          filtered: Optional[Any], applied: Optional[dict[str, Any]],
+                          reach: Optional[dict[str, list[str]]] = None) -> ValidationReport:
         """The filters as CONFIGURED on the dashboard — their targets, their scopes — tried on the dashboard:
         it is opened with every filter set, and each chart in scope must then ask for something else than it
         did unfiltered, and still get an answer."""
         report = ValidationReport()
-        if not spec.filters:
+        if not spec.filters and not any(s.filters for s in spec.sections):
             return report
         base = next((r for r in renders if not r.error), None)
         what = ", ".join(f"{k}={v!r}" for k, v in (applied or {}).items())
@@ -304,7 +305,9 @@ class ValidationAgent:
         after = {c["chart_id"]: c for c in filtered.calls if c["kind"] == "chart"}
         for component in spec.components:
             dataset = self.registry.dataset(component.dataset)
-            reached = [f for f in (applied or {}) if f in dataset.columns]
+            # `reach`: which filters are scoped to this chart — a section's filter stops at its section
+            mine = (reach or {}).get(component.slot)
+            reached = [f for f in (applied or {}) if f in dataset.columns and (mine is None or f in mine)]
             chart_id = (charts.get(component.slot) or {}).get("id")
             if not reached or chart_id is None:
                 continue

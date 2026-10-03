@@ -2,7 +2,7 @@
 template:
   id: telecom-kpi
   name: Telecom KPI board
-  version: "1.0"
+  version: "1.1"
   aliases: [telecom-kpi, telecom kpi, kpi board]
   description: Six headline KPIs, two trends compared, a ranking and a detail table.
   title_pattern: "{subject} KPIs"
@@ -80,3 +80,10 @@ responsive:
     - {name: laptop, width: 1180}
   collapse_empty_slots: true
   min_slot_width: {kpi: 2, chart: 4}
+
+# Sections: what the rows are FOR. A dashboard may rename one, describe it, give it an owner, scope a
+# filter to it or hide it; it cannot move a row from one section to another.
+sections:
+  - {id: headline, title: "KPIs", rows: [kpis]}
+  - {id: evolution, title: "Trends", rows: [trends]}
+  - {id: breakdown, title: "Ranking and detail", rows: [breakdown]}

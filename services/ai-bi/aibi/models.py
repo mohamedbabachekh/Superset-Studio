@@ -160,6 +160,15 @@ class SlotDef(Strict):
     mandatory: bool = False
 
 
+class TemplateSection(Strict):
+    """What some of a template's rows are FOR. A section owns whole rows; a dashboard may rename it, describe
+    it, give it an owner, scope a filter to it or hide it — it cannot move a row from one to another."""
+    id: str
+    title: str = ""
+    description: str = ""
+    rows: list[str]
+
+
 class TemplateFilters(Strict):
     max: int = 5
     allowed_roles: list[str] = Field(default_factory=lambda: ["time", "dimension"])
@@ -201,10 +210,22 @@ class TemplateDef(Strict):
     components: dict[str, str] = Field(default_factory=dict)
     kpi_formatting: dict[str, Any] = Field(default_factory=dict)
     responsive: Responsive
+    sections: list[TemplateSection] = Field(default_factory=list)
 
     @property
     def id(self) -> str:
         return self.template.id
+
+    def section_list(self) -> list[TemplateSection]:
+        """The template's sections, in reading order. One that names none has a section per row, untitled."""
+        return self.sections or [TemplateSection(id=row.row, rows=[row.row]) for row in self.layout]
+
+    def slots_in(self, section_id: str) -> list[str]:
+        rows = next((s.rows for s in self.section_list() if s.id == section_id), [])
+        return [p.id for row in self.layout if row.row in rows for p in row.slots]
+
+    def section_of(self, slot: str) -> Optional[str]:
+        return next((s.id for s in self.section_list() if slot in self.slots_in(s.id)), None)
 
     @property
     def version(self) -> str:
@@ -232,6 +253,29 @@ class Visualization(Strict):
     status: Literal["available", "not_installed"] = "available"
     kind: str = "builtin"
     needs: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChartTemplate(Strict):
+    """A way to start a chart that is not « from scratch »: Time series, Top N, KPI… Each names an approved
+    visualization and what the developer still has to choose. One nobody can draw yet says so, and why."""
+    name: str
+    description: str = ""
+    visualization: Optional[str] = None
+    alternatives: list[str] = Field(default_factory=list)
+    purpose: Optional[str] = None
+    needs: list[str] = Field(default_factory=list)
+    options: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["available", "not_available"] = "available"
+    reason: str = ""
+
+
+class Domain(Strict):
+    """A logical folder of the asset library — what the business calls a subject, not a database schema."""
+    name: str
+    description: str = ""
+    owner: str = ""
+    datasets: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
 
 
 # ── security ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -300,6 +344,27 @@ class ComponentSpec(Strict):
     dataset: Optional[str] = None
     title: Optional[str] = Field(default=None, max_length=80)
     options: ComponentOptions = Field(default_factory=ComponentOptions)
+    # what the chart is for, in a sentence; without one it is described by its metric's documentation
+    description: Optional[str] = Field(default=None, max_length=300)
+    # A SHARED chart of the asset library, by its id. The component is then that chart: its type, metric,
+    # dimension and options are the library's, written here when the specification is saved so that a
+    # version records exactly what was built.
+    asset: Optional[str] = None
+
+
+class SectionSpec(Strict):
+    """What a dashboard says of one of its template's sections."""
+    id: str
+    title: Optional[str] = Field(default=None, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=300)
+    owner: Optional[str] = Field(default=None, max_length=80)
+    # hidden: kept in the specification, absent from the dashboard. Its components wait in `parked`.
+    visibility: Literal["visible", "hidden"] = "visible"
+    # filters that reach this section's charts and no others
+    filters: list[str] = Field(default_factory=list)
+    # a SHARED section of the asset library this one was filled from
+    asset: Optional[str] = None
+    parked: list[ComponentSpec] = Field(default_factory=list)
 
 
 class DashboardHeader(Strict):
@@ -307,6 +372,7 @@ class DashboardHeader(Strict):
     template: str
     title: str = Field(max_length=120)
     description: str = Field(default="", max_length=500)
+    owner: Optional[str] = Field(default=None, max_length=80)
     # The version of the BI project this specification is. The engine writes the one it is about to
     # produce; a specification that arrives with its own (« 1.0 ») is accepted, and renumbered when stored.
     version: Optional[str] = Field(default=None, pattern=r"^\d+(\.\d+){0,2}$")
@@ -330,9 +396,15 @@ class DashboardSpec(Strict):
     filters: list[str] = Field(default_factory=list)
     components: list[ComponentSpec]
     theme: ThemeChoice = Field(default_factory=ThemeChoice)
+    # A dashboard is a composition of sections. A specification that names none is laid out as rows only,
+    # as every specification was before sections existed — so an older version restores as it was.
+    sections: list[SectionSpec] = Field(default_factory=list)
 
     def component(self, slot: str) -> Optional[ComponentSpec]:
         return next((c for c in self.components if c.slot == slot), None)
+
+    def section(self, section_id: str) -> Optional[SectionSpec]:
+        return next((s for s in self.sections if s.id == section_id), None)
 
     def datasets(self) -> list[str]:
         seen: list[str] = []
@@ -347,6 +419,54 @@ class DashboardSpec(Strict):
             if c.metric not in seen:
                 seen.append(c.metric)
         return seen
+
+
+# ── the asset library's own assets ──────────────────────────────────────────────────────────────────────────
+def _slug(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", value):
+        raise ValueError("an asset id is lower-case words joined by hyphens")
+    return value
+
+
+class ChartAsset(Strict):
+    """A chart defined ONCE and referenced by the dashboards that use it. It is a definition in SharpSight's
+    vocabulary — an approved visualization of a governed metric — never engine state."""
+    id: str
+    name: str = Field(max_length=80)
+    description: str = Field(default="", max_length=300)
+    owner: str = Field(default="", max_length=80)
+    type: str
+    metric: str
+    dimension: Optional[str] = None
+    dataset: Optional[str] = None
+    options: ComponentOptions = Field(default_factory=ComponentOptions)
+    template: Optional[str] = None           # the chart template it was started from
+    certified: bool = False
+    certified_by: Optional[str] = None
+    revision: int = 1
+    created_by: str = ""
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+    _check_id = field_validator("id")(_slug)
+
+
+class SectionAsset(Strict):
+    """A section defined once — a title, what it is for, and the shared charts it is made of, in order."""
+    id: str
+    name: str = Field(max_length=80)
+    description: str = Field(default="", max_length=300)
+    owner: str = Field(default="", max_length=80)
+    charts: list[str]
+    filters: list[str] = Field(default_factory=list)
+    certified: bool = False
+    certified_by: Optional[str] = None
+    revision: int = 1
+    created_by: str = ""
+    created_at: str = Field(default_factory=utcnow)
+    updated_at: str = Field(default_factory=utcnow)
+
+    _check_id = field_validator("id")(_slug)
 
 
 # ── a transformation the AI proposes ────────────────────────────────────────────────────────────────────────

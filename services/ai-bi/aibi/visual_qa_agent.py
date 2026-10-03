@@ -74,6 +74,16 @@ _HEADER_JS = """
 }
 """
 
+# The headers of the dashboard's sections, as drawn.
+_HEADERS_JS = """
+() => Array.from(document.querySelectorAll('.dashboard-component-header')).map(el => {
+  const box = el.getBoundingClientRect();
+  return {text: (el.textContent || '').trim().slice(0, 120),
+          rect: {x: Math.round(box.x + window.scrollX), y: Math.round(box.y + window.scrollY),
+                 w: Math.round(box.width), h: Math.round(box.height)}};
+})
+"""
+
 _SETTLED_JS = """
 (expected) => {
   const holders = document.querySelectorAll('.dashboard-component-chart-holder');
@@ -96,6 +106,8 @@ class Render:
     header: Optional[dict[str, Any]] = None
     page_width: int = 0
     error: Optional[str] = None
+    # the section headers on the page: their text and where they are
+    headers: list[dict[str, Any]] = field(default_factory=list)
 
     def describe(self) -> dict[str, Any]:
         body = asdict(self)
@@ -173,6 +185,7 @@ class VisualQaAgent:
                     page.wait_for_timeout(1500)        # let the charts finish animating before the picture
                     render.components = page.evaluate(_COMPONENTS_JS)
                     render.header = page.evaluate(_HEADER_JS)
+                    render.headers = page.evaluate(_HEADERS_JS)
                     render.page_width = page.evaluate("() => document.documentElement.scrollWidth")
                     # the picture stops where the dashboard does, not at the bottom of a tall window
                     bottom = max((c["rect"]["y"] + c["rect"]["h"] for c in render.components), default=900) + 24
@@ -246,8 +259,9 @@ class VisualQaAgent:
 
     # ── checking ────────────────────────────────────────────────────────────────────────────────────────────
     def check(self, render: Render, spec: DashboardSpec, template: TemplateDef, charts: dict[str, dict[str, Any]],
-              data: dict[str, dict[str, Any]]) -> ValidationReport:
-        """`charts`: slot → the engine's chart; `data`: slot → what the component's query returned."""
+              data: dict[str, dict[str, Any]], sections: Optional[list[str]] = None) -> ValidationReport:
+        """`charts`: slot → the engine's chart; `data`: slot → what the component's query returned;
+        `sections`: the titles the dashboard's sections must be announced by."""
         report = ValidationReport()
         view = render.viewport
         if render.error or not render.screenshot:
@@ -304,7 +318,12 @@ class VisualQaAgent:
             if not rects:
                 continue
             if previous_bottom >= 0:
-                gaps.append((row.row, min(r["y"] for r in rects) - previous_bottom))
+                # a section's header standing between two rows is not a hole: its height is taken out, and
+                # it brings one more spacing of its own
+                top_of_row = min(r["y"] for r in rects)
+                between = [h["rect"] for h in render.headers if previous_bottom <= h["rect"]["y"] < top_of_row]
+                gaps.append((row.row, (top_of_row - previous_bottom - sum(b["h"] for b in between))
+                             // (1 + len(between))))
             if max(r["y"] for r in rects) - min(r["y"] for r in rects) > 2:
                 problems.append(f"row {row.row}: cards do not start on one line")
             if max(r["h"] for r in rects) - min(r["h"] for r in rects) > 2:
@@ -324,7 +343,9 @@ class VisualQaAgent:
 
             # Excessive whitespace, on the page: the cards must cover the grid, and rows must follow each
             # other. A hole is a slot left empty that did not give its columns away, or a row pushed down.
-            cover = sum(r["w"] * r["h"] for _, r in boxes) / max(1, (right - left) * (bottom - top))
+            bands = sum(h["rect"]["h"] + int(visual.get("row_spacing_px", 16)) for h in render.headers
+                        if top <= h["rect"]["y"] < bottom)
+            cover = sum(r["w"] * r["h"] for _, r in boxes) / max(1, (right - left) * (bottom - top - bands))
             min_cover = float(visual.get("min_grid_coverage", 0.85))
             max_gap = int(visual.get("max_row_gap_px", 32))
             holes = [f"the cards cover {cover:.0%} of the grid, under {min_cover:.0%}"] if cover < min_cover else []
@@ -369,6 +390,13 @@ class VisualQaAgent:
                        "; ".join(violations) or f"{len(boxes)} cards, each with its slot's width, its row's "
                                                 "height and a chart its slot accepts",
                        code="template_violation" if violations else None)
+        if sections is not None:
+            drawn = [h["text"] for h in render.headers]
+            absent = [title for title in sections if title not in drawn]
+            report.add("visual", "every section is announced", "fail" if absent else "pass", view,
+                       "no header for: " + ", ".join(f"« {t} »" for t in absent) if absent else
+                       (", ".join(f"« {t} »" for t in sections) or "the dashboard names no section"),
+                       code="section_header_missing" if absent else None)
         min_fill = float(visual.get("min_fill_ratio", 0.3))
 
         for slot, chart in charts.items():
@@ -489,11 +517,14 @@ class VisualQaAgent:
 def _set_option(spec: DashboardSpec, slot: str, **changes: Any) -> None:
     component = spec.component(slot)
     component.options = ComponentOptions(**{**component.options.model_dump(), **changes})
+    component.asset = None       # corrected for THIS dashboard: it is no longer the shared chart it referenced
 
 
 def _set_title(spec: DashboardSpec, slot: str, title: str) -> None:
     spec.component(slot).title = title
+    spec.component(slot).asset = None
 
 
 def _set_type(spec: DashboardSpec, slot: str, kind: str) -> None:
     spec.component(slot).type = kind
+    spec.component(slot).asset = None

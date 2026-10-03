@@ -12,6 +12,7 @@
 #   bash ai-bi.sh person <rbac user>                       a Superset account for someone who has none yet
 #   bash ai-bi.sh check-adapter <project>                  every road of the Superset adapter, on a copy
 #   bash ai-bi.sh compatibility                            the compatibility matrix, beside what is running
+#   bash ai-bi.sh studio                                   where BI Studio is, and how to sign in to it
 #   bash ai-bi.sh test                                     the engine's own tests, inside its container
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
 #   bash ai-bi.sh --erase      stop the engine and delete ITS two volumes (the kit's are untouched)
@@ -52,6 +53,12 @@ case "${1:-}" in
   discard)  cli discard "${2:?usage: ai-bi.sh discard <project>}"; exit $? ;;
   people)   cli people --user release.manager; exit $? ;;
   compatibility) cli compatibility; exit $? ;;
+  studio)
+    studio_port="$(grep -E '^AIBI_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
+    echo "BI Studio:  http://127.0.0.1:${studio_port:-3003}/studio/"
+    echo "  sign in with a user of registry/security/rbac.yaml (dev.user builds, lead.reviewer reviews,"
+    echo "  release.manager releases) and the API token: the value of AIBI_API_TOKEN in .env"
+    exit 0 ;;
   person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
   check-adapter)
     compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.adapter_check "$@"' check "${2:?usage: ai-bi.sh check-adapter <project>}"; exit $? ;;

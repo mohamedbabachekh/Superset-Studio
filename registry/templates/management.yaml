@@ -4,7 +4,7 @@
 template:
   id: management
   name: Management review
-  version: "1.0"
+  version: "1.1"
   aliases: [management, management review, managers, mgmt, steering]
   description: Three headline KPIs, the trend beside what makes up the total, then the ranking and its figures.
   title_pattern: "{subject} Management Review"
@@ -77,3 +77,10 @@ responsive:
     - {name: laptop, width: 1180}
   collapse_empty_slots: true
   min_slot_width: {kpi: 2, chart: 4}
+
+# Sections: what the rows are FOR. A dashboard may rename one, describe it, give it an owner, scope a
+# filter to it or hide it; it cannot move a row from one section to another.
+sections:
+  - {id: headline, title: "Headline numbers", rows: [kpis]}
+  - {id: performance, title: "Performance", rows: [performance]}
+  - {id: accountability, title: "Accountability", rows: [accountability]}

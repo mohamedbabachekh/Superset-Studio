@@ -318,7 +318,17 @@ class Lifecycle:
                  "| Slot | Visualization | Metric | By | Dataset |", "|---|---|---|---|---|"]
         for c in spec.components:
             lines.append(f"| {c.slot} | {c.type} | {c.metric} | {c.dimension or '—'} | {c.dataset} |")
-        lines += ["", "Filters: " + (", ".join(spec.filters) or "none"), "", "## Metrics", ""]
+        lines += ["", "Filters: " + (", ".join(spec.filters) or "none")]
+        titled = [s for s in self.tools.dashboards.sections(spec, template) if s["declared"]]
+        if titled:
+            lines += ["", "## Sections", ""]
+            for s in titled:
+                lines.append(f"- **{s['title'] or s['id']}**" + (f" — {s['description']}" if s["description"] else "")
+                             + (f" · owner {s['owner']}" if s["owner"] else "")
+                             + (f" · filters: {', '.join(s['filters'])}" if s["filters"] else "")
+                             + (" · HIDDEN" if s["visibility"] == "hidden" else "")
+                             + (f" · shared section `{s['asset']}`" if s["asset"] else ""))
+        lines += ["", "## Metrics", ""]
         for m in metrics:
             lines += [f"**{m.name}** (`{m.id}` v{m.version}, {'certified' if m.certified else 'NOT certified'}, "
                       f"owner {m.owner})", "", f"    {m.expression}", "", " ".join(m.documentation.split()), ""]

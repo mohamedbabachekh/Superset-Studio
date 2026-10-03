@@ -338,3 +338,39 @@ so it worked — by accident, and until somebody moved a class. → the gates ar
 apart; a card is its row's height in grid units × 8 px exactly, and its width within 0.1 of a column of the
 template's. The narrowest drawing is the country map: half its card, because Morocco is tall. → 85 % cover,
 32 px, 0.35 of a column, and a warning (not a failure) under 30 % of a card.
+
+**A screen that finishes loading late must not take over.** BI Studio's builder kept its state in one place.
+Opening a project, then going elsewhere before it had loaded, let the late answer overwrite that state — and
+the builder drawn next was wired to the other project: a chart dropped on a slot was « accepted » by a
+read-only project nobody was looking at, and nothing happened on screen. No error anywhere. It was found only
+because a scripted session did what a person does, switching user and page in quick succession. → a load
+checks that it is still the one that was asked for before it touches anything; a build reports to the builder
+it was started from, or to none.
+
+**… and an action that finishes late must not redraw another screen.** The same session, a run later: a
+reviewer approves for UAT — several seconds of comparing Superset with what was validated — and goes to
+another screen meanwhile. When the approval answered, the page drew « the current screen » again, which was
+now a builder: reloaded from the service, over whatever had been composed and not saved. → an action redraws
+only the screen it was started from; a builder with unsaved changes is given back as it is, never loaded
+again over itself; and the browser asks before the page is left with a dashboard half composed.
+
+**A dashboard's own charts are assets too — and so need the same question asked.** Shared charts were shown
+only to those cleared for their metric; local charts, added later to the same list, were shown to everyone
+in the workspace. A test with a user cleared for nothing caught it the day it was written.
+
+**A draft must not be the specification a promotion is judged against.** The project's stored specification
+is what the access checks and the probes at promotion compute from. Saving a Studio draft into it would have
+made a reviewer's approval compare Superset with something that was never built. → a draft is kept beside the
+built specification, and becomes it only by a build that passed.
+
+**Superset's dashboard layout has a HEADER component, and it is enough for a section.** `type: HEADER` with a
+text, as a child of the grid, above a row. Measured on a render: 64 px high, and the gap between two rows grows
+from 16 px to 96 px with one between them. → the whitespace check takes a header's height out, and counts the
+spacing it brings; otherwise every titled section is « a hole ».
+
+**Two text nodes side by side in a CSS grid are ONE grid item.** A two-column list written as `label, value,
+label, value` with plain text collapsed into a single cell. → every cell is an element.
+
+**A filter can be scoped to part of a dashboard**: a native filter's `scope.excluded` and `chartsInScope`. That
+is what a section's own filter is; Superset names it in the filter bar like any other, so the section's title
+goes into the filter's name.

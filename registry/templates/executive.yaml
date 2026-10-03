@@ -4,7 +4,7 @@
 template:
   id: executive
   name: Executive overview
-  version: "1.0"
+  version: "1.1"
   aliases: [executive, exec, executive-telecom-v1]
   description: Headline KPIs on top, the trend and its distribution, then ranking and geography.
   title_pattern: "{subject} Overview"
@@ -80,3 +80,10 @@ responsive:
   # an optional slot left empty gives its columns to its neighbours instead of leaving a hole
   collapse_empty_slots: true
   min_slot_width: {kpi: 2, chart: 4}
+
+# Sections: what the rows are FOR. A dashboard may rename one, describe it, give it an owner, scope a
+# filter to it or hide it; it cannot move a row from one section to another.
+sections:
+  - {id: headline, title: "Executive KPIs", rows: [kpis]}
+  - {id: evolution, title: "Trend and distribution", rows: [trend]}
+  - {id: breakdown, title: "Where it stands", rows: [breakdown]}

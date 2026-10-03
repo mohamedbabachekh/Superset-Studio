@@ -20,24 +20,28 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, ValidationError
 
 from . import __version__, compatibility
+from .assets import KINDS, AssetError, Catalog
 from .audit import AuditLog
 from .config import Settings, get_settings
 from .data_gateway import DataGateway
 from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
+from .library import Library, LibraryError
 from .lifecycle import Lifecycle, LifecycleError
 from .llm import get_parser
 from .people import People
-from .models import RunRecord
+from .models import HELD, Attempt, DashboardHeader, DashboardSpec, RunRecord, SectionSpec, utcnow
 from .pipeline import Pipeline
-from .planner import new_steps
+from .planner import new_steps, slugify
 from .policy_engine import Identity, PolicyEngine, PolicyError
 from .registry import Registry, RegistryError
 from .store import Store
@@ -67,6 +71,11 @@ class Service:
             state_dir=state, bi_database_name=settings.superset_database_name,
             bi_database_uri=settings.superset_database_uri, superset_public_url=settings.superset_public_url,
             dbt_dev_schema=settings.dbt_dev_schema)
+        # the asset library: shared charts and sections, and the catalogue over everything
+        self.library = Library(self.store, self.registry, self.policy, self.audit, self.git)
+        self.tools.dashboards.library = self.library
+        self.catalog = Catalog(self.registry, self.policy, self.store, self.library)
+        self.tools.catalog = self.catalog
         self.lifecycle = Lifecycle(self.tools, settings.exports_dir)
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
@@ -134,6 +143,17 @@ async def _lifecycle(_, exc: LifecycleError):
 @app.exception_handler(ToolError)
 async def _tool(_, exc: ToolError):
     return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+@app.exception_handler(LibraryError)
+async def _library(_, exc: LibraryError):
+    # a change stopped because the asset is in use carries what uses it: the caller looks, then decides
+    return JSONResponse(status_code=409, content={"error": str(exc), "impact": exc.impact})
+
+
+@app.exception_handler(AssetError)
+async def _asset(_, exc: AssetError):
+    return JSONResponse(status_code=404, content={"error": str(exc)})
 
 
 @app.exception_handler(SupersetError)
@@ -481,3 +501,389 @@ def audit_verify(identity: Identity = Depends(caller)) -> Any:
 @app.exception_handler(GitError)
 async def _git(_, exc: GitError):
     return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+# ── the asset library ───────────────────────────────────────────────────────────────────────────────────────
+@app.get("/me")
+def me(identity: Identity = Depends(caller)) -> Any:
+    return {"user": identity.user, "type": identity.type, "tenant": identity.tenant, "roles": list(identity.roles),
+            "capabilities": sorted(identity.capabilities)}
+
+
+@app.get("/assets")
+def assets(kind: Optional[str] = None, project_id: Optional[str] = None, identity: Identity = Depends(reader)) -> Any:
+    if kind is not None and kind not in KINDS:
+        raise AssetError(f"there is no kind of asset called {kind}")
+    return service.catalog.cards(identity, kind, project_id)
+
+
+@app.get("/assets/tree")
+def assets_tree(project_id: Optional[str] = None, identity: Identity = Depends(reader)) -> Any:
+    return service.catalog.tree(identity, project_id)
+
+
+@app.get("/assets/search")
+def assets_search(q: str = "", kind: Optional[str] = None, domain: Optional[str] = None, status: Optional[str] = None,
+                  owner: Optional[str] = None, used_by: Optional[str] = None, scope: Optional[str] = None,
+                  project_id: Optional[str] = None, identity: Identity = Depends(reader)) -> Any:
+    return service.catalog.search(identity, q, kind, domain, status, owner, used_by, scope, project_id)
+
+
+@app.get("/assets/{kind}/{asset_id}")
+def asset(kind: str, asset_id: str, identity: Identity = Depends(reader)) -> Any:
+    found = service.catalog.detail(identity, kind, asset_id)
+    if kind == "dataset":
+        # « Rows: 48M » — counted through the data gateway, as the caller, and audited like any statement
+        dataset = service.registry.dataset(asset_id)
+        try:
+            found["facts"]["rows"] = service.tools._run_sql(_context(identity), service.tools.sql.row_count(dataset),
+                                                           f"row count of {asset_id}, for the asset library").scalar()
+        except Exception:  # noqa: BLE001 — the card is still worth showing without its count
+            found["facts"]["rows"] = None
+    return found
+
+
+@app.get("/assets/{kind}/{asset_id}/impact")
+def asset_impact(kind: str, asset_id: str, identity: Identity = Depends(reader)) -> Any:
+    service.catalog.detail(identity, kind, asset_id)            # the caller may see it, or this raises
+    return service.catalog.impact(kind, asset_id, identity.tenant)
+
+
+@app.put("/assets/{kind}/{asset_id}/favorite")
+def asset_favorite(kind: str, asset_id: str, identity: Identity = Depends(reader)) -> Any:
+    service.catalog.detail(identity, kind, asset_id)
+    service.store.set_favorite(identity.user, kind, asset_id, True)
+    return {"kind": kind, "id": asset_id, "favorite": True}
+
+
+@app.delete("/assets/{kind}/{asset_id}/favorite")
+def asset_unfavorite(kind: str, asset_id: str, identity: Identity = Depends(reader)) -> Any:
+    service.store.set_favorite(identity.user, kind, asset_id, False)
+    return {"kind": kind, "id": asset_id, "favorite": False}
+
+
+class SharedAsset(BaseModel):
+    asset: dict[str, Any]
+    acknowledge_impact: bool = False
+
+
+def _impact(tenant: str):
+    return lambda kind, asset_id: service.catalog.impact(kind, asset_id, tenant)
+
+
+@app.post("/assets/{kind}")
+def asset_save(kind: str, body: SharedAsset, identity: Identity = Depends(caller)) -> Any:
+    """Create a shared chart or section — or change one. A change to one that is in use is refused with its
+    impact, until the caller has seen it and sends `acknowledge_impact`."""
+    document = dict(body.asset)
+    document.setdefault("id", slugify(document.get("name", "")))
+    return service.library.save(identity, kind, document, str(uuid.uuid4()), _impact(identity.tenant),
+                                body.acknowledge_impact)
+
+
+@app.delete("/assets/{kind}/{asset_id}")
+def asset_delete(kind: str, asset_id: str, identity: Identity = Depends(caller)) -> Any:
+    service.library.delete(identity, kind, asset_id, str(uuid.uuid4()), _impact(identity.tenant))
+    return {"kind": kind, "id": asset_id, "deleted": True}
+
+
+@app.post("/assets/{kind}/{asset_id}/certify")
+def asset_certify(kind: str, asset_id: str, identity: Identity = Depends(caller)) -> Any:
+    return service.library.certify(identity, kind, asset_id, str(uuid.uuid4()))
+
+
+class FromTemplate(BaseModel):
+    template: str
+    metric: str
+    dimension: Optional[str] = None
+    dataset: Optional[str] = None
+    type: Optional[str] = None
+    name: Optional[str] = None
+    description: str = ""
+    options: dict[str, Any] = Field(default_factory=dict)
+    share: bool = False
+
+
+@app.post("/chart-templates/create")
+def chart_from_template(body: FromTemplate, identity: Identity = Depends(reader)) -> Any:
+    """« Create from template »: a chart template, a metric, a dimension → a chart definition, checked.
+    With `share`, it is put in the library; without, it is returned for one dashboard to use."""
+    from .models import ChartAsset
+
+    template = service.registry.chart_templates.get(body.template)
+    if template is None:
+        raise AssetError(f"there is no chart template {body.template}")
+    if template.status != "available":
+        raise LibraryError(f"« {template.name} » cannot be drawn yet: {template.reason}")
+    kind = body.type or template.visualization
+    if kind not in (template.visualization, *template.alternatives):
+        raise LibraryError(f"« {template.name} » is drawn as {', '.join([template.visualization, *template.alternatives])}")
+    metric = service.policy.require_metric(identity, body.metric)
+    words = (body.dimension or "").replace("_", " ")
+    name = body.name or (metric.name if not words else f"{metric.name} by {words.upper() if len(words) <= 3 else words}")
+    document = {"id": slugify(name), "name": name[:80], "description": body.description, "type": kind,
+                "metric": metric.id, "dimension": body.dimension, "dataset": body.dataset,
+                "options": {**template.options, **body.options}, "template": body.template}
+    if body.share:
+        return {"chart": service.library.save(identity, "chart", document, str(uuid.uuid4()),
+                                              _impact(identity.tenant)), "shared": True, "problems": []}
+    try:
+        chart = ChartAsset(**document)
+    except ValidationError as exc:
+        raise LibraryError(f"not a valid chart: {exc.errors()[0]['msg']}") from exc
+    return {"chart": chart, "shared": False, "problems": service.library.chart_problems(chart, identity)}
+
+
+@app.get("/chart-templates")
+def chart_templates(identity: Identity = Depends(reader)) -> Any:
+    return {key: body.model_dump() for key, body in service.registry.chart_templates.items()}
+
+
+@app.get("/security/overview")
+def security_overview(identity: Identity = Depends(reader)) -> Any:
+    """Organizations, users and permissions, for those who administer or audit them; one's own for the rest."""
+    rbac = service.registry.rbac
+    mine = {"user": identity.user, "tenant": identity.tenant, "roles": list(identity.roles)}
+    if not {"access.manage", "audit.read"} & identity.capabilities:
+        return {"restricted": True, "me": mine, "tenants": [identity.tenant]}
+    return {"restricted": False, "me": mine, "tenants": rbac.tenants,
+            "users": {name: body.model_dump() for name, body in rbac.users.items()},
+            "roles": {name: body.model_dump() for name, body in rbac.roles.items()},
+            "row_filters": rbac.row_filters}
+
+
+# ── BI Studio: composing a dashboard ────────────────────────────────────────────────────────────────────────
+STUDIO_DIR = Path(__file__).parent / "studio"
+
+
+@app.get("/builder/config")
+def builder_config() -> Any:
+    """What the Studio's page needs before anybody has signed in. Nothing here is a secret."""
+    return {"version": __version__, "bi_engine_url": service.settings.superset_public_url,
+            "tokens": service.registry.tokens.model_dump(), "ai_model": service.parser.name,
+            # which approved visualizations this BI engine can draw, and what each needs
+            "visualizations": {kind: v.model_dump() for kind, v in service.registry.visualizations.items()}}
+
+
+class Working(BaseModel):
+    spec: dict[str, Any]
+    project_id: Optional[str] = None
+
+
+def _read_spec(document: dict[str, Any]) -> DashboardSpec:
+    try:
+        return DashboardSpec(**document)
+    except ValidationError as exc:
+        problems = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:6])
+        raise HTTPException(status_code=422, detail=f"not a dashboard specification — {problems}") from exc
+
+
+def _inspect(spec: DashboardSpec, identity: Identity, project_id: Optional[str] = None) -> dict[str, Any]:
+    """Everything BI Studio shows about a working specification, computed here — where the rules are —
+    and nowhere in the page: validation, the canvas, the outline, governance, who it is for."""
+    dashboards, registry = service.tools.dashboards, service.registry
+    resolved = dashboards.resolve(spec, identity)
+    report = dashboards.validate(spec, identity)
+    try:
+        template = registry.template(spec.dashboard.template)
+    except RegistryError:
+        return {"spec": spec.model_dump(), "validation": report.summary(), "checks": report.checks,
+                "template": None, "canvas": [], "outline": None, "governance": [], "audience": [], "titles": {}}
+    problems: dict[str, int] = {}
+    for check in report.failures:
+        slot = check.slot or check.subject.split(" ")[0]
+        if slot in template.slots:
+            problems[slot] = problems.get(slot, 0) + 1
+    datasets = [registry.datasets[d] for d in spec.datasets() if d in registry.datasets]
+    metrics = [registry.metrics[m] for m in spec.metrics() if m in registry.metrics]
+    latest = service.store.latest_version(project_id) if project_id else None
+    sections = dashboards.sections(spec, template)
+    return {"spec": spec.model_dump(), "validation": report.summary(), "checks": report.checks,
+            "template": template.model_dump(), "canvas": dashboards.canvas(spec, template),
+            "outline": service.catalog.outline(spec, template, sections, problems),
+            "governance": service.catalog.governance(spec, template, identity, latest.validation if latest else None),
+            "audience": service.policy.audience(datasets, metrics),
+            "row_rules": service.policy.row_rules(datasets, metrics),
+            "titles": {c.slot: service.catalog._title(c, template) for c in spec.components},
+            "problems": problems, "datasets_resolved": resolved}
+
+
+@app.post("/builder/inspect")
+def builder_inspect(body: Working, identity: Identity = Depends(reader)) -> Any:
+    return _inspect(_read_spec(body.spec), identity, body.project_id)
+
+
+class FillSection(BaseModel):
+    spec: dict[str, Any]
+    section: str
+    asset: str
+
+
+@app.post("/builder/fill-section")
+def builder_fill_section(body: FillSection, identity: Identity = Depends(reader)) -> Any:
+    """Fill one section of a working specification from a shared section of the library."""
+    spec = _read_spec(body.spec)
+    template = service.registry.template(spec.dashboard.template)
+    try:
+        notes = service.tools.dashboards.fill_section(spec, template, body.section, body.asset)
+    except ValueError as exc:
+        raise AssetError(str(exc)) from exc
+    return {**_inspect(spec, identity), "notes": notes}
+
+
+class NewProject(BaseModel):
+    title: str = Field(min_length=3, max_length=80)
+    template: str
+
+
+def _editable(project_id: str) -> Optional[str]:
+    """Why this project cannot be changed, or None when it can."""
+    latest = service.store.latest_version(project_id)
+    if latest is not None and latest.status in HELD:
+        return (f"version {latest.version} is {latest.status}: this kit has one BI engine, so changing the "
+                "project would rewrite the promoted dashboard in place")
+    return None
+
+
+@app.post("/builder/projects")
+def builder_new_project(body: NewProject, identity: Identity = Depends(caller)) -> Any:
+    """A new BI project, started by hand: an empty specification on a template, every section named."""
+    service.policy.require(identity, "bi.generate")
+    project_id = slugify(body.title)
+    if service.store.get_project(project_id) is not None:
+        raise LifecycleError(f"BI project {project_id} already exists")
+    template = service.registry.template(body.template)
+    title = template.template.title_pattern.format(subject=body.title)
+    suffix = slugify(title.replace(body.title, "", 1))
+    spec = DashboardSpec(
+        dashboard=DashboardHeader(id=project_id if slugify(title) == project_id else f"{project_id}-{suffix}",
+                                  template=template.id, title=title, owner=identity.user),
+        components=[], sections=[SectionSpec(id=s.id) for s in template.section_list()])
+    request_id = str(uuid.uuid4())
+    attempt = Attempt(run_id="-", request_id=request_id, by=identity.user)
+    attempt.move("DRAFT", by=identity.user, note="started in BI Studio")
+    service.tools.save_project({
+        "project_id": project_id, "tenant": identity.tenant, "created_by": identity.user, "created_at": utcnow(),
+        "title": body.title, "template": template.id, "spec_valid": False, "attempt": attempt.model_dump(),
+        "draft": {"spec": spec.model_dump(), "saved_by": identity.user, "saved_at": utcnow()}})
+    service.audit.record(action="studio:project", user=identity.user, request_id=request_id, actor="human",
+                         project_id=project_id, detail={"template": template.id, "title": body.title})
+    return builder_project(project_id, identity)
+
+
+@app.get("/builder/projects/{project_id}")
+def builder_project(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """A project as the Studio opens it: its working specification — the draft when there is one, what was
+    built otherwise — and whether it may be changed."""
+    body = _project(project_id, identity)
+    latest = service.store.latest_version(project_id)
+    draft = body.get("draft")
+    document = (draft or {}).get("spec") or body.get("spec")
+    if not document:
+        raise HTTPException(status_code=404, detail=f"BI project {project_id} has no specification yet")
+    attempt = body.get("attempt") or {}
+    locked = _editable(project_id)
+    return {"project_id": project_id, "title": body.get("title"), "created_by": body.get("created_by"),
+            "status": latest.status if latest else attempt.get("status", "DRAFT"),
+            "environment": latest.state if latest else "DEV", "version": latest.version if latest else None,
+            "history": latest.history if latest else attempt.get("history", []),
+            "editable": locked is None and "bi.generate" in identity.capabilities,
+            "locked_because": locked or (None if "bi.generate" in identity.capabilities
+                                         else f"{identity.user} may read this project, not change it"),
+            "draft": {"saved_by": draft.get("saved_by"), "saved_at": draft.get("saved_at")} if draft else None,
+            "dashboard_url": (body.get("engine") or {}).get("dashboard", {}).get("url"),
+            "last_attempt": {k: attempt.get(k) for k in ("run_id", "status", "version", "error")} if attempt else None,
+            **_inspect(_read_spec(document), identity, project_id)}
+
+
+@app.put("/builder/projects/{project_id}/draft")
+def builder_save_draft(project_id: str, body: Working, identity: Identity = Depends(caller)) -> Any:
+    """Keep the working specification. It is a DRAFT beside what was built: nothing in the BI engine changes,
+    and what a reviewer is looking at stays what was validated."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    locked = _editable(project_id)
+    if locked:
+        raise LifecycleError(f"{project_id} cannot be changed: {locked}")
+    spec = _read_spec(body.spec)
+    found = _inspect(spec, identity, project_id)
+    project["draft"] = {"spec": found["spec"], "saved_by": identity.user, "saved_at": utcnow()}
+    service.tools.save_project(project)
+    service.audit.record(action="studio:draft", user=identity.user, request_id=str(uuid.uuid4()), actor="human",
+                         project_id=project_id, datasets=spec.datasets(), metrics=spec.metrics(),
+                         validation=found["validation"],
+                         detail={"components": len(spec.components),
+                                 "sections": [s.id for s in spec.sections if s.visibility == "visible"],
+                                 "shared_charts": sorted({c.asset for c in spec.components if c.asset})})
+    return builder_project(project_id, identity)
+
+
+@app.delete("/builder/projects/{project_id}/draft")
+def builder_drop_draft(project_id: str, identity: Identity = Depends(caller)) -> Any:
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    if not project.get("spec"):
+        raise LifecycleError(f"{project_id} is only a draft so far: discard the project instead")
+    project.pop("draft", None)
+    service.tools.save_project(project)
+    return builder_project(project_id, identity)
+
+
+@app.post("/builder/projects/{project_id}/build")
+def builder_build(project_id: str, response: Response, identity: Identity = Depends(caller)) -> Any:
+    """Build the draft: the specification a person composed goes through validation, the BI engine, visual QA,
+    a version, a commit and a package — the same steps and gates as one the engine wrote."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    locked = _editable(project_id)
+    if locked:
+        raise LifecycleError(f"{project_id} cannot be built: {locked}")
+    document = (project.get("draft") or {}).get("spec")
+    if not document:
+        raise LifecycleError(f"{project_id} has no draft to build: what was built is what is there")
+    spec = _read_spec(document)
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
+    run = RunRecord(id=uuid.uuid4().hex[:12], request_id=str(uuid.uuid4()), user=identity.user,
+                    prompt=f"Build of the BI Studio draft of {project_id}: {spec.dashboard.title}",
+                    ai_model=service.parser.name, steps=new_steps(), project_id=project_id)
+    service.store.save_run(run)
+
+    def work() -> None:
+        try:
+            service.pipeline.execute(run, identity, composed=(project_id, spec))
+        finally:
+            service.busy.release()
+
+    threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
+    response.status_code = 202
+    return {"run_id": run.id, "request_id": run.request_id, "status": "running"}
+
+
+@app.get("/projects/{project_id}/outline")
+def project_outline(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    return builder_project(project_id, identity)["outline"]
+
+
+@app.get("/projects/{project_id}/governance")
+def project_governance(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    return builder_project(project_id, identity)["governance"]
+
+
+@app.get("/projects/{project_id}/definition")
+def project_definition(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """The dashboard as a composition: metadata, sections, shared assets, visual assets, security, deployment."""
+    body = _project(project_id, identity)
+    document = body.get("spec") or (body.get("draft") or {}).get("spec")
+    if not document:
+        raise HTTPException(status_code=404, detail=f"BI project {project_id} has no specification yet")
+    spec = _read_spec(document)
+    template = service.registry.template(spec.dashboard.template)
+    return service.catalog.definition(project_id, identity, service.tools.dashboards.sections(spec, template),
+                                      spec, template)
+
+
+# The Studio's page: three static files, served by this service — no build step, no script from anywhere else.
+# Mounted LAST, so that no route above can be shadowed by a file.
+if STUDIO_DIR.is_dir():
+    app.mount("/studio", StaticFiles(directory=STUDIO_DIR, html=True), name="studio")

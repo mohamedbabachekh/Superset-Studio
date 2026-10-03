@@ -89,6 +89,18 @@ class DimensionArgs(BaseModel):
     dataset_id: Optional[str] = None
 
 
+class SearchArgs(BaseModel):
+    query: str = ""
+    kind: Optional[str] = None
+    domain: Optional[str] = None
+    status: Optional[str] = None
+
+
+class AssetArgs(BaseModel):
+    kind: str
+    asset_id: str
+
+
 class ListMetricsArgs(BaseModel):
     domain: Optional[str] = None
     certified_only: bool = False
@@ -196,7 +208,7 @@ class Toolbox:
         self.semantic = SemanticAgent(registry)
         self.sql = SqlAgent()
         self.charts = ChartAgent(registry)
-        self.dashboards = DashboardAgent(registry, policy, self.semantic)
+        self.dashboards = DashboardAgent(registry, policy, self.semantic)     # .library is set by the service
         self.dbt_agent = DbtAgent(registry)
         self.validation = ValidationAgent(registry, policy, self.sql, store)
         # what the last retrieval and render of each project found — evidence for validate_dashboard
@@ -204,6 +216,8 @@ class Toolbox:
         # Who builds a package. The lifecycle sets it: a package is cut from a committed version, and what
         # a version is, is the lifecycle's to know. The tool below only asks.
         self.packager: Optional[Callable[[str], dict[str, Any]]] = None
+        # the asset catalogue (aibi/assets.py), set by the service: what BI Studio's library shows a person
+        self.catalog: Any = None
 
     # ── the catalogue ───────────────────────────────────────────────────────────────────────────────────────
     @classmethod
@@ -371,6 +385,32 @@ class Toolbox:
                                     "readable": column in self.policy.readable_columns(ctx.identity, d),
                                     "part_of_grain": column in d.grain} for d in holders},
                 "metrics": [m.id for m in usable]}
+
+    # ── the asset library: the same one BI Studio shows a person ────────────────────────────────────────────
+    @tool("search_assets", "Search the asset library — datasets, metrics, dimensions, shared charts and sections, "
+          "dashboards, templates — by word, kind, domain and status. Only what the user may read is returned. "
+          "Look here before defining a chart: one that is already shared is referenced, not written again.",
+          SearchArgs, capability="bi.read")
+    def search_assets(self, ctx: ToolContext, note: dict, query: str, kind: Optional[str], domain: Optional[str],
+                      status: Optional[str]) -> dict[str, Any]:
+        if self.catalog is None:
+            raise ToolError("this service has no asset catalogue")
+        found = self.catalog.search(ctx.identity, query, kind, domain, status)
+        note.update(metrics=[c["id"] for c in found["groups"].get("metric", [])],
+                    datasets=[c["id"] for c in found["groups"].get("dataset", [])],
+                    detail={"query": query, "kind": kind, "total": found["total"]})
+        return found
+
+    @tool("get_asset_usage", "Where an asset is used — dashboards, charts, metrics, shared sections — and what "
+          "changing it would touch, with whether any of that has been handed on to UAT or PROD.", AssetArgs,
+          capability="bi.read")
+    def get_asset_usage(self, ctx: ToolContext, note: dict, kind: str, asset_id: str) -> dict[str, Any]:
+        if self.catalog is None:
+            raise ToolError("this service has no asset catalogue")
+        self.catalog.detail(ctx.identity, kind, asset_id)            # the user may see it, or this raises
+        impact = self.catalog.impact(kind, asset_id, ctx.identity.tenant)
+        note["detail"] = {"kind": kind, "id": asset_id, "counts": impact["counts"], "severity": impact["severity"]}
+        return impact
 
     @tool("list_dashboard_templates", "The predefined dashboard templates.", capability="bi.read")
     def list_dashboard_templates(self, ctx: ToolContext, note: dict) -> list[dict[str, Any]]:
@@ -638,7 +678,7 @@ class Toolbox:
             engine["charts"][slot] = {**chart, "id": None}
         charts = {slot: chart for slot, chart in self.live_charts(engine).items() if slot in specified}
 
-        filters = self.dashboards.native_filters(spec, engine["datasets"], charts)
+        filters = self.dashboards.native_filters(spec, engine["datasets"], charts, template)
         self.superset.update_dashboard(engine["dashboard"]["id"], {
             "dashboard_title": spec.dashboard.title,
             "slug": spec.dashboard.id,
@@ -881,7 +921,7 @@ class Toolbox:
                            "wall_ms": int((time.monotonic() - started) * 1000)}
 
         probes = []
-        for column in spec.filters:
+        for column in dict.fromkeys(column for _, column, _ in self.dashboards.filter_uses(spec)):
             for dataset_id in spec.datasets():
                 dataset = self.registry.dataset(dataset_id)
                 if column not in dataset.columns:
@@ -936,7 +976,8 @@ class Toolbox:
             evidence["filtered_render"] = self.visual.render(
                 engine["dashboard"]["id"], charts, out_dir, "filtered", template.responsive.viewports[0].width,
                 native_filters=mask)
-            evidence["filters_applied"] = {column: values[column] for column in spec.filters if column in values}
+            evidence["filters_applied"] = {column: values[column] for _, column, _ in self.dashboards.filter_uses(spec)
+                                           if column in values}
         note["detail"] = {"renders": [{"viewport": r.viewport, "width": r.width, "load_ms": r.load_ms,
                                        "components": len(r.components), "requests": len(r.calls),
                                        "error": r.error} for r in renders],
@@ -980,12 +1021,12 @@ class Toolbox:
             "charts": charts, "connection": self._bi_database[0],
             "filters": [{"name": f["name"], "column": f["targets"][0]["column"]["name"],
                          "dataset_id": f["targets"][0]["datasetId"]}
-                        for f in self.dashboards.native_filters(spec, engine["datasets"], charts)
+                        for f in self.dashboards.native_filters(spec, engine["datasets"], charts, template)
                         if f["targets"] and f["targets"][0]]}))
         if visual:
             report.extend(self.validation.dashboard_filters(
                 spec, self.live_charts(engine), renders, evidence.get("filtered_render"),
-                evidence.get("filters_applied")))
+                evidence.get("filters_applied"), self.dashboards.reach(spec, template)))
         outsider = self.probe_access(body, None)
         self.audit.record(action="access_probe", user=ctx.identity.user, request_id=ctx.request_id, actor=ctx.actor,
                           ai_model=ctx.ai_model, project_id=ctx.project_id,
@@ -1010,7 +1051,8 @@ class Toolbox:
             report.add("visual", "screenshot generated", "fail", "", "the dashboard has not been rendered",
                        code="render_failed")
         for render in renders:
-            report.extend(self.visual.check(render, spec, template, charts, data))
+            report.extend(self.visual.check(render, spec, template, charts, data,
+                                            self.dashboards.section_titles(spec, template, charts)))
         if visual and renders:
             # the page is styled by the template's stylesheet and no other: a rule added by hand in the BI
             # engine is a template violation no screenshot measurement would name

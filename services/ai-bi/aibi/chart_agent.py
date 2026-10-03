@@ -166,7 +166,8 @@ class ChartAgent:
             "datasource_id": engine_dataset_id,
             "datasource_type": "table",
             "params": json.dumps(form, ensure_ascii=False),
-            "description": f"{metric.name} — {' '.join(metric.documentation.split())}"[:1000],
+            "description": (component.description or
+                            f"{metric.name} — {' '.join(metric.documentation.split())}")[:1000],
             "dashboards": [dashboard_id],
             # where this chart is defined: a SharpSight project and slot, not the engine's editor
             "external_url": f"sharpsight://bi-project/{project_id}/slot/{component.slot}",

@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from .dataset_agent import Need
 from .models import (RESTRICTED_CLASSIFICATIONS, ComponentOptions, ComponentSpec, DashboardHeader, DashboardSpec,
-                     MetricDef, Requirement, TemplateDef, ValidationReport)
+                     MetricDef, Requirement, SectionSpec, TemplateDef, ValidationReport)
 from .planner import slugify
 from .policy_engine import Identity, PolicyEngine
 from .registry import Registry
@@ -43,10 +43,12 @@ class Draft:
 
 
 class DashboardAgent:
-    def __init__(self, registry: Registry, policy: PolicyEngine, semantic: SemanticAgent):
+    def __init__(self, registry: Registry, policy: PolicyEngine, semantic: SemanticAgent, library: Any = None):
         self.registry = registry
         self.policy = policy
         self.semantic = semantic
+        # the asset library's shared charts and sections (aibi/library.py); None where there is none to ask
+        self.library = library
 
     # ── 1 · the draft ───────────────────────────────────────────────────────────────────────────────────────
     def draft(self, requirement: Requirement, template: TemplateDef,
@@ -174,7 +176,88 @@ class DashboardAgent:
         dashboard_id = project_id if slugify(title) == project_id else f"{project_id}-{suffix}"
         header = DashboardHeader(id=dashboard_id, template=template.id, title=title, version=version,
                                  description=" ".join(requirement.prompt.split())[:500])
-        return DashboardSpec(dashboard=header, filters=filters, components=components), notes
+        # No duplication: a chart the library already defines is REFERENCED, not written out again.
+        for component in components:
+            shared = self.shared_twin(component)
+            if shared is not None:
+                component.asset = shared.id
+                notes.append(f"{component.slot} is the shared chart « {shared.name} » ({shared.id}), referenced")
+        sections = [SectionSpec(id=section.id) for section in template.section_list()]
+        return DashboardSpec(dashboard=header, filters=filters, components=components, sections=sections), notes
+
+    def shared_twin(self, component: ComponentSpec) -> Any:
+        """The library's chart that IS this component — same visualization, metric, dimension and options."""
+        if self.library is None or component.asset:
+            return None
+        return next((c for c in self.library.charts()
+                     if (c.type, c.metric, c.dimension, c.options) == (component.type, component.metric,
+                                                                       component.dimension, component.options)
+                     and c.dataset in (None, component.dataset)), None)
+
+    # ── sections ────────────────────────────────────────────────────────────────────────────────────────────
+    def sections(self, spec: DashboardSpec, template: TemplateDef) -> list[dict[str, Any]]:
+        """Each of the template's sections as THIS dashboard has it: the template's rows and title, and what
+        the dashboard says of it — another title, a description, an owner, filters of its own, hidden."""
+        found = []
+        for section in template.section_list():
+            own = spec.section(section.id)
+            found.append({"id": section.id, "rows": section.rows, "slots": template.slots_in(section.id),
+                          "title": own.title if own and own.title is not None else section.title,
+                          "description": own.description if own and own.description is not None else section.description,
+                          "owner": own.owner if own else None, "visibility": own.visibility if own else "visible",
+                          "filters": list(own.filters) if own else [], "asset": own.asset if own else None,
+                          "declared": own is not None})
+        return found
+
+    def canvas(self, spec: DashboardSpec, template: TemplateDef) -> list[dict[str, Any]]:
+        """The dashboard as BI Studio draws it: every section, every row, EVERY slot of the template — the
+        empty ones too, since an empty slot is where the next chart goes."""
+        drawn = []
+        for section in self.sections(spec, template):
+            own = spec.section(section["id"])
+            parked = {c.slot: c for c in (own.parked if own else [])}
+            rows = []
+            for row in template.layout:
+                if row.row not in section["rows"]:
+                    continue
+                slots = []
+                for placement in row.slots:
+                    component = spec.component(placement.id) or parked.get(placement.id)
+                    slots.append({"slot": placement.id, "width": placement.width, **template.slots[placement.id].model_dump(),
+                                  "component": component.model_dump() if component else None,
+                                  "parked": placement.id in parked})
+                rows.append({"row": row.row, "height": row.height, "slots": slots})
+            drawn.append({**section, "rows": rows})
+        return drawn
+
+    def fill_section(self, spec: DashboardSpec, template: TemplateDef, section_id: str, asset_id: str) -> list[str]:
+        """Fill one section of the dashboard from a SHARED section: its charts go, in order, into the first
+        free slot that accepts them. Returns what was placed and what found no slot."""
+        shared = self.library.section(asset_id) if self.library else None
+        if shared is None:
+            raise ValueError(f"there is no shared section {asset_id}")
+        if section_id not in {s.id for s in template.section_list()}:
+            raise ValueError(f"template {template.id} has no section {section_id}")
+        slots = template.slots_in(section_id)
+        spec.components = [c for c in spec.components if c.slot not in slots]
+        free, notes = list(slots), []
+        for chart_id in shared.charts:
+            chart = self.library.chart(chart_id)
+            slot = next((s for s in free if chart is not None and chart.type in template.slots[s].accepts), None)
+            if slot is None:
+                notes.append(f"shared chart {chart_id} found no slot in section {section_id} that accepts it")
+                continue
+            free.remove(slot)
+            spec.components.append(ComponentSpec(slot=slot, type=chart.type, metric=chart.metric, asset=chart.id))
+            notes.append(f"{slot}: shared chart « {chart.name} »")
+        own = spec.section(section_id) or SectionSpec(id=section_id)
+        own.asset, own.title, own.description = shared.id, shared.name, shared.description or None
+        own.filters = [f for f in shared.filters]
+        if spec.section(section_id) is None:
+            spec.sections.append(own)
+        order = [p.id for row in template.layout for p in row.slots]
+        spec.components.sort(key=lambda c: order.index(c.slot) if c.slot in order else len(order))
+        return notes
 
     def resolve(self, spec: DashboardSpec, identity: Identity) -> list[str]:
         """Give each component that names no dataset the one its metric comes from. A specification may leave
@@ -182,16 +265,33 @@ class DashboardAgent:
         metric, broken down that way, is found: a governed dataset before a generated one, the metric's own
         before one derived from it. Nothing is found for a breakdown no dataset offers; validation says so."""
         resolved: list[str] = []
+        # A component that names a shared chart IS that chart: what the library says is written here, so the
+        # version records exactly what was built, and a later change of the shared chart is a visible change.
+        for component in [*spec.components, *(p for s in spec.sections for p in s.parked)]:
+            shared = self.library.chart(component.asset) if self.library is not None and component.asset else None
+            if shared is not None:
+                component.type, component.metric, component.dimension = shared.type, shared.metric, shared.dimension
+                component.options = shared.options.model_copy()
+                component.title = shared.name
+                component.description = component.description or shared.description or None
+                if shared.dataset:
+                    component.dataset = shared.dataset
         for component in spec.components:
             metric = self.registry.metrics.get(component.metric)
             if component.dataset or metric is None:
                 continue
+            visualization = self.registry.visualizations.get(component.type)
+            role = visualization.needs.get("dimension_role") if visualization else None
+            by_role = role not in (None, "time") and not component.dimension
             found = [d for d in self.policy.permitted_datasets(identity)
                      if self.semantic.valid_on(metric, d)[0]
-                     and (component.dimension is None or component.dimension in d.columns)]
+                     and (component.dimension is None or component.dimension in d.columns)
+                     and (not by_role or d.columns_with_role(role))]
             found.sort(key=lambda d: (not d.certified, d.id not in metric.lineage.datasets, d.id))
             if found:
                 component.dataset = found[0].id
+                if by_role:
+                    component.dimension = found[0].columns_with_role(role)[0]
                 resolved.append(f"{component.slot}: {found[0].id}")
         return resolved
 
@@ -288,9 +388,64 @@ class DashboardAgent:
                     f"{metric.id} by {column}" + ("" if allowed else
                                                    f": its dimensions are {', '.join(metric.dimensions)}"))
 
+        # ── shared assets: a reference is a reference, not a copy that drifted ─────────────────────────────────
+        if self.library is not None:
+            for component in spec.components:
+                if not component.asset:
+                    continue
+                shared = self.library.chart(component.asset)
+                subject = f"{component.slot} → {component.asset}"
+                add("shared chart exists", shared is not None, subject)
+                if shared is not None:
+                    same = (component.type, component.metric, component.dimension, component.options) == (
+                        shared.type, shared.metric, shared.dimension, shared.options)
+                    add("component is its shared chart", same, subject,
+                        f"revision {shared.revision}" if same else
+                        "it differs from the shared chart it names: change the shared chart, or stop referencing it")
+
+        # ── sections ──────────────────────────────────────────────────────────────────────────────────────────
+        known = {s.id for s in template.section_list()}
+        declared = [s.id for s in spec.sections]
+        add("one entry per section", len(set(declared)) == len(declared), detail=", ".join(declared))
+        section_filters = 0
+        for section in spec.sections:
+            subject = f"section {section.id}"
+            if section.id not in known:
+                add("section exists in template", False, subject, f"{template.id} has {', '.join(sorted(known))}")
+                continue
+            inside = set(template.slots_in(section.id))
+            if any(p.slot not in inside for p in section.parked):
+                add("a parked component belongs to its section", False, subject)
+            if section.visibility == "hidden":
+                shown = [c.slot for c in spec.components if c.slot in inside]
+                add("a hidden section is not on the dashboard", not shown, subject,
+                    f"{', '.join(shown)} would still be drawn" if shown else f"{len(section.parked)} component(s) kept aside")
+                must = [s for s in inside if template.slots[s].mandatory]
+                add("a section holding a mandatory slot is not hidden", not must, subject, ", ".join(must))
+                continue
+            if section.parked:
+                add("only a hidden section keeps components aside", False, subject)
+            if section.asset and self.library is not None:
+                add("shared section exists", self.library.section(section.asset) is not None,
+                    f"{subject} → {section.asset}")
+            holders = [self.registry.datasets[c.dataset] for c in spec.components
+                       if c.slot in inside and c.dataset in self.registry.datasets]
+            for column in section.filters:
+                section_filters += 1
+                body = next((d.columns[column] for d in holders if column in d.columns), None)
+                add("section filter is a column of the section's datasets", body is not None, f"{subject} · {column}")
+                if body is not None:
+                    add("filter role allowed by the template", body.role in template.filters.allowed_roles,
+                        f"{subject} · {column}", f"{column} is {body.role}")
+                    add("filter is not a restricted column", body.classification not in RESTRICTED_CLASSIFICATIONS,
+                        f"{subject} · {column}", f"classified {body.classification}")
+                add("a filter is set once", column not in spec.filters, f"{subject} · {column}",
+                    "" if column not in spec.filters else "it is already a filter of the whole dashboard")
+
         used = [self.registry.datasets[ds] for ds in spec.datasets() if ds in self.registry.datasets]
-        add("filter count within the template's limit", len(spec.filters) <= template.filters.max,
-            detail=f"{len(spec.filters)} of {template.filters.max}")
+        total_filters = len(spec.filters) + section_filters
+        add("filter count within the template's limit", total_filters <= template.filters.max,
+            detail=f"{total_filters} of {template.filters.max}")
         for column in spec.filters:
             holders = [d for d in used if column in d.columns]
             if not holders:
@@ -335,10 +490,23 @@ class DashboardAgent:
             "GRID_ID": {"type": "GRID", "id": "GRID_ID", "children": [], "parents": ["ROOT_ID"]},
             "HEADER_ID": {"type": "HEADER", "id": "HEADER_ID", "meta": {"text": spec.dashboard.title}},
         }
+        # A section the specification names, and that has a title, is announced by a header above its first
+        # row. A specification that names no section is rows only — as every dashboard was before sections.
+        section_of_row = {name: section for section in self.sections(spec, template) for name in section["rows"]}
+        announced: set[str] = set()
         for row in template.layout:
             placed = [p for p in row.slots if p.id in charts]
             if not placed:
                 continue
+            section = section_of_row.get(row.row)
+            if section and section["declared"] and section["title"] and section["id"] not in announced:
+                announced.add(section["id"])
+                header_id = f"HEADER-{section['id']}"
+                position["GRID_ID"]["children"].append(header_id)
+                position[header_id] = {"type": "HEADER", "id": header_id, "children": [],
+                                       "parents": ["ROOT_ID", "GRID_ID"],
+                                       "meta": {"text": section["title"], "headerSize": "SMALL_HEADER",
+                                                "background": "BACKGROUND_TRANSPARENT"}}
             row_id = f"ROW-{row.row}"
             widths = self._widths(row.slots, placed, template.responsive.collapse_empty_slots)
             position["GRID_ID"]["children"].append(row_id)
@@ -355,18 +523,40 @@ class DashboardAgent:
         return position
 
     @staticmethod
-    def filter_id(spec: DashboardSpec, column: str) -> str:
-        return f"NATIVE_FILTER-{spec.dashboard.id}-{column}"
+    def filter_id(spec: DashboardSpec, column: str, section: Optional[str] = None) -> str:
+        return f"NATIVE_FILTER-{spec.dashboard.id}-" + (f"{section}-" if section else "") + column
+
+    def section_titles(self, spec: DashboardSpec, template: TemplateDef, slots: Any) -> list[str]:
+        """The headers the dashboard must show: the titled sections it names that have a chart on the page."""
+        return [s["title"] for s in self.sections(spec, template)
+                if s["declared"] and s["title"] and any(slot in slots for slot in s["slots"])]
+
+    def filter_uses(self, spec: DashboardSpec) -> list[tuple[str, str, Optional[str]]]:
+        """(filter id, column, section) for every filter: the dashboard's own, then each visible section's."""
+        uses: list[tuple[str, str, Optional[str]]] = [(self.filter_id(spec, c), c, None) for c in spec.filters]
+        for section in spec.sections:
+            if section.visibility == "visible":
+                uses += [(self.filter_id(spec, c, section.id), c, section.id) for c in section.filters]
+        return uses
+
+    def reach(self, spec: DashboardSpec, template: TemplateDef) -> dict[str, list[str]]:
+        """For each slot, the filter columns that reach its chart: the dashboard's, and its own section's."""
+        reached = {}
+        for component in spec.components:
+            own = spec.section(template.section_of(component.slot) or "")
+            reached[component.slot] = list(dict.fromkeys([*spec.filters, *(
+                own.filters if own is not None and own.visibility == "visible" else [])]))
+        return reached
 
     def filter_state(self, spec: DashboardSpec, values: dict[str, Any]) -> dict[str, Any]:
         """The dashboard's filters, set to the given values, as the engine reads them from an address."""
         used = [self.registry.dataset(ds) for ds in spec.datasets()]
         mask: dict[str, Any] = {}
-        for column in spec.filters:
+        for fid, column, _section in self.filter_uses(spec):
             holder = next((d for d in used if column in d.columns), None)
             if holder is None or column not in values:
                 continue
-            fid, value = self.filter_id(spec, column), values[column]
+            value = values[column]
             if holder.columns[column].role == "time":
                 mask[fid] = {"id": fid, "extraFormData": {"time_range": value},
                              "filterState": {"value": value}, "ownState": {}}
@@ -376,20 +566,24 @@ class DashboardAgent:
         return mask
 
     def native_filters(self, spec: DashboardSpec, engine_dataset_ids: dict[str, int],
-                       charts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+                       charts: dict[str, dict[str, Any]], template: Optional[TemplateDef] = None) -> list[dict[str, Any]]:
+        """The engine's filters. One that belongs to a section reaches that section's charts and no others."""
         datasets = {c.slot: self.registry.dataset(c.dataset) for c in spec.components if c.slot in charts}
-        ordered = sorted({d.id: d for d in datasets.values()}.values(), key=lambda d: (not d.certified, d.id))
+        titles = {s["id"]: s["title"] for s in self.sections(spec, template)} if template is not None else {}
         filters = []
-        for column in spec.filters:
+        for fid, column, section in self.filter_uses(spec):
+            inside = {slot: d for slot, d in datasets.items()
+                      if section is None or (template is not None and slot in template.slots_in(section))}
+            ordered = sorted({d.id: d for d in inside.values()}.values(), key=lambda d: (not d.certified, d.id))
             holder = next((d for d in ordered if column in d.columns), None)
             if holder is None:
                 continue
-            in_scope = [charts[slot]["id"] for slot, d in datasets.items() if column in d.columns]
-            excluded = [charts[slot]["id"] for slot, d in datasets.items() if column not in d.columns]
+            in_scope = [charts[slot]["id"] for slot, d in inside.items() if column in d.columns]
+            excluded = [chart["id"] for chart in charts.values() if chart["id"] not in in_scope]
             is_time = holder.columns[column].role == "time"
             filters.append({
-                "id": self.filter_id(spec, column),
-                "name": holder.label(column),
+                "id": fid,
+                "name": holder.label(column) + (f" · {titles.get(section) or section}" if section else ""),
                 "type": "NATIVE_FILTER",
                 "filterType": "filter_time" if is_time else "filter_select",
                 "targets": [{}] if is_time else [{"datasetId": engine_dataset_ids[holder.id],
@@ -423,6 +617,10 @@ class DashboardAgent:
             f"border-radius: {radius}px; padding: {space('card_padding', 'sm')}px; }}",
             f".dashboard-component-chart-holder .header-title {{ font-size: {title['size_px']}px; "
             f"font-weight: {title['weight']}; color: {tokens.colors['text']}; }}",
+            # a section's header: the template's own heading token, and nothing behind it
+            f".dashboard-component-header {{ font-size: {font('section_title', 'heading_m')['size_px']}px; "
+            f"font-weight: {font('section_title', 'heading_m')['weight']}; color: {tokens.colors['text']}; "
+            "background: transparent; }",
         ]
         # Not a design choice — a correction. The engine sizes the title field from a hidden element in the
         # theme's « strong » weight and draws the title itself in the normal one; with this kit's theme the

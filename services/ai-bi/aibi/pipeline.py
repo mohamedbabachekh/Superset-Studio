@@ -22,7 +22,8 @@ from .dashboard_agent import Draft
 from .dataset_agent import Candidate, DatasetAgent, Gap
 from .lifecycle import Lifecycle
 from .llm import RequirementParser
-from .models import HELD, Attempt, ModelPlan, ProjectVersion, RunRecord, StepRecord, ValidationReport, utcnow
+from .models import (HELD, Attempt, DashboardSpec, DatasetDef, ModelPlan, ProjectVersion, Requirement, RunRecord,
+                     StepRecord, ValidationReport, utcnow)
 from .planner import slugify
 from .policy_engine import Identity, PolicyError
 from .store import Store
@@ -134,7 +135,10 @@ class Pipeline:
         self.audit: AuditLog = tools.audit
         self.datasets = DatasetAgent(tools.registry, tools.semantic)
 
-    def execute(self, run: RunRecord, identity: Identity) -> RunRecord:
+    def execute(self, run: RunRecord, identity: Identity,
+                composed: Optional[tuple[str, DashboardSpec]] = None) -> RunRecord:
+        """`composed`: a project and the specification a person composed for it in BI Studio. The run then
+        starts from that specification instead of reading a sentence — and goes through everything else."""
         ctx = ToolContext(identity=identity, request_id=run.request_id, ai_model=run.ai_model)
         self.audit.record(action="request", user=identity.user, request_id=run.request_id, actor="human",
                           ai_model=run.ai_model, detail={"prompt": run.prompt, "run_id": run.id})
@@ -142,7 +146,10 @@ class Pipeline:
         gates = _Gates(run, ctx, self.tools)
         try:
             self.tools.policy.require(identity, "bi.generate")
-            self._run(run, ctx, _Steps(run, self.store), notes, gates)
+            if composed is None:
+                self._run(run, ctx, _Steps(run, self.store), notes, gates)
+            else:
+                self._run_composed(run, ctx, _Steps(run, self.store), notes, gates, *composed)
             run.status = "succeeded"
         except Exception as exc:  # noqa: BLE001 — whatever stopped it, the run must say so
             run.status, run.error = "failed", f"{type(exc).__name__}: {str(exc)[:1500]}"
@@ -287,45 +294,13 @@ class Pipeline:
 
         dbt_results: list[dict[str, Any]] = []
         if plan is None:
-            for key in ("generate_dbt_model", "dbt_compile", "dbt_test", "dbt_run", "register_dataset"):
-                steps.skip(key, "no transformation is needed")
+            self._no_transformation(steps)
         else:
-            with steps.step("generate_dbt_model") as step:
-                generated = tools.generate_dbt_model(ctx, plan=plan)
-                project = tools.project(ctx)
-                step.summary = {"model": plan.name, "files": generated["files"],
-                                "branch": project["dbt"]["branch"], "commit": generated["commit"],
-                                "target_schema": tools.dbt_dev_schema}
-            with steps.step("dbt_compile") as step:
-                outcome = tools.compile_dbt(ctx, select=plan.name)
-                step.summary = _dbt_ok(outcome, "dbt compile")
-            with steps.step("dbt_test") as step:
-                # what the model is built FROM is tested before it is built
-                outcome = tools.run_dbt_test(ctx, select=f"1+{plan.name}", exclude=plan.name)
-                dbt_results.append({"stage": "upstream tests", **outcome})
-                step.summary = _dbt_ok(outcome, "the tests of the model's sources")
-            with steps.step("dbt_run") as step:
-                outcome = tools.run_dbt_model(ctx, select=plan.name)
-                dbt_results.append({"stage": "run", **outcome})
-                built = _dbt_ok(outcome, "dbt run")
-                outcome = tools.run_dbt_test(ctx, select=plan.name)
-                dbt_results.append({"stage": "model tests", **outcome})
-                step.summary = {"run": built, "tests": _dbt_ok(outcome, "the generated model's own tests")}
-            with steps.step("register_dataset") as step:
-                node = self.store.lineage_for(plan.name) or {}
-                dataset = tools.dbt_agent.dataset_for(plan, project_id, tools.dbt_dev_schema, node.get("columns") or None)
-                path = registry.register_generated(dataset)
-                rows = tools.execute_readonly_sql(ctx, sql=tools.sql.row_count(dataset),
-                                                  purpose=f"inspect the built {dataset.id}").scalar()
-                candidates.append(Candidate(dataset, 0.0, ["generated for this project"]))
-                added = [c for j in plan.joins for c in j.add_columns]
-                for draft, gap in closable:
-                    draft.dataset = dataset.id
-                    draft.dimension = gap.need.column or dataset.columns_with_role(gap.need.role)[0]
-                step.summary = {"dataset": dataset.id, "certified": False, "relation": dataset.relation,
-                                "rows": rows, "added_columns": added, "registered_in": path.name,
-                                "lineage": [p["name"] for p in node.get("depends_on", [])],
-                                "tests": node.get("tests", [])}
+            dataset = self._transform(ctx, steps, plan, project_id, dbt_results)
+            candidates.append(Candidate(dataset, 0.0, ["generated for this project"]))
+            for draft, gap in closable:
+                draft.dataset = dataset.id
+                draft.dimension = gap.need.column or dataset.columns_with_role(gap.need.role)[0]
 
         with steps.step("generate_specification") as step:
             spec, spec_notes = tools.dashboards.specify(project_id, requirement, template, drafts,
@@ -336,6 +311,97 @@ class Pipeline:
                                    f"{len(spec.components)} components on template {template.id}"
                                    + (f", and the dbt model {plan.name}" if plan else ""))
 
+        self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
+                    template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
+
+    # ── a specification a person composed ───────────────────────────────────────────────────────────────────
+    def _run_composed(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates,
+                      project_id: str, spec: DashboardSpec) -> None:
+        """BI Studio's « Build »: there is no sentence to read and nothing to discover — a person chose —
+        so steps 2 to 5 have nothing to do. From step 12 on it is the same road, checks and gates included."""
+        tools, registry, identity = self.tools, self.registry, ctx.identity
+        with steps.step("parse_requirement") as step:
+            project = self.store.get_project(project_id)
+            if project is None or project["tenant"] != identity.tenant:
+                raise PolicyError(f"{identity.user} has no access to BI project {project_id}", "tenant")
+            run.project_id = ctx.project_id = project_id
+            template = registry.template(spec.dashboard.template)
+            latest = self.store.latest_version(project_id)
+            if latest and latest.status in HELD:
+                raise PipelineError(f"BI project {project_id} v{latest.version} is {latest.status}. This kit has ONE "
+                                    "BI engine, so building it again would rewrite the promoted dashboard in place.")
+            project.update(template=template.id, spec_valid=False)
+            tools.save_project(project)
+            gates.open(project_id)
+            requirement = Requirement(prompt=run.prompt, subject=project.get("title") or spec.dashboard.title,
+                                      template=template.id, metrics=spec.metrics(), filters=spec.filters,
+                                      parser="BI Studio (composed by a person)")
+            step.summary = {"project_id": project_id, "template": template.id, "metrics": requirement.metrics,
+                            "read_by": requirement.parser, "reason": "composed in BI Studio: there is no sentence to read"}
+        for key in ("find_datasets", "find_metrics", "identify_missing_data", "determine_transformations"):
+            steps.skip(key, "the specification was composed in BI Studio")
+        metrics = [registry.metrics[m] for m in spec.metrics() if m in registry.metrics]
+        dbt_results: list[dict[str, Any]] = []
+        mine = [d for d in spec.datasets() if d in registry.datasets and registry.datasets[d].project == project_id]
+        if mine and project.get("model_plan"):
+            # a dataset this project generated earlier is rebuilt, so that what is validated is today's data
+            self._transform(ctx, steps, ModelPlan(**project["model_plan"]), project_id, dbt_results)
+        else:
+            self._no_transformation(steps)
+        with steps.step("generate_specification") as step:
+            spec.dashboard.version = self.lifecycle.next_version(project_id)
+            step.summary = {"specification": spec.model_dump(exclude_none=True), "composed_by": identity.user}
+        self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
+                    template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
+
+    # ── steps 6 to 10 ───────────────────────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _no_transformation(steps: _Steps) -> None:
+        for key in ("generate_dbt_model", "dbt_compile", "dbt_test", "dbt_run", "register_dataset"):
+            steps.skip(key, "no transformation is needed")
+
+    def _transform(self, ctx: ToolContext, steps: _Steps, plan: ModelPlan, project_id: str,
+                   dbt_results: list[dict[str, Any]]) -> DatasetDef:
+        tools, registry = self.tools, self.registry
+        with steps.step("generate_dbt_model") as step:
+            generated = tools.generate_dbt_model(ctx, plan=plan)
+            project = tools.project(ctx)
+            step.summary = {"model": plan.name, "files": generated["files"],
+                            "branch": project["dbt"]["branch"], "commit": generated["commit"],
+                            "target_schema": tools.dbt_dev_schema}
+        with steps.step("dbt_compile") as step:
+            outcome = tools.compile_dbt(ctx, select=plan.name)
+            step.summary = _dbt_ok(outcome, "dbt compile")
+        with steps.step("dbt_test") as step:
+            # what the model is built FROM is tested before it is built
+            outcome = tools.run_dbt_test(ctx, select=f"1+{plan.name}", exclude=plan.name)
+            dbt_results.append({"stage": "upstream tests", **outcome})
+            step.summary = _dbt_ok(outcome, "the tests of the model's sources")
+        with steps.step("dbt_run") as step:
+            outcome = tools.run_dbt_model(ctx, select=plan.name)
+            dbt_results.append({"stage": "run", **outcome})
+            built = _dbt_ok(outcome, "dbt run")
+            outcome = tools.run_dbt_test(ctx, select=plan.name)
+            dbt_results.append({"stage": "model tests", **outcome})
+            step.summary = {"run": built, "tests": _dbt_ok(outcome, "the generated model's own tests")}
+        with steps.step("register_dataset") as step:
+            node = self.store.lineage_for(plan.name) or {}
+            dataset = tools.dbt_agent.dataset_for(plan, project_id, tools.dbt_dev_schema, node.get("columns") or None)
+            path = registry.register_generated(dataset)
+            rows = tools.execute_readonly_sql(ctx, sql=tools.sql.row_count(dataset),
+                                              purpose=f"inspect the built {dataset.id}").scalar()
+            step.summary = {"dataset": dataset.id, "certified": False, "relation": dataset.relation,
+                            "rows": rows, "added_columns": [c for j in plan.joins for c in j.add_columns],
+                            "registered_in": path.name,
+                            "lineage": [p["name"] for p in node.get("depends_on", [])],
+                            "tests": node.get("tests", [])}
+        return dataset
+
+    # ── steps 12 to 22: the same for a specification the engine wrote and for one a person composed ─────────
+    def _build(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates, *,
+               project_id: str, requirement: Requirement, template: Any, metrics: list[Any], spec: DashboardSpec,
+               dbt_results: list[dict[str, Any]]) -> None:
+        tools, registry, identity = self.tools, self.registry, ctx.identity
         gates.move("VALIDATING", "the specification, then the dashboard built from it")
         with steps.step("validate_specification") as step:
             verdict = tools.save_dashboard_spec(ctx, spec=spec)
@@ -432,6 +498,10 @@ class Pipeline:
             step.summary = {"project_id": project_id, "version": record.version, "status": record.status,
                             "environment": record.state, "dashboard": record.dashboard.get("url"),
                             "package": package.get("exported_to") or package["file"], "sha256": package["sha256"]}
+            # what was being composed in BI Studio is now this version: there is no draft apart from it
+            project = self.store.get_project(project_id)
+            if project.pop("draft", None) is not None:
+                tools.save_project(project)
 
     def _resolve(self, draft: Draft, candidates: list[Candidate], gaps: list[tuple[Draft, Gap]]) -> bool:
         """Give the draft its dataset, or record what is missing. False when the metric is valid nowhere."""

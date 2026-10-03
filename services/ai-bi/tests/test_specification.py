@@ -156,13 +156,19 @@ def _charts(spec):
 def test_the_layout_is_the_templates_and_empty_slots_give_their_room_away(with_generated, dashboards, semantic, policy, requirement):
     spec, *_ , template, _, _ = _specified(with_generated, dashboards, semantic, policy, requirement)
     position = dashboards.layout(spec, template, _charts(spec))
-    assert position["GRID_ID"]["children"] == ["ROW-kpis", "ROW-trend", "ROW-breakdown"]
+    # each section the specification names is announced by a header above its first row
+    assert position["GRID_ID"]["children"] == ["HEADER-headline", "ROW-kpis", "HEADER-evolution", "ROW-trend",
+                                               "HEADER-breakdown", "ROW-breakdown"]
+    assert position["HEADER-headline"]["meta"]["text"] == "Executive KPIs"
+    # a specification that names no section is rows only — as every dashboard was before sections
+    plain = spec.model_copy(update={"sections": []})
+    assert dashboards.layout(plain, template, _charts(spec))["GRID_ID"]["children"] == ["ROW-kpis", "ROW-trend", "ROW-breakdown"]
     kpis = [position[c]["meta"] for c in position["ROW-kpis"]["children"]]
     assert [k["width"] for k in kpis] == [4, 4, 4]                # three KPIs in a row of four slots of three
     assert {k["height"] for k in kpis} == {16}
     assert [position[c]["meta"]["width"] for c in position["ROW-trend"]["children"]] == [8, 4]
     assert all(sum(position[c]["meta"]["width"] for c in position[row]["children"]) == 12
-               for row in position["GRID_ID"]["children"])
+               for row in position["GRID_ID"]["children"] if row.startswith("ROW-"))
 
 
 def test_filters_are_scoped_to_the_charts_that_have_the_column(with_generated, dashboards, semantic, policy, requirement):

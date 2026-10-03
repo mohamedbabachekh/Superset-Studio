@@ -1,0 +1,20 @@
+# The asset library's folders: LOGICAL domains — what the business calls a subject — not database schemas.
+# A dataset or a metric is filed under one domain at most. One that is filed nowhere follows what it is built
+# on: a generated dataset goes where its base is, a metric where its dataset is.
+domains:
+  qoe:
+    name: Quality of Experience
+    description: How the network is experienced, day by day — scores, and who is degraded.
+    owner: CEM
+    datasets: [cem.qoe_daily, cem.qoe_site_daily]
+    metrics: [cem.qoe_score, cem.degraded_users, cem.degraded_rate]
+  audience:
+    name: Audience
+    description: How many people are on the network.
+    owner: CEM
+    metrics: [cem.active_users]
+  geography:
+    name: Geography
+    description: Regions and their codes — what a map is drawn by.
+    owner: CEM
+    datasets: [cem.region]
