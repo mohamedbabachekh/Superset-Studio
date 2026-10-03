@@ -1,0 +1,9 @@
+# EVERY TEXT FILE IS LF, EVERYWHERE. This kit is built on Windows and runs on Linux: a CRLF install.sh does not
+# execute there at all ("bash\r: command not found"), and a CRLF Dockerfile or .sql fails in subtler ways. The
+# SharpSight repository carries the same rule, and a release was once broken for want of it.
+* text=auto eol=lf
+
+# Binaries, untouched.
+*.png binary
+*.jar binary
+*.tar.gz binary
