@@ -18,7 +18,7 @@ The SharpSight AI BI service: a request in, a governed, validated, versioned das
 | `aibi/lifecycle.py` · `aibi/git_adapter.py` | versions, the `.ssbi` package, the gates from review to PROD, restore |
 | `aibi/compatibility.py` | the compatibility matrix, beside what is actually running |
 | `aibi/assets.py` · `aibi/library.py` | the asset library: one catalogue over everything, where each asset is used and what a change would touch; the shared charts and sections |
-| `aibi/studio/` | BI Studio: three static files the service serves at `/studio/` — the frame, the dashboard builder, the other screens |
+| `aibi/studio/` | BI Studio: static files the service serves at `/studio/` — a frame around Superset (the live dashboard, Explore, SQL Lab) and around dbt's own documentation, with SharpSight's library, structure, governance and gates beside them |
 | `aibi/audit.py` · `aibi/store.py` | the audit trail; SharpSight's own memory of projects |
 | `sql/bootstrap.sql` | the warehouse roles, schemas and the landed extract |
 | `tests/` | the rules, held to account without a database (`bash ai-bi.sh test`) |

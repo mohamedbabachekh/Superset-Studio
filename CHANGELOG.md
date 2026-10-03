@@ -42,10 +42,16 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
   filed under logical domains, with favourites and search; charts and sections **shared** — defined once,
   referenced by the dashboards that use them, not changed without their impact having been seen; dashboards as
   compositions of **sections**, each with a title on the Superset dashboard, an owner, filters of its own, and
-  the option to hide it; an outline; chart templates; a contextual inspector; Design, Data and Governance
-  modes; and the navigation's twenty-one other screens over what the engine already knew. A person composes a
-  specification on a template's slots, saves it as a draft beside what was built, and builds it through the
-  same steps and gates as a generated one. Superset's editor is not rebuilt. `ai-bi.sh studio` says where it is.
+  the option to hide it; an outline; chart templates; a contextual inspector; Dashboard, Data and Governance
+  modes; and the navigation's other screens over what the engine already knew. A person composes a
+  specification on a template's slots and builds it through the same steps and gates as a generated one.
+  `ai-bi.sh studio` says where it is.
+- **The Studio wraps Superset and dbt instead of standing beside them.** The middle of the builder is Superset
+  itself, framed: the live dashboard, and Superset's Explore to edit a chart. A change is applied to Superset
+  as soon as it is valid; what a person saves in Explore is read back into the specification — or refused,
+  saying why (an ad-hoc metric, an unapproved visualization) — and a build validates what Superset shows.
+  dbt's own documentation site is published by the production build and framed under SharpSight's table of
+  models and tests; Superset's SQL Lab is framed in the Data Lab.
 - **Which language model drives it is left open.** The planner is deterministic today; `aibi/llm.py` is the seam.
 - Verified on a running kit, from an erased engine: the request (four times), fifteen review cases, a forced
   failure that wrote no version and put the reviewed dashboard back, the fix loop once under a stricter policy.

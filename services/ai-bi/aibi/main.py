@@ -792,60 +792,165 @@ def builder_project(project_id: str, identity: Identity = Depends(reader)) -> An
                                          else f"{identity.user} may read this project, not change it"),
             "draft": {"saved_by": draft.get("saved_by"), "saved_at": draft.get("saved_at")} if draft else None,
             "dashboard_url": (body.get("engine") or {}).get("dashboard", {}).get("url"),
+            # where it is in Superset — what the Studio frames: the dashboard, and each slot's chart
+            "superset": ({"dashboard_id": body["engine"]["dashboard"]["id"],
+                          "charts": {slot: {"id": c["id"], "name": c.get("name")}
+                                     for slot, c in service.tools.live_charts(body["engine"]).items()}}
+                         if (body.get("engine") or {}).get("dashboard") else None),
+            # False while the working specification is not valid yet, and so not in Superset
+            "applied": draft is None and bool(body.get("spec")) and bool((body.get("engine") or {}).get("dashboard")),
             "last_attempt": {k: attempt.get(k) for k in ("run_id", "status", "version", "error")} if attempt else None,
             **_inspect(_read_spec(document), identity, project_id)}
 
 
-@app.put("/builder/projects/{project_id}/draft")
-def builder_save_draft(project_id: str, body: Working, identity: Identity = Depends(caller)) -> Any:
-    """Keep the working specification. It is a DRAFT beside what was built: nothing in the BI engine changes,
-    and what a reviewer is looking at stays what was validated."""
+def _changeable(project_id: str, identity: Identity) -> dict[str, Any]:
     service.policy.require(identity, "bi.generate")
     project = _project(project_id, identity)
     locked = _editable(project_id)
     if locked:
         raise LifecycleError(f"{project_id} cannot be changed: {locked}")
+    return project
+
+
+def _engine_free() -> None:
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is running on this BI engine; try again after it")
+
+
+@app.post("/builder/projects/{project_id}/apply")
+def builder_apply(project_id: str, body: Working, identity: Identity = Depends(caller)) -> Any:
+    """The working specification, made real in Superset's DEV dashboard — so that what the Studio shows IS
+    Superset. A specification that is not valid yet (a mandatory slot still empty) is kept as a draft, and
+    nothing is sent to Superset until it is. No version is written: that is what a build is for."""
+    project = _changeable(project_id, identity)
     spec = _read_spec(body.spec)
     found = _inspect(spec, identity, project_id)
-    project["draft"] = {"spec": found["spec"], "saved_by": identity.user, "saved_at": utcnow()}
-    service.tools.save_project(project)
-    service.audit.record(action="studio:draft", user=identity.user, request_id=str(uuid.uuid4()), actor="human",
+    ctx = _context(identity, project_id)
+    applied = found["validation"]["passed"]
+    if not applied:
+        project["draft"] = {"spec": found["spec"], "saved_by": identity.user, "saved_at": utcnow()}
+        service.tools.save_project(project)
+    else:
+        _engine_free()
+        try:
+            service.tools.save_dashboard_spec(ctx, spec=_read_spec(found["spec"]))
+            service.tools.apply_specification(ctx)
+        finally:
+            service.busy.release()
+        project = service.store.get_project(project_id)
+        if project.pop("draft", None) is not None:
+            service.tools.save_project(project)
+    service.audit.record(action="studio:apply", user=identity.user, request_id=ctx.request_id, actor="human",
                          project_id=project_id, datasets=spec.datasets(), metrics=spec.metrics(),
                          validation=found["validation"],
-                         detail={"components": len(spec.components),
+                         detail={"applied_to_the_bi_engine": applied, "components": len(spec.components),
                                  "sections": [s.id for s in spec.sections if s.visibility == "visible"],
                                  "shared_charts": sorted({c.asset for c in spec.components if c.asset})})
     return builder_project(project_id, identity)
 
 
-@app.delete("/builder/projects/{project_id}/draft")
-def builder_drop_draft(project_id: str, identity: Identity = Depends(caller)) -> Any:
-    service.policy.require(identity, "bi.generate")
-    project = _project(project_id, identity)
-    if not project.get("spec"):
-        raise LifecycleError(f"{project_id} is only a draft so far: discard the project instead")
-    project.pop("draft", None)
-    service.tools.save_project(project)
+@app.get("/builder/projects/{project_id}/superset")
+def builder_superset(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """What Superset holds, against what SharpSight specified: each chart a person edited in Superset's own
+    editor, and whether the dashboard is still the version that was validated."""
+    body = _project(project_id, identity)
+    engine = body.get("engine") or {}
+    latest = service.store.latest_version(project_id)
+    if not engine.get("dashboard") or not body.get("spec") or not body.get("spec_valid"):
+        return {"charts": [], "in_step": True, "version": None}
+    held = latest is not None and latest.status in HELD
+    charts = [] if held else service.tools.superset_changes(body)
+    return {"charts": [c for c in charts if not c["in_step"]], "in_step": all(c["in_step"] for c in charts),
+            "version": ({"version": latest.version, "status": latest.status, "differs": service.lifecycle.drift(latest)}
+                        if latest else None)}
+
+
+@app.post("/builder/projects/{project_id}/adopt")
+def builder_adopt(project_id: str, identity: Identity = Depends(caller)) -> Any:
+    """Take into the specification what a person changed in Superset's Explore — the part that can be said
+    in governed terms. A chart that cannot be (an ad-hoc metric, an unapproved visualization) is left as
+    specified and named in the answer. The specification is then applied again, so that Superset holds the
+    governed form of what was taken."""
+    project = _changeable(project_id, identity)
+    if not project.get("spec_valid"):
+        raise LifecycleError(f"{project_id} has nothing in Superset to take changes from yet")
+    ctx = _context(identity, project_id)
+    changes = service.tools.superset_changes(project)
+    taken = [c for c in changes if c["changed"] and not c["refused"]]
+    if not taken:
+        raise LifecycleError("there is nothing to take: no chart was changed in Superset in a way a specification "
+                             "can carry" + ("; " + "; ".join(f"{c['slot']}: {', '.join(c['refused'])}" for c in changes
+                                                             if c["refused"]) if any(c["refused"] for c in changes) else ""))
+    spec = _read_spec(project["spec"])
+    for change in taken:
+        spec.components = [c if c.slot != change["slot"] else type(c)(**change["adopted"]) for c in spec.components]
+    found = _inspect(spec, identity, project_id)
+    if not found["validation"]["passed"]:
+        raise LifecycleError("what was made in Superset cannot be this dashboard's specification: " + "; ".join(
+            f"{c.name} ({c.subject}) {c.detail}".strip() for c in found["checks"] if c.status == "fail"))
+    _engine_free()
+    try:
+        service.tools.save_dashboard_spec(ctx, spec=_read_spec(found["spec"]))
+        service.tools.apply_specification(ctx)
+    finally:
+        service.busy.release()
+    service.audit.record(action="studio:adopt", user=identity.user, request_id=ctx.request_id, actor="human",
+                         project_id=project_id, metrics=spec.metrics(),
+                         detail={"taken": {c["slot"]: c["changed"] for c in taken},
+                                 "refused": {c["slot"]: c["refused"] for c in changes if c["refused"]},
+                                 "set_back": {c["slot"]: c["not_carried"] for c in changes if c["not_carried"]}})
+    return {**builder_project(project_id, identity), "taken": [c["slot"] for c in taken],
+            "refused": {c["slot"]: c["refused"] for c in changes if c["refused"]}}
+
+
+class PutBack(BaseModel):
+    to: Literal["specification", "version"] = "specification"
+
+
+@app.post("/builder/projects/{project_id}/put-back")
+def builder_put_back(project_id: str, body: PutBack, identity: Identity = Depends(caller)) -> Any:
+    """Make Superset hold again what SharpSight says: the working specification (undoing what was edited by
+    hand in Superset), or the latest version (discarding what was composed since it was built)."""
+    project = _changeable(project_id, identity)
+    ctx = _context(identity, project_id)
+    latest = service.store.latest_version(project_id)
+    if body.to == "version" and latest is None:
+        raise LifecycleError(f"{project_id} has no version to go back to")
+    if body.to == "specification" and not project.get("spec_valid"):
+        raise LifecycleError(f"{project_id} has no valid specification in Superset yet")
+    _engine_free()
+    try:
+        if body.to == "version":
+            verdict = service.tools.save_dashboard_spec(ctx, spec=service.lifecycle.specification_at(project_id, latest.version))
+            if not verdict.passed:
+                raise LifecycleError("that version's specification is no longer valid: "
+                                     + "; ".join(f"{c.name} {c.detail}" for c in verdict.failures))
+        service.tools.apply_specification(ctx)
+    finally:
+        service.busy.release()
+    project = service.store.get_project(project_id)
+    if body.to == "version" and project.pop("draft", None) is not None:
+        service.tools.save_project(project)
+    service.audit.record(action="restore", user=identity.user, request_id=ctx.request_id, actor="human",
+                         project_id=project_id,
+                         detail={"put_back_to": body.to, "version": latest.version if latest and body.to == "version" else None,
+                                 "reason": "asked for in BI Studio"})
     return builder_project(project_id, identity)
 
 
 @app.post("/builder/projects/{project_id}/build")
 def builder_build(project_id: str, response: Response, identity: Identity = Depends(caller)) -> Any:
-    """Build the draft: the specification a person composed goes through validation, the BI engine, visual QA,
-    a version, a commit and a package — the same steps and gates as one the engine wrote."""
-    service.policy.require(identity, "bi.generate")
-    project = _project(project_id, identity)
-    locked = _editable(project_id)
-    if locked:
-        raise LifecycleError(f"{project_id} cannot be built: {locked}")
-    document = (project.get("draft") or {}).get("spec")
+    """Build what was composed: the working specification goes through validation, the BI engine, visual QA, a
+    version, a commit and a package — the same steps and gates as one the engine wrote."""
+    project = _changeable(project_id, identity)
+    document = (project.get("draft") or {}).get("spec") or project.get("spec")
     if not document:
-        raise LifecycleError(f"{project_id} has no draft to build: what was built is what is there")
+        raise LifecycleError(f"{project_id} has nothing to build yet")
     spec = _read_spec(document)
     if not service.busy.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
     run = RunRecord(id=uuid.uuid4().hex[:12], request_id=str(uuid.uuid4()), user=identity.user,
-                    prompt=f"Build of the BI Studio draft of {project_id}: {spec.dashboard.title}",
+                    prompt=f"Build of what was composed in BI Studio for {project_id}: {spec.dashboard.title}",
                     ai_model=service.parser.name, steps=new_steps(), project_id=project_id)
     service.store.save_run(run)
 
@@ -882,6 +987,44 @@ def project_definition(project_id: str, identity: Identity = Depends(reader)) ->
     return service.catalog.definition(project_id, identity, service.tools.dashboards.sections(spec, template),
                                       spec, template)
 
+
+@app.get("/dbt/models")
+def dbt_models(identity: Identity = Depends(reader)) -> Any:
+    """What dbt knows, as SharpSight keeps it: every model of the governed project (the production build) and
+    every model the engine generated on a branch of its own — its layer, where it is built, its tests and how
+    each ended, what it is built from, and which governed dataset it is the source of."""
+    feeds = {d.source_model: d for d in service.registry.datasets.values()}
+    models = []
+    for node in service.store.list_lineage():
+        if node.get("resource_type") not in ("model", "seed"):
+            continue
+        dataset = feeds.get(node["name"])
+        if dataset is not None and not service.policy.can_read(identity, dataset):
+            dataset = None
+        path = node.get("path") or ""
+        tests = node.get("tests", [])
+        layer = ("generated" if "ai_generated" in node.get("tags", []) else
+                 "seed" if node["resource_type"] == "seed" else
+                 next((part for part in ("staging", "intermediate", "marts") if part in path), "model"))
+        models.append({
+            "name": node["name"], "kind": node["resource_type"], "environment": node["environment"], "layer": layer,
+            "path": path, "materialized": node.get("materialized"), "relation": node.get("relation"),
+            "status": node.get("status"), "columns": len(node.get("columns") or {}),
+            "built_from": [p["name"] for p in node.get("depends_on", [])],
+            "tests": {"total": len(tests), "passed": sum(1 for t in tests if t.get("status") == "pass"),
+                      "failed": [t["name"] for t in tests if t.get("status") in ("fail", "error")],
+                      "not_run": sum(1 for t in tests if t.get("status") in (None, "not run"))},
+            "dataset": ({"id": dataset.id, "name": dataset.name, "certified": dataset.certified,
+                         "project": dataset.project} if dataset else None)})
+    return {"models": models,
+            "docs": "/dbt-docs/" if (service.settings.dbt_prod_state_dir / "index.html").exists() else None,
+            "semantic_layer": service.dbt_semantic_layer,
+            "governed_commit": service.git.dbt.git("rev-parse", "main", check=False)[:12]}
+
+
+# dbt's own documentation site, as the production build published it: served as it is, framed by BI Studio.
+if get_settings().dbt_prod_state_dir.is_dir():
+    app.mount("/dbt-docs", StaticFiles(directory=get_settings().dbt_prod_state_dir, html=True), name="dbt-docs")
 
 # The Studio's page: three static files, served by this service — no build step, no script from anywhere else.
 # Mounted LAST, so that no route above can be shadowed by a file.

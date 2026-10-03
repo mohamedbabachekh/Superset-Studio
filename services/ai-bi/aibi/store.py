@@ -127,6 +127,11 @@ class Store:
                            (node["environment"], node["unique_id"], node["name"],
                             json.dumps(node, ensure_ascii=False)))
 
+    def list_lineage(self) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute("select body from lineage order by environment desc, name").fetchall()
+        return [json.loads(r["body"]) for r in rows]
+
     def lineage_for(self, model_name: str) -> Optional[dict[str, Any]]:
         """A model's own record: the production build's when it knows the model, the workspace's otherwise."""
         with self._connect() as db:

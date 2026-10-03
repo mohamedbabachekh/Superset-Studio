@@ -127,7 +127,7 @@ const Studio = (() => {
   // ── navigation ─────────────────────────────────────────────────────────────────────────────────────────
   const NAV = [
     ['', [['home', 'Home']]],
-    ['DEVELOP', [['projects', 'Projects'], ['dashboards', 'Dashboards'], ['data', 'Data Assets'], ['metrics', 'Metrics'],
+    ['DEVELOP', [['projects', 'Projects'], ['dashboards', 'Dashboards'], ['data', 'Data Assets'], ['models', 'Data Models (dbt)'], ['metrics', 'Metrics'],
                  ['templates', 'Templates'], ['datalab', 'SQL / Data Lab']]],
     ['GOVERN', [['tests', 'Tests'], ['certification', 'Certification'], ['review', 'Code Review'],
                 ['impact', 'Impact Analysis'], ['catalog', 'Data Catalog']]],
@@ -231,6 +231,12 @@ const Studio = (() => {
   /* After an action that took a while: draw the screen again ONLY if the person is still on it. An approval
      takes seconds; by the time it answers they may be composing a dashboard, and that must not be reloaded. */
   function refresh(from) { if (location.hash === from) render(); }
+  /* Superset, on the host the Studio was opened on: its session cookie is then sent to a frame that shows it. */
+  function supersetUrl(path) {
+    const base = new URL(S.config.bi_engine_url);
+    base.hostname = location.hostname;
+    return base.origin + path;
+  }
   function page(title, lead, ...content) {
     return h('div', { class: 'page' }, h('h1', { text: title }), lead ? h('p', { class: 'lead', text: lead }) : null, ...content);
   }
@@ -241,6 +247,6 @@ const Studio = (() => {
     render();
   }
 
-  return { S, h, enc, clone, fmt, api, blob, download, toast, badge, dot, table, field, select, dialog, impactBox, go, render, refresh, page, start,
+  return { S, h, enc, clone, fmt, api, blob, download, toast, badge, dot, table, field, select, dialog, impactBox, go, render, refresh, supersetUrl, page, start,
            can: (capability) => S.me.capabilities.includes(capability), views: {} };
 })();

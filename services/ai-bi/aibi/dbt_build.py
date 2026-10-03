@@ -17,7 +17,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ARTIFACTS = ("manifest.json", "catalog.json", "semantic_manifest.json")
+# index.html is dbt's OWN documentation site (models, columns, tests, the lineage graph): one file, which reads
+# manifest.json and catalog.json from beside it. The AI BI service serves it as it is, and BI Studio frames it.
+ARTIFACTS = ("manifest.json", "catalog.json", "semantic_manifest.json", "index.html")
 
 
 def main() -> int:

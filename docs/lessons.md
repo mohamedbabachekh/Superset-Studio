@@ -374,3 +374,30 @@ label, value` with plain text collapsed into a single cell. → every cell is an
 **A filter can be scoped to part of a dashboard**: a native filter's `scope.excluded` and `chartsInScope`. That
 is what a section's own filter is; Superset names it in the filter bar like any other, so the section's title
 goes into the filter's name.
+
+**Superset can be framed by another page of the same host as it is configured here** — no `X-Frame-Options`,
+and its session cookie (SameSite=Lax) is sent because `127.0.0.1:3003` and `127.0.0.1:3002` are the same
+*site*: the port does not count. A Studio opened as `localhost:3003` framing Superset at `127.0.0.1:3002`
+would be two sites, and by that same rule the cookie would not go to the frame (reasoned, not tried here).
+→ the Studio builds Superset's address on the host it was itself opened on.
+
+**A frame cannot be moved, only kept.** Re-attaching an `<iframe>` reloads it. A page that redraws itself by
+replacing its content reloads Superset at every click. → the builder has fixed regions, each redrawn on its
+own, and the frame is created once.
+
+**A frame of another origin takes no drop and tells nothing of a click.** So the place where a slot is picked
+and an asset is dropped cannot be Superset's picture of the dashboard: it is the structure tree beside it.
+
+**A live dashboard is never « network idle ».** A test that waits for the network to go quiet waits for ever
+once Superset is in the page. → wait for what was asked — the Studio's own « updating » mark to go.
+
+**`dbt docs generate` writes a whole site, in one file.** `target/index.html` reads `manifest.json` and
+`catalog.json` from beside it: published with them, it is dbt's own documentation and lineage graph, with
+nothing to build. Its `<body>` has no height of its own (the page is laid out absolutely), which a test reads
+as « hidden »; and it asks for two images named `{{ getIcon(…) }}` before its templates are filled — two 404s
+that are dbt's, not the kit's.
+
+**Reading a chart back needs the same vocabulary in both directions.** A chart's settings are built from a
+specification's component; a chart edited in Explore is read back into one. Where the two do not meet — a
+title compared as a field rather than as what people read — an untouched chart reads as changed. The test
+that holds it: every kind of chart, built and read back, is itself.

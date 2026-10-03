@@ -384,3 +384,92 @@ def test_the_engine_has_the_same_library_a_person_has(studio, tmp_path):
     with pytest.raises(AssetError):
         tools.get_asset_usage(guest, kind="chart", asset_id="qoe-by-region")
     assert [r["action"] for r in tools.audit.read()][-3:] == ["tool:search_assets", "tool:get_asset_usage", "tool:get_asset_usage"]
+
+
+# ── a chart edited in the engine's own editor, read back ────────────────────────────────────────────────────
+def _as_superset_holds(registry, component, **edited):
+    """The chart as the engine stores it for this component — then as a person left it in Explore."""
+    import json
+
+    from aibi.chart_agent import ChartAgent
+    from aibi.models import ComponentSpec
+
+    agent, template = ChartAgent(registry), registry.template("executive")
+    spec = ComponentSpec(**component)
+    payload = agent.payload(spec, registry.dataset(spec.dataset), registry.metric(spec.metric), 5, 9, template,
+                            "inwi", "superset_seq_1", "p")
+    name = edited.pop("slice_name", payload["slice_name"])
+    return agent, spec, {"params": json.dumps({**json.loads(payload["params"]), **edited}), "slice_name": name}
+
+
+def test_a_chart_nobody_touched_reads_back_as_itself(registry):
+    for component in (KPI, TREND, BAR, {"slot": "distribution_1", "type": "histogram", "metric": "cem.qoe_score", "dataset": "cem.qoe_daily"},
+                      {"slot": "distribution_1", "type": "pie", "metric": "cem.active_users", "dimension": "rat", "dataset": "cem.qoe_daily"},
+                      {**BAR, "title": "QoE Score by region", "asset": "qoe-by-region"}):          # a shared chart: its name is its title
+        agent, spec, chart = _as_superset_holds(registry, component)
+        read = agent.read_back(spec, chart, registry.template("executive").slots[spec.slot].purpose, {5: "cem.qoe_daily"})
+        assert (read["changed"], read["refused"]) == ({}, []), (component["slot"], read)
+        assert read["component"] == spec
+
+
+def test_what_was_changed_in_explore_is_said_in_the_specifications_words(registry):
+    agent, spec, chart = _as_superset_holds(registry, {**BAR, "asset": "qoe-by-region", "title": "QoE Score by region"},
+                                            row_limit=5, order_desc=False, slice_name="Bottom 5 regions")
+    read = agent.read_back(spec, chart, "ranking", {5: "cem.qoe_daily"})
+    assert read["changed"] == {"row_limit": {"specification": None, "superset": 5}, "sort": {"specification": None, "superset": "asc"},
+                               "title": {"specification": "QoE Score by region", "superset": "Bottom 5 regions"}}
+    adopted = read["component"]
+    assert (adopted.options.row_limit, adopted.options.sort, adopted.title) == (5, "asc", "Bottom 5 regions")
+    assert adopted.asset is None                       # changed: it is no longer the shared chart it referenced
+    agent, spec, chart = _as_superset_holds(registry, TREND, time_grain_sqla="P1W")
+    assert agent.read_back(spec, chart, "trend", {5: "cem.qoe_daily"})["changed"] == {"time_grain": {"specification": None, "superset": "P1W"}}
+    agent, spec, chart = _as_superset_holds(registry, KPI, metric="cem__active_users")
+    read = agent.read_back(spec, chart, "kpi", {5: "cem.qoe_daily"})
+    assert read["changed"]["metric"] == {"specification": "cem.qoe_score", "superset": "cem.active_users"} and "title" not in read["changed"]
+
+
+@pytest.mark.parametrize("component, edited, why", [
+    (KPI, {"metric": {"expressionType": "SQL", "sqlExpression": "MAX(qoe_score)", "label": "Best"}}, "an ad-hoc metric (« Best »)"),
+    (KPI, {"metric": "count"}, "metric « count » is not in the metric registry"),
+    (BAR, {"viz_type": "sankey_v2"}, "« sankey_v2 » is not an approved visualization"),
+    (BAR, {"metrics": ["cem__qoe_score", "cem__active_users"]}, "one metric per chart, and it has 2"),
+    (BAR, {"datasource": "77__table"}, "a dataset that is not one of this project's governed datasets"),
+    (BAR, {"row_limit": 5000}, "5000 rows: a chart shows at most 1000"),
+    (TREND, {"x_axis": "region"}, "a line is drawn over time (date), not over « region »"),
+    (TREND, {"time_grain_sqla": "PT1H"}, "time grain « PT1H »: day, week or month")])
+def test_what_cannot_be_said_in_governed_terms_is_refused_not_approximated(registry, component, edited, why):
+    agent, spec, chart = _as_superset_holds(registry, component, **edited)
+    read = agent.read_back(spec, chart, registry.template("executive").slots[spec.slot].purpose, {5: "cem.qoe_daily"})
+    assert read["component"] is None and why in "; ".join(read["refused"])
+
+
+def test_superset_is_compared_with_the_specification_chart_by_chart(studio, tmp_path):
+    import json
+
+    from aibi.tools import Toolbox
+
+    holds = {}
+
+    class _Engine:
+        def get_chart(self, chart_id):
+            return holds.get(chart_id)
+
+    tools = Toolbox(registry=studio.registry, policy=studio.policy, gateway=None, dbt=None, git=None, superset=_Engine(),
+                    store=studio.store, audit=AuditLog(tmp_path / "t"), visual=None, state_dir=tmp_path, bi_database_name="BI",
+                    bi_database_uri="", superset_public_url="", dbt_dev_schema="bi_dev")
+    spec = _spec(KPI, TREND, BAR)
+    for chart_id, component in zip((1, 2, 3), (KPI, TREND, BAR)):
+        _, _, holds[chart_id] = _as_superset_holds(studio.registry, component)
+    body = {"spec": spec.model_dump(), "engine": {"datasets": {"cem.qoe_daily": 5},
+                                                  "charts": {"kpi_1": {"id": 1}, "trend_1": {"id": 2}, "ranking_1": {"id": 3}}}}
+    assert all(c["in_step"] for c in tools.superset_changes(body))
+    form = json.loads(holds[3]["params"])
+    holds[3] = {"params": json.dumps({**form, "row_limit": 7, "color_scheme": "supersetColors", "show_legend": True}), "slice_name": holds[3]["slice_name"]}
+    del holds[2]                                                                 # deleted by hand in Superset
+    found = {c["slot"]: c for c in tools.superset_changes(body)}
+    assert found["kpi_1"]["in_step"]
+    assert found["trend_1"]["refused"] == ["the chart no longer exists in Superset"]
+    ranking = found["ranking_1"]
+    assert ranking["changed"] == {"row_limit": {"specification": None, "superset": 7}}
+    assert ranking["not_carried"] == ["color_scheme", "show_legend"]             # a specification has no place for them
+    assert ranking["adopted"]["options"]["row_limit"] == 7 and not ranking["in_step"]

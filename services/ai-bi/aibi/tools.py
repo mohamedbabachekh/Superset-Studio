@@ -737,6 +737,45 @@ class Toolbox:
         note.update(datasets=[d.id for d in datasets], metrics=[m.id for m in metrics], superset_assets=assets)
         return engine["access"]
 
+    # what a chart's settings depend on besides the specification: the data itself
+    _DATA_DEPENDENT = ("show_labels_threshold", "y_axis_format", "datasource")
+
+    def superset_changes(self, body: dict[str, Any]) -> list[dict[str, Any]]:
+        """Each chart of the project as Superset holds it NOW, against the specification — for the day a
+        person edits one in Superset's own Explore. Per slot: what changed in governed terms (and can be
+        taken into the specification), what cannot be a component at all (and why), and what Superset holds
+        that a specification has no place for (and a build would set back)."""
+        spec, engine = DashboardSpec(**body["spec"]), body["engine"]
+        template = self.registry.template(spec.dashboard.template)
+        by_engine_id = {engine_id: dataset_id for dataset_id, engine_id in engine.get("datasets", {}).items()}
+        found = []
+        for slot, chart in self.live_charts(engine).items():
+            component = spec.component(slot)
+            if component is None:
+                continue
+            live = self.superset.get_chart(chart["id"])
+            entry: dict[str, Any] = {"slot": slot, "chart_id": chart["id"], "changed": {}, "refused": [],
+                                     "not_carried": [], "adopted": None}
+            if live is None:
+                entry.update(title=chart.get("name"), refused=["the chart no longer exists in Superset"])
+            else:
+                read = self.charts.read_back(component, live, template.slots[slot].purpose, by_engine_id)
+                adopted = read["component"]
+                entry.update(title=live.get("slice_name"), changed=read["changed"], refused=read["refused"])
+                if adopted is not None:
+                    dataset, metric = self.registry.dataset(adopted.dataset), self.registry.metric(adopted.metric)
+                    expected = self.charts.form_data(
+                        adopted, dataset, metric, engine["datasets"][dataset.id], template,
+                        spec.theme.color_scheme or template.theme.color_scheme,
+                        spec.theme.sequential_scheme or template.theme.sequential_scheme)
+                    actual = json.loads(live.get("params") or "{}")
+                    entry["not_carried"] = sorted(k for k, v in expected.items() if not k.startswith("_")
+                                                  and k not in self._DATA_DEPENDENT and k in actual and actual[k] != v)
+                    entry["adopted"] = adopted.model_dump()
+            entry["in_step"] = not (entry["changed"] or entry["refused"] or entry["not_carried"])
+            found.append(entry)
+        return found
+
     def access_differences(self, body: dict[str, Any]) -> list[str]:
         """How the access set in the BI engine differs from what SharpSight grants. Empty when it does not."""
         spec, engine = DashboardSpec(**body["spec"]), body["engine"]
