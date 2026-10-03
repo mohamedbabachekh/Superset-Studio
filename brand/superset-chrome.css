@@ -1,0 +1,24 @@
+/* Chrome removed for EVERY role, administrators included — unlike reader-chrome.css, which is a matter of
+ * what a reader needs. This is a matter of what the server survives.
+ *
+ * « Export as Example » (Download ▸) OOM-KILLS THE SUPERSET WORKER. Measured 2026-09-13 on this dashboard:
+ * the request ran 113 s and returned 502, and the container logged
+ *
+ *     Worker (pid:5208) was sent SIGKILL! Perhaps out of memory?
+ *
+ * three times over as gunicorn rebooted the worker after each attempt. The entry is a Superset DEVELOPER
+ * feature: unlike « Export YAML », which exports the definition, the example export embeds sample DATA for
+ * every dataset the dashboard touches — seventeen of them, over sixty-one days of mart. Nothing on this
+ * platform consumes such a file, and the cost of the click is not paid by the person who makes it: the
+ * killed worker is the one serving everyone else's queries at that moment.
+ *
+ * Hiding the entry is the whole fix available here. The endpoint itself stays reachable to anyone who types
+ * the URL, and that is acceptable — it is an administrator-only permission (can_export on Dashboard, which
+ * sharpsight_roles.py refuses to every reader role) and the failure is a rebooted worker, not a data leak.
+ * Removing it properly would mean a fork, and ADR-018 keeps this deployment on configuration.
+ *
+ * Anchored on antd's data-menu-id, which ends with the menu key Superset assigns — never on the
+ * `superset-xxxxx` emotion class names, which every frontend build regenerates.
+ */
+li[data-menu-id$="export-as-example"],
+[role="menuitem"][data-menu-id$="export-as-example"] { display: none !important; }

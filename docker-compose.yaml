@@ -1,0 +1,183 @@
+# SharpSight Superset DEV KIT — a complete Superset workbench that shares NOTHING with the platform.
+#
+#   project name   sharpsight-superset-devkit   (its own containers, network and volumes)
+#   images         sharpsight-superset-devkit:*  — never the platform's sharpsight-superset:dev
+#   ports          only Superset, on 127.0.0.1:${DEVKIT_PORT:-3002}; the database and Redis are internal
+#
+# Start:   docker compose -p sharpsight-superset-devkit up -d
+# Stop:    docker compose -p sharpsight-superset-devkit down          (data kept — it is in named volumes)
+# Erase:   docker compose -p sharpsight-superset-devkit down -v       (deletes the dev kit's volumes ONLY)
+#
+# Running it beside the platform costs about 1.2 GB of memory. On a laptop that already runs SharpSight, stop
+# one or the other rather than both at once.
+
+name: sharpsight-superset-devkit
+
+x-devkit-env: &devkit-env
+  SUPERSET_SECRET_KEY: "${DEVKIT_SECRET_KEY:?set DEVKIT_SECRET_KEY in .env — openssl rand -base64 42}"
+  SUPERSET_META_URI: "postgresql+psycopg2://devkit:${DEVKIT_DB_PASSWORD:?set DEVKIT_DB_PASSWORD in .env}@devkit-db:5432/superset"
+  SUPERSET_REDIS_URL: "redis://devkit-redis:6379/0"
+  PYTHONPATH: "/app/pythonpath"
+  # where cem_to_mart.py lands its extracts, and the connection you then add in Superset
+  DEVKIT_MART_DSN: "host=devkit-db port=5432 dbname=devkit user=devkit password=${DEVKIT_DB_PASSWORD}"
+  CEM_JDBC_URL: "${CEM_JDBC_URL:-}"
+  CEM_JDBC_DRIVER: "${CEM_JDBC_DRIVER:-}"
+  CEM_JDBC_JARS: "${CEM_JDBC_JARS:-}"
+  DEVKIT_LOCALE: "${DEVKIT_LOCALE:-fr}"
+  DEVKIT_DARK: "${DEVKIT_DARK:-0}"
+  DEVKIT_APP_NAME: "${DEVKIT_APP_NAME:-SharpSight Superset — atelier}"
+  DEVKIT_BEHIND_PROXY: "${DEVKIT_BEHIND_PROXY:-false}"
+  DEVKIT_COOKIE_SECURE: "${DEVKIT_COOKIE_SECURE:-false}"
+
+services:
+  # Two databases in one server: `superset` is Superset's own metadata, `devkit` is where YOUR extracts land
+  # (cem_to_mart.py, CSV uploads, CREATE TABLE AS in SQL Lab). Keeping them apart means you can wipe your
+  # extracts without losing the dashboards you drew.
+  devkit-db:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: devkit
+      POSTGRES_PASSWORD: "${DEVKIT_DB_PASSWORD:?set DEVKIT_DB_PASSWORD in .env}"
+      POSTGRES_DB: devkit
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - devkit-db:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devkit -d devkit"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512m }
+
+  devkit-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128m }
+
+  # One-shot: schema, then the admin account, then Superset's own examples-free init. Exits 0 and stays exited.
+  devkit-init:
+    build:
+      context: .
+      args:
+        WITH_JDBC: "${DEVKIT_WITH_JDBC:-1}"
+    image: sharpsight-superset-devkit:1.0.0
+    # It seeds the two connections, so it needs the CEM's file to know whether there is a CEM to connect to.
+    volumes:
+      - devkit-cem:/run/cem:ro
+    environment:
+      <<: *devkit-env
+      DEVKIT_ADMIN_USER: "${DEVKIT_ADMIN_USER:-admin}"
+      DEVKIT_ADMIN_PASSWORD: "${DEVKIT_ADMIN_PASSWORD:?set DEVKIT_ADMIN_PASSWORD in .env}"
+      DEVKIT_ADMIN_EMAIL: "${DEVKIT_ADMIN_EMAIL:-admin@sharpsight.local}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        superset db upgrade
+        superset fab create-admin --username "$$DEVKIT_ADMIN_USER" --firstname Dev --lastname Kit \
+          --email "$$DEVKIT_ADMIN_EMAIL" --password "$$DEVKIT_ADMIN_PASSWORD" || true
+        superset init
+        python /app/pythonpath/devkit_seed.py
+        echo "dev kit ready — sign in as $$DEVKIT_ADMIN_USER"
+    depends_on:
+      devkit-db:
+        condition: service_healthy
+      devkit-cem-sync:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # cem.env INTO THE VOLUME, ON EVERY START. It used to be copied only by install.sh, so editing cem.env and
+  # restarting any other way left the container with the old copy — or with none, and the CEM connection then
+  # said its settings were not set while the file sat right there beside install.sh (owner, 2026-09-28). This
+  # runs as root, which is how a 0600 file owned by the person who wrote it can be read at all, and leaves a
+  # copy the container's own user can read. It also SAYS when there is nothing to hand over: an empty cem.env
+  # was created silently once, and the silence cost an afternoon.
+  devkit-cem-sync:
+    image: postgres:16.4
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -s /src/cem.env ]; then
+          cp /src/cem.env /cem/cem.env && chown 1000:1000 /cem/cem.env && chmod 400 /cem/cem.env
+          echo "cem.env: $$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=.' /cem/cem.env) setting(s) given to the container"
+        else
+          rm -f /cem/cem.env
+          echo "cem.env is empty or absent — the CEM is NOT configured (see cem.env.example)"
+        fi
+    volumes:
+      - ./cem.env:/src/cem.env:ro
+      - devkit-cem:/cem
+    restart: "no"
+
+  superset-devkit:
+    build:
+      context: .
+      args:
+        WITH_JDBC: "${DEVKIT_WITH_JDBC:-1}"
+    image: sharpsight-superset-devkit:1.0.0
+    # NO env_file FOR cem.env. Compose interpolates those values as it does .env's, so the password arrived
+    # cut (see the volume below) — and worse, it PRINTS the fragments it did not recognise:
+    # « The "aS" variable is not set », i.e. a piece of the password on the console and in the logs. The
+    # settings travel in the volume instead, and nothing about them passes through compose.
+    environment:
+      <<: *devkit-env
+      SERVER_WORKER_AMOUNT: "${DEVKIT_WORKERS:-2}"
+      SERVER_THREADS_AMOUNT: "${DEVKIT_THREADS:-20}"
+      # GUNICORN'S OWN TIMEOUT, which is 60 SECONDS in this image and kills the worker serving a longer
+      # request — a CEM query answering slowly was enough to take a worker down, and with two workers the
+      # interface then hangs. It follows the query timeout now.
+      GUNICORN_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+      GUNICORN_KEEPALIVE: "75"
+    ports:
+      # Loopback by default: a dev kit is not something to publish on every interface by accident. On a server,
+      # set DEVKIT_BIND=0.0.0.0 deliberately, and put TLS in front of it.
+      - "${DEVKIT_BIND:-127.0.0.1}:${DEVKIT_PORT:-3002}:8088"
+    volumes:
+      - devkit-home:/app/superset_home
+      # The JDBC driver is MOUNTED, never baked — the same rule the platform follows for the Yacht jar.
+      - ./driver-jars:/app/driver-jars:ro
+      # AND THE CEM'S SETTINGS AS A FILE — through a VOLUME, not a bind mount. env_file above is a
+      # convenience; it is NOT safe for a password, because compose interpolates those values too (measured
+      # 2026-09-28: `p$aS#sw0rd${NOPE}end` in the file arrived as `p#sw0rded`, and the cluster refused an
+      # account that was never wrong). cem_to_mart.py reads this copy, where the bytes are the bytes.
+      # A bind mount kept the host's ownership, and a 0600 file owned by the person who wrote it is unreadable
+      # to `superset` (uid 1000) inside — PermissionError on a real Linux host, invisible on Docker Desktop.
+      # install.sh fills this volume with a root helper, so the host file keeps its 0600 and nothing
+      # world-readable is ever written beside it.
+      - devkit-cem:/run/cem:ro
+      # krb5.conf and the keytab for a Kerberised cluster. The folder is empty until you put them there, and an
+      # empty mount costs nothing; /etc/krb5.conf is read by kinit and by the JVM.
+      - ./krb5:/run/krb5:ro
+      # Dashboards you export land here, ready to be committed into a product repo.
+      - ./exports:/app/exports
+    depends_on:
+      devkit-init:
+        condition: service_completed_successfully
+      devkit-cem-sync:
+        condition: service_completed_successfully
+      devkit-redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1024m }
+
+volumes:
+  devkit-db:
+  devkit-home:
+  devkit-cem:

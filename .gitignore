@@ -1,0 +1,16 @@
+# Secrets. .env holds this kit's own passwords, cem.env the customer's CEM account.
+.env
+cem.env
+
+# The customer's JDBC driver, and anything else dropped in to be mounted.
+driver-jars/*.jar
+krb5/*
+!krb5/README.txt
+
+# What the kit produces: bundles, dashboard exports, mart archives.
+dist/
+exports/*
+!exports/.keep
+*.tgz
+*.tar.gz
+*.tar.gz.sha256
