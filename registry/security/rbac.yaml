@@ -5,20 +5,17 @@ tenants: [default]
 
 roles:
   bi_developer:
-    # assets.write: create and change the shared charts and sections of the asset library
-    capabilities: [bi.read, bi.generate, tools.use, assets.write]
+    capabilities: [bi.read, bi.generate, tools.use]
     datasets: ["cem.*"]
     classifications: [public, internal]
   bi_reviewer:
-    # assets.certify: say that a shared asset is the one to use — never held by whoever only writes them
-    capabilities: [bi.read, bi.approve_uat, bi.reject, assets.certify]
+    capabilities: [bi.read, bi.approve_uat, bi.reject]
     datasets: ["cem.*"]
     classifications: [public, internal]
   bi_release_manager:
     # tools.use: a restore re-applies a specification through the same tools a generation uses
     # access.manage: carries who-holds-which-role to the BI engine's accounts (aibi/people.py)
-    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use, access.manage,
-                   assets.write, assets.certify]
+    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use, access.manage]
     datasets: ["cem.*"]
     classifications: [public, internal]
   # The people a CEM dashboard is FOR. They open it in the BI engine; they generate and approve nothing.

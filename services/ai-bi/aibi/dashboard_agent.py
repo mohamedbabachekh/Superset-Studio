@@ -43,12 +43,10 @@ class Draft:
 
 
 class DashboardAgent:
-    def __init__(self, registry: Registry, policy: PolicyEngine, semantic: SemanticAgent, library: Any = None):
+    def __init__(self, registry: Registry, policy: PolicyEngine, semantic: SemanticAgent):
         self.registry = registry
         self.policy = policy
         self.semantic = semantic
-        # the asset library's shared charts and sections (aibi/library.py); None where there is none to ask
-        self.library = library
 
     # ── 1 · the draft ───────────────────────────────────────────────────────────────────────────────────────
     def draft(self, requirement: Requirement, template: TemplateDef,
@@ -176,23 +174,8 @@ class DashboardAgent:
         dashboard_id = project_id if slugify(title) == project_id else f"{project_id}-{suffix}"
         header = DashboardHeader(id=dashboard_id, template=template.id, title=title, version=version,
                                  description=" ".join(requirement.prompt.split())[:500])
-        # No duplication: a chart the library already defines is REFERENCED, not written out again.
-        for component in components:
-            shared = self.shared_twin(component)
-            if shared is not None:
-                component.asset = shared.id
-                notes.append(f"{component.slot} is the shared chart « {shared.name} » ({shared.id}), referenced")
         sections = [SectionSpec(id=section.id) for section in template.section_list()]
         return DashboardSpec(dashboard=header, filters=filters, components=components, sections=sections), notes
-
-    def shared_twin(self, component: ComponentSpec) -> Any:
-        """The library's chart that IS this component — same visualization, metric, dimension and options."""
-        if self.library is None or component.asset:
-            return None
-        return next((c for c in self.library.charts()
-                     if (c.type, c.metric, c.dimension, c.options) == (component.type, component.metric,
-                                                                       component.dimension, component.options)
-                     and c.dataset in (None, component.dataset)), None)
 
     # ── sections ────────────────────────────────────────────────────────────────────────────────────────────
     def sections(self, spec: DashboardSpec, template: TemplateDef) -> list[dict[str, Any]]:
@@ -205,59 +188,9 @@ class DashboardAgent:
                           "title": own.title if own and own.title is not None else section.title,
                           "description": own.description if own and own.description is not None else section.description,
                           "owner": own.owner if own else None, "visibility": own.visibility if own else "visible",
-                          "filters": list(own.filters) if own else [], "asset": own.asset if own else None,
+                          "filters": list(own.filters) if own else [],
                           "declared": own is not None})
         return found
-
-    def canvas(self, spec: DashboardSpec, template: TemplateDef) -> list[dict[str, Any]]:
-        """The dashboard as BI Studio draws it: every section, every row, EVERY slot of the template — the
-        empty ones too, since an empty slot is where the next chart goes."""
-        drawn = []
-        for section in self.sections(spec, template):
-            own = spec.section(section["id"])
-            parked = {c.slot: c for c in (own.parked if own else [])}
-            rows = []
-            for row in template.layout:
-                if row.row not in section["rows"]:
-                    continue
-                slots = []
-                for placement in row.slots:
-                    component = spec.component(placement.id) or parked.get(placement.id)
-                    slots.append({"slot": placement.id, "width": placement.width, **template.slots[placement.id].model_dump(),
-                                  "component": component.model_dump() if component else None,
-                                  "parked": placement.id in parked})
-                rows.append({"row": row.row, "height": row.height, "slots": slots})
-            drawn.append({**section, "rows": rows})
-        return drawn
-
-    def fill_section(self, spec: DashboardSpec, template: TemplateDef, section_id: str, asset_id: str) -> list[str]:
-        """Fill one section of the dashboard from a SHARED section: its charts go, in order, into the first
-        free slot that accepts them. Returns what was placed and what found no slot."""
-        shared = self.library.section(asset_id) if self.library else None
-        if shared is None:
-            raise ValueError(f"there is no shared section {asset_id}")
-        if section_id not in {s.id for s in template.section_list()}:
-            raise ValueError(f"template {template.id} has no section {section_id}")
-        slots = template.slots_in(section_id)
-        spec.components = [c for c in spec.components if c.slot not in slots]
-        free, notes = list(slots), []
-        for chart_id in shared.charts:
-            chart = self.library.chart(chart_id)
-            slot = next((s for s in free if chart is not None and chart.type in template.slots[s].accepts), None)
-            if slot is None:
-                notes.append(f"shared chart {chart_id} found no slot in section {section_id} that accepts it")
-                continue
-            free.remove(slot)
-            spec.components.append(ComponentSpec(slot=slot, type=chart.type, metric=chart.metric, asset=chart.id))
-            notes.append(f"{slot}: shared chart « {chart.name} »")
-        own = spec.section(section_id) or SectionSpec(id=section_id)
-        own.asset, own.title, own.description = shared.id, shared.name, shared.description or None
-        own.filters = [f for f in shared.filters]
-        if spec.section(section_id) is None:
-            spec.sections.append(own)
-        order = [p.id for row in template.layout for p in row.slots]
-        spec.components.sort(key=lambda c: order.index(c.slot) if c.slot in order else len(order))
-        return notes
 
     def resolve(self, spec: DashboardSpec, identity: Identity) -> list[str]:
         """Give each component that names no dataset the one its metric comes from. A specification may leave
@@ -265,17 +198,6 @@ class DashboardAgent:
         metric, broken down that way, is found: a governed dataset before a generated one, the metric's own
         before one derived from it. Nothing is found for a breakdown no dataset offers; validation says so."""
         resolved: list[str] = []
-        # A component that names a shared chart IS that chart: what the library says is written here, so the
-        # version records exactly what was built, and a later change of the shared chart is a visible change.
-        for component in [*spec.components, *(p for s in spec.sections for p in s.parked)]:
-            shared = self.library.chart(component.asset) if self.library is not None and component.asset else None
-            if shared is not None:
-                component.type, component.metric, component.dimension = shared.type, shared.metric, shared.dimension
-                component.options = shared.options.model_copy()
-                component.title = shared.name
-                component.description = component.description or shared.description or None
-                if shared.dataset:
-                    component.dataset = shared.dataset
         for component in spec.components:
             metric = self.registry.metrics.get(component.metric)
             if component.dataset or metric is None:
@@ -388,21 +310,6 @@ class DashboardAgent:
                     f"{metric.id} by {column}" + ("" if allowed else
                                                    f": its dimensions are {', '.join(metric.dimensions)}"))
 
-        # ── shared assets: a reference is a reference, not a copy that drifted ─────────────────────────────────
-        if self.library is not None:
-            for component in spec.components:
-                if not component.asset:
-                    continue
-                shared = self.library.chart(component.asset)
-                subject = f"{component.slot} → {component.asset}"
-                add("shared chart exists", shared is not None, subject)
-                if shared is not None:
-                    same = (component.type, component.metric, component.dimension, component.options) == (
-                        shared.type, shared.metric, shared.dimension, shared.options)
-                    add("component is its shared chart", same, subject,
-                        f"revision {shared.revision}" if same else
-                        "it differs from the shared chart it names: change the shared chart, or stop referencing it")
-
         # ── sections ──────────────────────────────────────────────────────────────────────────────────────────
         known = {s.id for s in template.section_list()}
         declared = [s.id for s in spec.sections]
@@ -425,9 +332,6 @@ class DashboardAgent:
                 continue
             if section.parked:
                 add("only a hidden section keeps components aside", False, subject)
-            if section.asset and self.library is not None:
-                add("shared section exists", self.library.section(section.asset) is not None,
-                    f"{subject} → {section.asset}")
             holders = [self.registry.datasets[c.dataset] for c in spec.components
                        if c.slot in inside and c.dataset in self.registry.datasets]
             for column in section.filters:

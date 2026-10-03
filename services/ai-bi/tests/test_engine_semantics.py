@@ -63,7 +63,7 @@ def test_reading_the_registries_needs_less_than_acting(policy):
 
     needs = {spec.name: spec.capability for spec in Toolbox.specs()}
     reading = {"list_datasets", "get_dataset", "get_dataset_schema", "get_metric", "list_metrics", "get_dimension",
-               "list_dashboard_templates", "get_dashboard_template", "validate_sql", "search_assets", "get_asset_usage"}
+               "list_dashboard_templates", "get_dashboard_template", "validate_sql"}
     assert {name for name, capability in needs.items() if capability == "bi.read"} == reading
     # everything that runs a query, builds a model or touches the BI engine
     assert {needs[name] for name in ("execute_readonly_sql", "get_dataset_sample", "generate_dbt_model",

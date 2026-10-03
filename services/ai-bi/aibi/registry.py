@@ -16,7 +16,7 @@ from typing import Any, Optional
 import yaml
 from pydantic import ValidationError
 
-from .models import ChartTemplate, DatasetDef, DesignTokens, Domain, MetricDef, Rbac, TemplateDef, Visualization
+from .models import DatasetDef, DesignTokens, MetricDef, Rbac, TemplateDef, Visualization
 
 
 class RegistryError(Exception):
@@ -57,8 +57,6 @@ class Registry:
         self.lexicon: dict[str, Any] = {}
         self.policies: dict[str, Any] = {}
         self.compatibility: dict[str, Any] = {}
-        self.domains: dict[str, Domain] = {}
-        self.chart_templates: dict[str, ChartTemplate] = {}
         self.reload()
 
     # ── loading ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -99,15 +97,6 @@ class Registry:
         self.policies = _load(root / "policies.yaml")
         matrix = root / "compatibility.yaml"
         self.compatibility = _load(matrix) if matrix.exists() else {}
-        try:
-            self.domains = {key: Domain(**body) for key, body in
-                            (_load(root / "domains.yaml").get("domains", {}) if (root / "domains.yaml").exists()
-                             else {}).items()}
-            self.chart_templates = {key: ChartTemplate(**body) for key, body in
-                                    (_load(root / "chart_templates.yaml").get("chart_templates", {})
-                                     if (root / "chart_templates.yaml").exists() else {}).items()}
-        except ValidationError as exc:
-            raise RegistryError(f"registry: {exc}") from exc
 
         self._resolve_physical()
         self._cross_check()
@@ -194,18 +183,6 @@ class Registry:
                 problems.append(f"template {tid}: its sections must name every row exactly once, in the layout's order")
             if len({s.id for s in template.sections}) != len(template.sections):
                 problems.append(f"template {tid}: two sections have the same id")
-        seen: dict[str, str] = {}
-        for key, domain in self.domains.items():
-            for kind, ids, known in (("dataset", domain.datasets, self.datasets), ("metric", domain.metrics, self.metrics)):
-                for asset_id in ids:
-                    if asset_id not in known:
-                        problems.append(f"domain {key}: {kind} {asset_id} is not registered")
-                    elif seen.setdefault(f"{kind}:{asset_id}", key) != key:
-                        problems.append(f"{kind} {asset_id} is in two domains, {seen[f'{kind}:{asset_id}']} and {key}")
-        for key, chart in self.chart_templates.items():
-            for kind in [chart.visualization, *chart.alternatives]:
-                if chart.status == "available" and kind not in self.visualizations:
-                    problems.append(f"chart template {key}: {kind} is not an approved visualization")
         for user, body in self.rbac.users.items():
             for role in body.roles:
                 if role not in self.rbac.roles:
@@ -232,20 +209,6 @@ class Registry:
             if wanted == template.id or wanted in (a.lower() for a in template.template.aliases):
                 return template
         raise RegistryError(f"no dashboard template is registered as {name}")
-
-    def domain_of(self, kind: str, asset_id: str) -> Optional[str]:
-        """The logical domain an asset is filed under. A generated dataset follows what it was derived
-        from; a metric nobody filed follows the dataset it is computed on."""
-        for key, domain in self.domains.items():
-            if asset_id in (domain.datasets if kind == "dataset" else domain.metrics):
-                return key
-        if kind == "dataset" and asset_id in self.datasets:
-            return next((d for d in (self.domain_of("dataset", parent)
-                                     for parent in self.datasets[asset_id].derived_from) if d), None)
-        if kind == "metric" and asset_id in self.metrics:
-            return next((d for d in (self.domain_of("dataset", ds)
-                                     for ds in self.metrics[asset_id].lineage.datasets) if d), None)
-        return None
 
     def dataset_by_relation(self, schema: Optional[str], table: str) -> Optional[DatasetDef]:
         matches = [d for d in self.datasets.values()

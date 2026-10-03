@@ -22,10 +22,6 @@ create table if not exists versions (project_id text not null, version text not 
 create table if not exists runs (id text primary key, project_id text, body text not null, started_at text not null);
 create table if not exists lineage (environment text not null, unique_id text not null, name text not null,
                                     body text not null, primary key (environment, unique_id));
-create table if not exists assets (kind text not null, id text not null, body text not null, updated_at text not null,
-                                   primary key (kind, id));
-create table if not exists favorites (user text not null, kind text not null, id text not null,
-                                      primary key (user, kind, id));
 """
 
 
@@ -127,11 +123,6 @@ class Store:
                            (node["environment"], node["unique_id"], node["name"],
                             json.dumps(node, ensure_ascii=False)))
 
-    def list_lineage(self) -> list[dict[str, Any]]:
-        with self._connect() as db:
-            rows = db.execute("select body from lineage order by environment desc, name").fetchall()
-        return [json.loads(r["body"]) for r in rows]
-
     def lineage_for(self, model_name: str) -> Optional[dict[str, Any]]:
         """A model's own record: the production build's when it knows the model, the workspace's otherwise."""
         with self._connect() as db:
@@ -144,37 +135,3 @@ class Store:
             rows = db.execute("select body from lineage where unique_id = ? order by environment desc",
                               (unique_id,)).fetchall()
         return json.loads(rows[0]["body"]) if rows else None
-
-    # ── the asset library's own assets ──────────────────────────────────────────────────────────────────────
-    def save_asset(self, kind: str, asset_id: str, body: dict[str, Any], updated_at: str) -> None:
-        with self._lock, self._connect() as db:
-            db.execute("insert into assets values (?, ?, ?, ?) on conflict(kind, id) do update set "
-                       "body = excluded.body, updated_at = excluded.updated_at",
-                       (kind, asset_id, json.dumps(body, ensure_ascii=False), updated_at))
-
-    def get_asset(self, kind: str, asset_id: str) -> Optional[dict[str, Any]]:
-        with self._connect() as db:
-            row = db.execute("select body from assets where kind = ? and id = ?", (kind, asset_id)).fetchone()
-        return json.loads(row["body"]) if row else None
-
-    def list_assets(self, kind: str) -> list[dict[str, Any]]:
-        with self._connect() as db:
-            rows = db.execute("select body from assets where kind = ? order by id", (kind,)).fetchall()
-        return [json.loads(r["body"]) for r in rows]
-
-    def delete_asset(self, kind: str, asset_id: str) -> None:
-        with self._lock, self._connect() as db:
-            db.execute("delete from assets where kind = ? and id = ?", (kind, asset_id))
-            db.execute("delete from favorites where kind = ? and id = ?", (kind, asset_id))
-
-    def set_favorite(self, user: str, kind: str, asset_id: str, on: bool) -> None:
-        with self._lock, self._connect() as db:
-            if on:
-                db.execute("insert or ignore into favorites values (?, ?, ?)", (user, kind, asset_id))
-            else:
-                db.execute("delete from favorites where user = ? and kind = ? and id = ?", (user, kind, asset_id))
-
-    def list_favorites(self, user: str) -> list[tuple[str, str]]:
-        with self._connect() as db:
-            rows = db.execute("select kind, id from favorites where user = ?", (user,)).fetchall()
-        return [(r["kind"], r["id"]) for r in rows]

@@ -135,10 +135,7 @@ class Pipeline:
         self.audit: AuditLog = tools.audit
         self.datasets = DatasetAgent(tools.registry, tools.semantic)
 
-    def execute(self, run: RunRecord, identity: Identity,
-                composed: Optional[tuple[str, DashboardSpec]] = None) -> RunRecord:
-        """`composed`: a project and the specification a person composed for it in BI Studio. The run then
-        starts from that specification instead of reading a sentence — and goes through everything else."""
+    def execute(self, run: RunRecord, identity: Identity) -> RunRecord:
         ctx = ToolContext(identity=identity, request_id=run.request_id, ai_model=run.ai_model)
         self.audit.record(action="request", user=identity.user, request_id=run.request_id, actor="human",
                           ai_model=run.ai_model, detail={"prompt": run.prompt, "run_id": run.id})
@@ -146,10 +143,7 @@ class Pipeline:
         gates = _Gates(run, ctx, self.tools)
         try:
             self.tools.policy.require(identity, "bi.generate")
-            if composed is None:
-                self._run(run, ctx, _Steps(run, self.store), notes, gates)
-            else:
-                self._run_composed(run, ctx, _Steps(run, self.store), notes, gates, *composed)
+            self._run(run, ctx, _Steps(run, self.store), notes, gates)
             run.status = "succeeded"
         except Exception as exc:  # noqa: BLE001 — whatever stopped it, the run must say so
             run.status, run.error = "failed", f"{type(exc).__name__}: {str(exc)[:1500]}"
@@ -314,46 +308,6 @@ class Pipeline:
         self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
                     template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
 
-    # ── a specification a person composed ───────────────────────────────────────────────────────────────────
-    def _run_composed(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates,
-                      project_id: str, spec: DashboardSpec) -> None:
-        """BI Studio's « Build »: there is no sentence to read and nothing to discover — a person chose —
-        so steps 2 to 5 have nothing to do. From step 12 on it is the same road, checks and gates included."""
-        tools, registry, identity = self.tools, self.registry, ctx.identity
-        with steps.step("parse_requirement") as step:
-            project = self.store.get_project(project_id)
-            if project is None or project["tenant"] != identity.tenant:
-                raise PolicyError(f"{identity.user} has no access to BI project {project_id}", "tenant")
-            run.project_id = ctx.project_id = project_id
-            template = registry.template(spec.dashboard.template)
-            latest = self.store.latest_version(project_id)
-            if latest and latest.status in HELD:
-                raise PipelineError(f"BI project {project_id} v{latest.version} is {latest.status}. This kit has ONE "
-                                    "BI engine, so building it again would rewrite the promoted dashboard in place.")
-            project.update(template=template.id, spec_valid=False)
-            tools.save_project(project)
-            gates.open(project_id)
-            requirement = Requirement(prompt=run.prompt, subject=project.get("title") or spec.dashboard.title,
-                                      template=template.id, metrics=spec.metrics(), filters=spec.filters,
-                                      parser="BI Studio (composed by a person)")
-            step.summary = {"project_id": project_id, "template": template.id, "metrics": requirement.metrics,
-                            "read_by": requirement.parser, "reason": "composed in BI Studio: there is no sentence to read"}
-        for key in ("find_datasets", "find_metrics", "identify_missing_data", "determine_transformations"):
-            steps.skip(key, "the specification was composed in BI Studio")
-        metrics = [registry.metrics[m] for m in spec.metrics() if m in registry.metrics]
-        dbt_results: list[dict[str, Any]] = []
-        mine = [d for d in spec.datasets() if d in registry.datasets and registry.datasets[d].project == project_id]
-        if mine and project.get("model_plan"):
-            # a dataset this project generated earlier is rebuilt, so that what is validated is today's data
-            self._transform(ctx, steps, ModelPlan(**project["model_plan"]), project_id, dbt_results)
-        else:
-            self._no_transformation(steps)
-        with steps.step("generate_specification") as step:
-            spec.dashboard.version = self.lifecycle.next_version(project_id)
-            step.summary = {"specification": spec.model_dump(exclude_none=True), "composed_by": identity.user}
-        self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
-                    template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
-
     # ── steps 6 to 10 ───────────────────────────────────────────────────────────────────────────────────────
     @staticmethod
     def _no_transformation(steps: _Steps) -> None:
@@ -397,7 +351,7 @@ class Pipeline:
                             "tests": node.get("tests", [])}
         return dataset
 
-    # ── steps 12 to 22: the same for a specification the engine wrote and for one a person composed ─────────
+    # ── steps 12 to 22 ──────────────────────────────────────────────────────────────────────────────────────
     def _build(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates, *,
                project_id: str, requirement: Requirement, template: Any, metrics: list[Any], spec: DashboardSpec,
                dbt_results: list[dict[str, Any]]) -> None:
@@ -498,10 +452,6 @@ class Pipeline:
             step.summary = {"project_id": project_id, "version": record.version, "status": record.status,
                             "environment": record.state, "dashboard": record.dashboard.get("url"),
                             "package": package.get("exported_to") or package["file"], "sha256": package["sha256"]}
-            # what was being composed in BI Studio is now this version: there is no draft apart from it
-            project = self.store.get_project(project_id)
-            if project.pop("draft", None) is not None:
-                tools.save_project(project)
 
     def _resolve(self, draft: Draft, candidates: list[Candidate], gaps: list[tuple[Draft, Gap]]) -> bool:
         """Give the draft its dataset, or record what is missing. False when the metric is valid nowhere."""

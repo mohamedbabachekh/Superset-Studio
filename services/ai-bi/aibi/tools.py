@@ -89,18 +89,6 @@ class DimensionArgs(BaseModel):
     dataset_id: Optional[str] = None
 
 
-class SearchArgs(BaseModel):
-    query: str = ""
-    kind: Optional[str] = None
-    domain: Optional[str] = None
-    status: Optional[str] = None
-
-
-class AssetArgs(BaseModel):
-    kind: str
-    asset_id: str
-
-
 class ListMetricsArgs(BaseModel):
     domain: Optional[str] = None
     certified_only: bool = False
@@ -208,7 +196,7 @@ class Toolbox:
         self.semantic = SemanticAgent(registry)
         self.sql = SqlAgent()
         self.charts = ChartAgent(registry)
-        self.dashboards = DashboardAgent(registry, policy, self.semantic)     # .library is set by the service
+        self.dashboards = DashboardAgent(registry, policy, self.semantic)
         self.dbt_agent = DbtAgent(registry)
         self.validation = ValidationAgent(registry, policy, self.sql, store)
         # what the last retrieval and render of each project found — evidence for validate_dashboard
@@ -216,8 +204,6 @@ class Toolbox:
         # Who builds a package. The lifecycle sets it: a package is cut from a committed version, and what
         # a version is, is the lifecycle's to know. The tool below only asks.
         self.packager: Optional[Callable[[str], dict[str, Any]]] = None
-        # the asset catalogue (aibi/assets.py), set by the service: what BI Studio's library shows a person
-        self.catalog: Any = None
 
     # ── the catalogue ───────────────────────────────────────────────────────────────────────────────────────
     @classmethod
@@ -385,32 +371,6 @@ class Toolbox:
                                     "readable": column in self.policy.readable_columns(ctx.identity, d),
                                     "part_of_grain": column in d.grain} for d in holders},
                 "metrics": [m.id for m in usable]}
-
-    # ── the asset library: the same one BI Studio shows a person ────────────────────────────────────────────
-    @tool("search_assets", "Search the asset library — datasets, metrics, dimensions, shared charts and sections, "
-          "dashboards, templates — by word, kind, domain and status. Only what the user may read is returned. "
-          "Look here before defining a chart: one that is already shared is referenced, not written again.",
-          SearchArgs, capability="bi.read")
-    def search_assets(self, ctx: ToolContext, note: dict, query: str, kind: Optional[str], domain: Optional[str],
-                      status: Optional[str]) -> dict[str, Any]:
-        if self.catalog is None:
-            raise ToolError("this service has no asset catalogue")
-        found = self.catalog.search(ctx.identity, query, kind, domain, status)
-        note.update(metrics=[c["id"] for c in found["groups"].get("metric", [])],
-                    datasets=[c["id"] for c in found["groups"].get("dataset", [])],
-                    detail={"query": query, "kind": kind, "total": found["total"]})
-        return found
-
-    @tool("get_asset_usage", "Where an asset is used — dashboards, charts, metrics, shared sections — and what "
-          "changing it would touch, with whether any of that has been handed on to UAT or PROD.", AssetArgs,
-          capability="bi.read")
-    def get_asset_usage(self, ctx: ToolContext, note: dict, kind: str, asset_id: str) -> dict[str, Any]:
-        if self.catalog is None:
-            raise ToolError("this service has no asset catalogue")
-        self.catalog.detail(ctx.identity, kind, asset_id)            # the user may see it, or this raises
-        impact = self.catalog.impact(kind, asset_id, ctx.identity.tenant)
-        note["detail"] = {"kind": kind, "id": asset_id, "counts": impact["counts"], "severity": impact["severity"]}
-        return impact
 
     @tool("list_dashboard_templates", "The predefined dashboard templates.", capability="bi.read")
     def list_dashboard_templates(self, ctx: ToolContext, note: dict) -> list[dict[str, Any]]:
@@ -736,45 +696,6 @@ class Toolbox:
         self.save_project(body)
         note.update(datasets=[d.id for d in datasets], metrics=[m.id for m in metrics], superset_assets=assets)
         return engine["access"]
-
-    # what a chart's settings depend on besides the specification: the data itself
-    _DATA_DEPENDENT = ("show_labels_threshold", "y_axis_format", "datasource")
-
-    def superset_changes(self, body: dict[str, Any]) -> list[dict[str, Any]]:
-        """Each chart of the project as Superset holds it NOW, against the specification — for the day a
-        person edits one in Superset's own Explore. Per slot: what changed in governed terms (and can be
-        taken into the specification), what cannot be a component at all (and why), and what Superset holds
-        that a specification has no place for (and a build would set back)."""
-        spec, engine = DashboardSpec(**body["spec"]), body["engine"]
-        template = self.registry.template(spec.dashboard.template)
-        by_engine_id = {engine_id: dataset_id for dataset_id, engine_id in engine.get("datasets", {}).items()}
-        found = []
-        for slot, chart in self.live_charts(engine).items():
-            component = spec.component(slot)
-            if component is None:
-                continue
-            live = self.superset.get_chart(chart["id"])
-            entry: dict[str, Any] = {"slot": slot, "chart_id": chart["id"], "changed": {}, "refused": [],
-                                     "not_carried": [], "adopted": None}
-            if live is None:
-                entry.update(title=chart.get("name"), refused=["the chart no longer exists in Superset"])
-            else:
-                read = self.charts.read_back(component, live, template.slots[slot].purpose, by_engine_id)
-                adopted = read["component"]
-                entry.update(title=live.get("slice_name"), changed=read["changed"], refused=read["refused"])
-                if adopted is not None:
-                    dataset, metric = self.registry.dataset(adopted.dataset), self.registry.metric(adopted.metric)
-                    expected = self.charts.form_data(
-                        adopted, dataset, metric, engine["datasets"][dataset.id], template,
-                        spec.theme.color_scheme or template.theme.color_scheme,
-                        spec.theme.sequential_scheme or template.theme.sequential_scheme)
-                    actual = json.loads(live.get("params") or "{}")
-                    entry["not_carried"] = sorted(k for k, v in expected.items() if not k.startswith("_")
-                                                  and k not in self._DATA_DEPENDENT and k in actual and actual[k] != v)
-                    entry["adopted"] = adopted.model_dump()
-            entry["in_step"] = not (entry["changed"] or entry["refused"] or entry["not_carried"])
-            found.append(entry)
-        return found
 
     def access_differences(self, body: dict[str, Any]) -> list[str]:
         """How the access set in the BI engine differs from what SharpSight grants. Empty when it does not."""

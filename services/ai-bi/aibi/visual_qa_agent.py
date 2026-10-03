@@ -517,14 +517,11 @@ class VisualQaAgent:
 def _set_option(spec: DashboardSpec, slot: str, **changes: Any) -> None:
     component = spec.component(slot)
     component.options = ComponentOptions(**{**component.options.model_dump(), **changes})
-    component.asset = None       # corrected for THIS dashboard: it is no longer the shared chart it referenced
 
 
 def _set_title(spec: DashboardSpec, slot: str, title: str) -> None:
     spec.component(slot).title = title
-    spec.component(slot).asset = None
 
 
 def _set_type(spec: DashboardSpec, slot: str, kind: str) -> None:
     spec.component(slot).type = kind
-    spec.component(slot).asset = None

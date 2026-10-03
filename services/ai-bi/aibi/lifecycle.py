@@ -326,8 +326,7 @@ class Lifecycle:
                 lines.append(f"- **{s['title'] or s['id']}**" + (f" — {s['description']}" if s["description"] else "")
                              + (f" · owner {s['owner']}" if s["owner"] else "")
                              + (f" · filters: {', '.join(s['filters'])}" if s["filters"] else "")
-                             + (" · HIDDEN" if s["visibility"] == "hidden" else "")
-                             + (f" · shared section `{s['asset']}`" if s["asset"] else ""))
+                             + (" · HIDDEN" if s["visibility"] == "hidden" else ""))
         lines += ["", "## Metrics", ""]
         for m in metrics:
             lines += [f"**{m.name}** (`{m.id}` v{m.version}, {'certified' if m.certified else 'NOT certified'}, "

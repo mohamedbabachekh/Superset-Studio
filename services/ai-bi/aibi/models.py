@@ -255,29 +255,6 @@ class Visualization(Strict):
     needs: dict[str, Any] = Field(default_factory=dict)
 
 
-class ChartTemplate(Strict):
-    """A way to start a chart that is not « from scratch »: Time series, Top N, KPI… Each names an approved
-    visualization and what the developer still has to choose. One nobody can draw yet says so, and why."""
-    name: str
-    description: str = ""
-    visualization: Optional[str] = None
-    alternatives: list[str] = Field(default_factory=list)
-    purpose: Optional[str] = None
-    needs: list[str] = Field(default_factory=list)
-    options: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["available", "not_available"] = "available"
-    reason: str = ""
-
-
-class Domain(Strict):
-    """A logical folder of the asset library — what the business calls a subject, not a database schema."""
-    name: str
-    description: str = ""
-    owner: str = ""
-    datasets: list[str] = Field(default_factory=list)
-    metrics: list[str] = Field(default_factory=list)
-
-
 # ── security ────────────────────────────────────────────────────────────────────────────────────────────────
 class RoleDef(Strict):
     capabilities: list[str] = Field(default_factory=list)
@@ -346,10 +323,6 @@ class ComponentSpec(Strict):
     options: ComponentOptions = Field(default_factory=ComponentOptions)
     # what the chart is for, in a sentence; without one it is described by its metric's documentation
     description: Optional[str] = Field(default=None, max_length=300)
-    # A SHARED chart of the asset library, by its id. The component is then that chart: its type, metric,
-    # dimension and options are the library's, written here when the specification is saved so that a
-    # version records exactly what was built.
-    asset: Optional[str] = None
 
 
 class SectionSpec(Strict):
@@ -362,8 +335,6 @@ class SectionSpec(Strict):
     visibility: Literal["visible", "hidden"] = "visible"
     # filters that reach this section's charts and no others
     filters: list[str] = Field(default_factory=list)
-    # a SHARED section of the asset library this one was filled from
-    asset: Optional[str] = None
     parked: list[ComponentSpec] = Field(default_factory=list)
 
 
@@ -419,54 +390,6 @@ class DashboardSpec(Strict):
             if c.metric not in seen:
                 seen.append(c.metric)
         return seen
-
-
-# ── the asset library's own assets ──────────────────────────────────────────────────────────────────────────
-def _slug(value: str) -> str:
-    if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", value):
-        raise ValueError("an asset id is lower-case words joined by hyphens")
-    return value
-
-
-class ChartAsset(Strict):
-    """A chart defined ONCE and referenced by the dashboards that use it. It is a definition in SharpSight's
-    vocabulary — an approved visualization of a governed metric — never engine state."""
-    id: str
-    name: str = Field(max_length=80)
-    description: str = Field(default="", max_length=300)
-    owner: str = Field(default="", max_length=80)
-    type: str
-    metric: str
-    dimension: Optional[str] = None
-    dataset: Optional[str] = None
-    options: ComponentOptions = Field(default_factory=ComponentOptions)
-    template: Optional[str] = None           # the chart template it was started from
-    certified: bool = False
-    certified_by: Optional[str] = None
-    revision: int = 1
-    created_by: str = ""
-    created_at: str = Field(default_factory=utcnow)
-    updated_at: str = Field(default_factory=utcnow)
-
-    _check_id = field_validator("id")(_slug)
-
-
-class SectionAsset(Strict):
-    """A section defined once — a title, what it is for, and the shared charts it is made of, in order."""
-    id: str
-    name: str = Field(max_length=80)
-    description: str = Field(default="", max_length=300)
-    owner: str = Field(default="", max_length=80)
-    charts: list[str]
-    filters: list[str] = Field(default_factory=list)
-    certified: bool = False
-    certified_by: Optional[str] = None
-    revision: int = 1
-    created_by: str = ""
-    created_at: str = Field(default_factory=utcnow)
-    updated_at: str = Field(default_factory=utcnow)
-
-    _check_id = field_validator("id")(_slug)
 
 
 # ── a transformation the AI proposes ────────────────────────────────────────────────────────────────────────
