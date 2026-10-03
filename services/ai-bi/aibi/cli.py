@@ -8,6 +8,8 @@
     python -m aibi.cli approve <project id> PROD --user release.manager --confirm --comment "…"
     python -m aibi.cli reject <project id> --user lead.reviewer --comment "…"
     python -m aibi.cli discard <project id>                    a project still in DEV, taken away
+    python -m aibi.cli people --user release.manager           BI-engine accounts given the roles rbac.yaml says
+    python -m aibi.cli person <rbac user> --user release.manager   an account for someone who has none yet
     python -m aibi.cli audit [--project <id>] [--request <id>] --user lead.reviewer
 
 It calls the service like any other client: with the gateway's token, and a user named on each call.
@@ -113,7 +115,8 @@ def generate(prompt: str, user: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="aibi", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health"):
+    for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health", "people",
+                 "person"):
         command = sub.add_parser(name)
         command.add_argument("--user", default="dev.user")
         if name == "generate":
@@ -127,6 +130,8 @@ def main() -> int:
             command.add_argument("--confirm", action="store_true")
         if name in ("approve", "reject"):
             command.add_argument("--comment", default="")
+        if name == "person":
+            command.add_argument("username")
         if name == "audit":
             command.add_argument("--project")
             command.add_argument("--request")
@@ -158,6 +163,23 @@ def main() -> int:
         print(f"{done['project_id']} discarded — {done['removed_from_bi_engine']} assets removed from the BI engine"
               + (f", generated datasets unregistered: {', '.join(done['generated_datasets'])}"
                  if done["generated_datasets"] else ""))
+    elif args.command == "people":
+        done = call("POST", "/people/sync", args.user)
+        for change in done["changed"]:
+            print(f"  {change['account']:<22} granted {', '.join(change['granted']) or '—'}; "
+                  f"withdrawn {', '.join(change['withdrawn']) or '—'}  ({change['why']})")
+        for same in done["unchanged"]:
+            print(f"  {same['account']:<22} already holds {', '.join(same['roles'])}")
+        if done["without_an_account"]:
+            print("  no account in the BI engine yet: " + ", ".join(done["without_an_account"])
+                  + "   (bash ai-bi.sh person <name>)")
+        if not (done["changed"] or done["unchanged"] or done["without_an_account"]):
+            print("  nobody to bring up to date")
+    elif args.command == "person":
+        made = call("POST", f"/people/{args.username}", args.user)
+        print(f"  account   {made['account']}")
+        print(f"  roles     {', '.join(made['roles'])}")
+        print(f"  password  {made['password']}     ({made['note']})")
     elif args.command == "audit":
         params = {k: v for k, v in (("project_id", args.project), ("request_id", args.request),
                                     ("limit", args.limit)) if v}

@@ -279,3 +279,18 @@ one Superset deletes.
 **A pie of a rate draws, and means nothing.** Sixteen regional rates shown as « shares » of their own sum. No
 engine refuses it. → a metric says whether its parts add up (`additive`), and a share-of-total chart is refused
 for one that does not.
+
+**The dashboard title is measured in one font weight and drawn in another.** Superset sizes the title field
+from a hidden element in the theme's « strong » weight and draws the title itself in the normal one. With this
+kit's theme (strong = 500) the two widths differ by a pixel for some titles, and one pixel is enough for the
+ellipsis. Not a font-loading race: a cold and a warm load measure the same. → the engine's dashboards carry
+`.dynamic-title-input { font-weight: inherit }`, so the drawn text is the measured text (352 needed / 351 given
+became 351 / 351). The same line in `templates/head_custom_extra.html` would cure every dashboard in the kit,
+hand-made ones included; that is the kit's stylesheet and was left alone.
+
+**A pie's label on one line loses its share for long names; on two it does not.** `label_type: template` with
+`{name}\n{percent}`. And `show_total` prints the total across the slices of a small ring — the total belongs in
+a KPI card beside it.
+
+**A share-of-total chart must draw every part.** A pie limited to its top twelve shows shares of something
+that is not the whole. → no row limit on a pie; thin slices keep their place and lose their label.

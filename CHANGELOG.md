@@ -22,6 +22,11 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
 - `ai-bi.sh check-adapter` drives copy, export, embedded configuration, delete and import on a copy — the roads
   a generation does not take, and the first thing to run after a Superset upgrade. `ai-bi.sh discard` takes a
   draft project away.
+- **People.** `ai-bi.sh person <user>` makes a Superset account for a person of `rbac.yaml`; `ai-bi.sh people`
+  gives every account the SharpSight roles it should hold and takes back the rest.
+- A request can ask for a **share** (a pie, for a metric whose parts add up) and a **volume over time** (an
+  area, drawn from zero). The dashboard title is no longer cut by a pixel: it is drawn in the weight Superset
+  measures it in.
 - **Which language model drives it is left open.** The planner is deterministic today; `aibi/llm.py` is the seam.
 - Verified on a running kit, from an erased engine: the request (four times), fifteen review cases, a forced
   failure that wrote no version and put the reviewed dashboard back, the fix loop once under a stricter policy.

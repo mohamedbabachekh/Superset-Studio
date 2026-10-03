@@ -13,6 +13,18 @@ intents:
   distribution:
     purpose: distribution
     phrases: [distribution, histogram, spread]
+  # A part-to-whole view. It PREFERS a pie, and gets one only where the template's slot accepts it and the
+  # metric's parts add up (metric.additive); otherwise it is drawn as the slot's next approved type, and
+  # the run says so.
+  share:
+    purpose: distribution
+    prefers: pie
+    phrases: [share by, share of, share, split by, split, composition, mix]
+  # A trend read as a quantity, drawn from zero: an area.
+  volume:
+    purpose: trend
+    prefers: area
+    phrases: [volume over time, volume trend, area chart, cumulative trend]
   geo:
     purpose: geo
     phrases: [geographic view, geographical view, geographic, geography, map, territorial view]

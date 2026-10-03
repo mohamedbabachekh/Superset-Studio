@@ -258,6 +258,9 @@ class ViewIntent(Strict):
     metric: Optional[str] = None
     dimension: Optional[str] = None
     time_grain: Optional[str] = None
+    # an approved visualization the view would rather be — a wish, granted only if the slot accepts it and
+    # the metric suits it
+    prefer: Optional[str] = None
 
 
 class Requirement(Strict):

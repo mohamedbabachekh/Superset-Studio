@@ -73,7 +73,16 @@ class DashboardAgent:
                 notes.append(f"template {template.id} has no free slot for « {view.phrase} »")
                 continue
             metric = by_id.get(view.metric or "", primary)
-            made = self._draft_for(slots[0], purpose, template, metric, view.dimension, view.time_grain, view.phrase)
+            made = self._draft_for(slots[0], purpose, template, metric, view.dimension, view.time_grain, view.phrase,
+                                   prefer=view.prefer)
+            if made is not None and view.prefer and made.type != view.prefer:
+                wanted = self.registry.visualizations.get(view.prefer)
+                why = (f"slot {slots[0]} of template {template.id} does not accept a {view.prefer}"
+                       if view.prefer not in template.slots[slots[0]].accepts else
+                       f"{metric.name}'s parts do not add up to a whole"
+                       if wanted is not None and wanted.needs.get("additive_metric") and not metric.additive else
+                       f"a {view.prefer} is not available")
+                notes.append(f"« {view.phrase} » is drawn as a {made.type}, not a {view.prefer}: {why}")
             if made is None:
                 # the slot stays free: a mandatory one is then filled with something that CAN be drawn
                 notes.append(f"« {view.phrase} » left out: no visualization approved for slot {slots[0]} can show "
@@ -96,10 +105,12 @@ class DashboardAgent:
 
     def _draft_for(self, slot: str, purpose: str, template: TemplateDef, metric: MetricDef,
                    dimension: Optional[str], time_grain: Optional[str], phrase: str,
-                   skip_types: tuple[str, ...] = ()) -> Optional[Draft]:
+                   skip_types: tuple[str, ...] = (), prefer: Optional[str] = None) -> Optional[Draft]:
         defaults = [d for d in self.registry.lexicon.get("default_ranking_dimensions", [])
                     if d in metric.dimensions]
-        for kind in template.slots[slot].accepts:
+        accepts = template.slots[slot].accepts
+        # the slot's own order, with the preferred type tried first WHEN the slot accepts it
+        for kind in sorted(accepts, key=lambda k: k != prefer):
             visualization = self.registry.visualizations.get(kind)
             if kind in skip_types or visualization is None or visualization.status != "available":
                 continue
@@ -388,6 +399,11 @@ class DashboardAgent:
             f".dashboard-component-chart-holder .header-title {{ font-size: {title['size_px']}px; "
             f"font-weight: {title['weight']}; color: {tokens.colors['text']}; }}",
         ]
+        # Not a design choice — a correction. The engine sizes the title field from a hidden element in the
+        # theme's « strong » weight and draws the title itself in the normal one; with this kit's theme the
+        # two differ by a pixel and the last letters turn into an ellipsis (« Customer Experien… », 352 px
+        # needed, 351 given). Inheriting the weight makes the drawn text the measured text.
+        rules.append(".dashboard-header-container .dynamic-title-input { font-weight: inherit; }")
         if template.components.get("kpi_card") == "accent_top":
             rules.append(".dashboard-component-chart-holder:has([data-test-viz-type='big_number_total']) "
                          f"{{ border-top: 3px solid {color('accent', 'primary')}; }}")

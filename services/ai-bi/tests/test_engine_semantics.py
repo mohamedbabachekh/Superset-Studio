@@ -204,3 +204,58 @@ def test_one_pixel_of_overflow_is_a_clipped_title():
 
 def test_the_label_threshold_is_the_measured_one(registry):
     assert registry.policies["visual"]["min_px_per_category"] == 18
+
+
+# ── area and pie, asked for ─────────────────────────────────────────────────────────────────────────────────
+AUDIENCE = ("Create a CEM audience dashboard using the customer-experience template. Use Active Users and QoE Score. "
+            "Show active users share by region, active users volume over time and regional ranking.")
+
+
+def _drafted(registry, dashboards, semantic, prompt):
+    from aibi.planner import DeterministicParser
+
+    requirement = DeterministicParser(registry).parse(prompt)
+    metrics, _ = semantic.find_metrics(requirement)
+    drafts, notes = dashboards.draft(requirement, registry.template(requirement.template), metrics)
+    return requirement, {d.slot: d for d in drafts}, notes
+
+
+def test_a_share_is_a_pie_and_a_volume_is_an_area_when_asked(registry, dashboards, semantic):
+    requirement, drafts, notes = _drafted(registry, dashboards, semantic, AUDIENCE)
+    assert [(v.intent, v.prefer, v.dimension) for v in requirement.views] == [
+        ("share", "pie", "region"), ("volume", "area", None), ("ranking", None, "region")]
+    assert requirement.unresolved == []
+    assert (drafts["distribution_1"].type, drafts["distribution_1"].column) == ("pie", "region")
+    assert drafts["trend_1"].type == "area"
+    assert not [n for n in notes if "drawn as" in n]
+
+
+def test_a_share_of_what_does_not_add_up_is_drawn_otherwise_and_says_so(registry, dashboards, semantic):
+    _, drafts, notes = _drafted(registry, dashboards, semantic, AUDIENCE.replace(
+        "active users share by region", "QoE share by region"))
+    assert drafts["distribution_1"].type == "histogram"
+    assert any("« QoE share by region » is drawn as a histogram, not a pie" in n and "do not add up" in n for n in notes)
+
+
+def test_a_preference_the_slot_does_not_accept_is_not_forced(registry, dashboards, semantic):
+    """The executive template's trend slot accepts line and area; the operational one's too — but no template
+    lets a pie into a ranking slot, whatever the request prefers."""
+    template = registry.template("executive")
+    metric = registry.metric("cem.active_users")
+    made = dashboards._draft_for("ranking_1", "ranking", template, metric, "region", None, "", prefer="pie")
+    assert made.type == "bar"
+
+
+def test_an_area_starts_at_zero_and_a_pie_draws_every_part(registry):
+    agent, template = ChartAgent(registry), registry.template("customer-experience")
+    dataset, users = registry.dataset("cem.qoe_daily"), registry.metric("cem.active_users")
+    area = agent.form_data(_component(slot="trend_1", type="area", metric=users.id, dimension="date"),
+                           dataset, users, 7, template, "inwi", "superset_seq_1")
+    line = agent.form_data(_component(slot="trend_1", type="line", metric=users.id, dimension="date"),
+                           dataset, users, 7, template, "inwi", "superset_seq_1")
+    assert area["viz_type"] == "echarts_area" and area["truncateYAxis"] is False
+    assert line["truncateYAxis"] is True
+    share = _component(slot="distribution_1", type="pie", metric=users.id, dimension="region")
+    pie = agent.form_data(share, dataset, users, 7, template, "inwi", "superset_seq_1")
+    assert pie["row_limit"] == 100 and pie["show_legend"] is False and pie["groupby"] == ["region"]
+    assert agent.title(share, users, "distribution") == "Active Users, share by region"

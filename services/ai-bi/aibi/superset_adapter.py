@@ -281,6 +281,21 @@ class SupersetAdapter:
     def set_account_active(self, user_id: int, active: bool) -> None:
         self._request("PUT", f"/api/v1/security/users/{user_id}", json={"active": active})
 
+    def list_accounts(self) -> list[dict[str, Any]]:
+        return self._list("security/users", [])
+
+    def set_account_roles(self, user_id: int, role_ids: list[int]) -> None:
+        self._request("PUT", f"/api/v1/security/users/{user_id}", json={"roles": role_ids})
+
+    def create_account(self, username: str, first_name: str, last_name: str, email: str, role_ids: list[int],
+                       password: str) -> int:
+        return self._request("POST", "/api/v1/security/users/", json={
+            "username": username, "first_name": first_name, "last_name": last_name, "email": email,
+            "active": True, "password": password, "roles": role_ids})["id"]
+
+    def delete_account(self, user_id: int) -> None:
+        self._request("DELETE", f"/api/v1/security/users/{user_id}", expect=(200, 404))
+
     # ── embedding ───────────────────────────────────────────────────────────────────────────────────────────
     def get_embedded(self, dashboard_id: int) -> Optional[dict[str, Any]]:
         try:

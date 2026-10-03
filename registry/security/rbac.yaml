@@ -14,7 +14,8 @@ roles:
     classifications: [public, internal]
   bi_release_manager:
     # tools.use: a restore re-applies a specification through the same tools a generation uses
-    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use]
+    # access.manage: carries who-holds-which-role to the BI engine's accounts (aibi/people.py)
+    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use, access.manage]
     datasets: ["cem.*"]
     classifications: [public, internal]
   # The people a CEM dashboard is FOR. They open it in the BI engine; they generate and approve nothing.

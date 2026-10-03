@@ -33,6 +33,7 @@ from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
 from .lifecycle import Lifecycle, LifecycleError
 from .llm import get_parser
+from .people import People
 from .models import RunRecord
 from .pipeline import Pipeline
 from .planner import new_steps
@@ -65,6 +66,7 @@ class Service:
             bi_database_uri=settings.superset_database_uri, superset_public_url=settings.superset_public_url,
             dbt_dev_schema=settings.dbt_dev_schema)
         self.lifecycle = Lifecycle(self.tools, settings.exports_dir)
+        self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
         # one generation at a time: each drives dbt and a browser, and two would also race on one dashboard
@@ -410,6 +412,20 @@ def restore(project_id: str, request: Restore, identity: Identity = Depends(call
                          superset_assets=[{"type": "dashboard", "id": applied["dashboard"]["id"], "action": "restored"}])
     return {"project_id": project_id, "restored_version": request.version, "dashboard": applied["dashboard"],
             "drift": service.lifecycle.drift(service.store.get_version(project_id, request.version))}
+
+
+# ── people ──────────────────────────────────────────────────────────────────────────────────────────────────
+@app.post("/people/sync")
+def people_sync(identity: Identity = Depends(caller)) -> Any:
+    """Give every BI-engine account the SharpSight roles rbac.yaml gives its user — and take back the rest."""
+    return service.people.sync(identity, str(uuid.uuid4()))
+
+
+@app.post("/people/{username}")
+def people_create(username: str, identity: Identity = Depends(caller)) -> Any:
+    """An account in the BI engine for a person of rbac.yaml who has none. The password is in this answer
+    and nowhere else."""
+    return service.people.create(identity, username, str(uuid.uuid4()))
 
 
 # ── audit ───────────────────────────────────────────────────────────────────────────────────────────────────

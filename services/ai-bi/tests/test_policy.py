@@ -269,3 +269,76 @@ def test_what_counts_as_refused_and_as_served():
     assert not Toolbox.served({"dashboard": 404, "data": {"a": 200}, "rows": {}})
     assert Toolbox.engine_role("cem_analyst") == "sharpsight_cem_analyst"
     assert Toolbox.rule_name("cem_regional_analyst", "cem.qoe_daily") == "sharpsight:cem_regional_analyst:cem.qoe_daily"
+
+
+# ── people ──────────────────────────────────────────────────────────────────────────────────────────────────
+class _FakeEngine:
+    """Superset's accounts and roles, in memory — enough to hold the rules of people.py to account."""
+
+    def __init__(self, accounts):
+        self.roles = {"Admin": 1, "Gamma": 4}
+        self.accounts = [{"id": i, "username": u, "roles": [{"id": self.role(r), "name": r} for r in roles]}
+                         for i, (u, roles) in enumerate(accounts.items(), start=10)]
+        self.created = {}
+
+    def role(self, name):
+        return self.roles.setdefault(name, 100 + len(self.roles))
+
+    find_role = ensure_role = role
+
+    def list_accounts(self):
+        return self.accounts
+
+    def set_account_roles(self, user_id, role_ids):
+        names = {v: k for k, v in self.roles.items()}
+        account = next(a for a in self.accounts if a["id"] == user_id)
+        account["roles"] = [{"id": i, "name": names[i]} for i in role_ids]
+
+    def create_account(self, username, first, last, email, role_ids, password):
+        names = {v: k for k, v in self.roles.items()}
+        self.created[username] = password
+        self.accounts.append({"id": 99, "username": username, "roles": [{"id": i, "name": names[i]} for i in role_ids]})
+        return 99
+
+    def held(self, username):
+        return sorted(r["name"] for a in self.accounts if a["username"] == username for r in a["roles"])
+
+
+def _people(registry, policy, tmp_path, accounts):
+    from aibi.audit import AuditLog
+    from aibi.people import People
+
+    engine = _FakeEngine(accounts)
+    return People(registry, policy, engine, AuditLog(tmp_path / "audit"), "sharpsight-ai"), engine
+
+
+def test_accounts_are_given_exactly_the_roles_rbac_gives_their_user(registry, policy, tmp_path):
+    people, engine = _people(registry, policy, tmp_path, {
+        "admin": ["Admin", "sharpsight_cem_analyst"],                 # not a user of rbac.yaml: loses it
+        "east.analyst": ["Gamma"],                                    # gains its role
+        "cem.analyst": ["Gamma", "sharpsight_cem_analyst"],           # already right
+        "lead.reviewer": [],                                          # gains its role AND the base role
+        "sharpsight-ai": ["Admin"], "sharpsight-probe-cem_analyst": ["Gamma", "sharpsight_cem_analyst"]})
+    done = people.sync(policy.identify("release.manager"), "r1")
+    assert engine.held("admin") == ["Admin"]
+    assert engine.held("east.analyst") == ["Gamma", "sharpsight_cem_regional_analyst"]
+    assert engine.held("lead.reviewer") == ["Gamma", "sharpsight_bi_reviewer"]          # auditor grants no dataset
+    assert engine.held("sharpsight-probe-cem_analyst") == ["Gamma", "sharpsight_cem_analyst"]   # the engine's own
+    assert {c["account"] for c in done["changed"]} == {"admin", "east.analyst", "lead.reviewer"}
+    assert [u["account"] for u in done["unchanged"]] == ["cem.analyst"]
+    assert done["without_an_account"] == ["dev.user", "release.manager"]
+    # a second pass changes nothing
+    assert people.sync(policy.identify("release.manager"), "r2")["changed"] == []
+
+
+def test_an_account_is_made_only_for_a_person_of_rbac_and_its_password_is_not_kept(registry, policy, tmp_path):
+    people, engine = _people(registry, policy, tmp_path, {"admin": ["Admin"]})
+    manager = policy.identify("release.manager")
+    made = people.create(manager, "east.analyst", "r1")
+    assert made["roles"] == ["Gamma", "sharpsight_cem_regional_analyst"] and len(made["password"]) >= 12
+    assert made["password"] not in (tmp_path / "audit" / "audit.jsonl").read_text(encoding="utf-8")
+    for nobody in ("mallory", "sharpsight-ai", "east.analyst"):       # unknown · not a person · exists now
+        with pytest.raises(PolicyError):
+            people.create(manager, nobody, "r2")
+    with pytest.raises(PolicyError, match="access.manage"):
+        people.sync(policy.identify("dev.user"), "r3")

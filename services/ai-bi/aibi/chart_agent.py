@@ -34,6 +34,8 @@ class ChartAgent:
         if purpose == "trend":
             grain = {"P1D": "daily", "P1W": "weekly", "P1M": "monthly"}[component.options.time_grain or "P1D"]
             return f"{metric.name}, {grain} trend"
+        if component.type == "pie":
+            return f"{metric.name}, share by {label}"
         if purpose == "distribution":
             return f"{metric.name} distribution"
         if purpose == "geo":
@@ -78,8 +80,12 @@ class ChartAgent:
                         seriesType="line", show_value=False, markerEnabled=False, zoomable=False,
                         show_legend=False, x_axis_time_format="smart_date", rich_tooltip=True,
                         tooltipTimeFormat="smart_date", y_axis_format=number_format,
-                        # a score between 3.1 and 3.6 drawn from zero is a flat line that says nothing
-                        truncateYAxis=True, y_axis_bounds=[None, None], truncateXAxis=True)
+                        # A score between 3.1 and 3.6 drawn from zero is a flat line that says nothing — so a
+                        # LINE's axis is cut to its values. An AREA is read as a quantity: it starts at zero,
+                        # or the filled surface lies about how much there is.
+                        truncateYAxis=kind == "line", y_axis_bounds=[None, None], truncateXAxis=True)
+            if kind == "area":
+                form.update(opacity=0.25, stack=None)
         elif kind == "bar":
             # Horizontal bars are drawn from the bottom up, so the FIRST category lands at the bottom: a
             # ranking that should read best-first from the top is therefore sorted ascending for display
@@ -100,10 +106,20 @@ class ChartAgent:
                         # over the tick labels (seen on the first render)
                         x_axis_format=number_format)
         elif kind == "pie":
-            form.update(groupby=[component.dimension], metric=metric.key, row_limit=options.row_limit or 12,
-                        sort_by_metric=True, color_scheme=color_scheme, show_labels=True,
-                        label_type="key_percent", number_format=number_format, show_legend=True,
-                        legendType="scroll", legendOrientation="top", donut=True, innerRadius=40, outerRadius=70)
+            # EVERY part is drawn: a pie of the top twelve would show shares of a whole that is not the
+            # whole. Thin slices keep their place and lose their label (under 4 %), and there is no legend —
+            # each slice is already named beside it, and a legend of sixteen regions is a scrollbar.
+            form.update(groupby=[component.dimension], metric=metric.key, row_limit=options.row_limit or 100,
+                        sort_by_metric=True, color_scheme=color_scheme, show_labels=True, labels_outside=True,
+                        label_line=True, show_labels_threshold=4,
+                        # name over share, on two lines: on one, the longest regions lost their percentage
+                        label_type="template", label_template="{name}\n{percent}",
+                        # no total in the middle: it is wider than the ring and prints across the slices
+                        # (tried); the KPI card beside the chart is where the whole is read
+                        number_format=number_format, show_legend=False, donut=True,
+                        # a smaller ring than the engine's default: a region's name and its share are long,
+                        # and at the default the chart cut them (« Rabat - Salé - Zemmour - Za… »)
+                        innerRadius=30, outerRadius=56)
         elif kind == "table":
             form.update(query_mode="aggregate", groupby=[component.dimension], metrics=[metric.key],
                         all_columns=[], percent_metrics=[], order_by_cols=[],

@@ -142,6 +142,7 @@ class DeterministicParser:
                     # « daily » names a grain for a trend, not a dimension to break it down by
                     dimension=next((d for d in dimensions if not (intent == "trend" and d == "date")), None),
                     time_grain=grains[0] if grains else None,
+                    prefer=self.registry.lexicon.get("intents", {}).get(intent, {}).get("prefers"),
                 ))
 
         return Requirement(prompt=prompt, subject=subject, template=template, metrics=metrics, views=views,
