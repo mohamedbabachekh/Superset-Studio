@@ -13,7 +13,8 @@ grid:
 
 layout:
   - row: kpis
-    height: 14
+    # 16 units = 128 px. At 14 the engine draws a KPI's caption at 8 px (measured 2026-10-03).
+    height: 16
     slots:
       - {id: kpi_1, width: 3}
       - {id: kpi_2, width: 3}
@@ -49,7 +50,6 @@ theme:
   variant: light
 
 typography:
-  dashboard_title: heading_m
   chart_title: heading_s
   kpi_value: display
 

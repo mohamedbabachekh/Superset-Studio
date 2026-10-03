@@ -160,3 +160,79 @@ direction — the *host* paths the same script passes. → container paths go in
 
 **`docker compose cp` lands a file as root** while the container runs as `superset`, so a tidy-up `rm` inside
 the container may be refused. It must not fail the operation around it.
+
+---
+
+## The AI BI engine, and what Superset's API really does
+
+All of these were met on 2026-10-03 while running the engine ([ai-bi.md](ai-bi.md)) against this kit's Superset
+6.1. Each has a test in `services/ai-bi/tests/` so it cannot quietly come back.
+
+**A query-level `time_range` REPLACES the range written in a `TEMPORAL_RANGE` filter clause.**
+That is how a dashboard's time filter reaches a chart: the chart carries its own clause on the time column
+saying « No filter », and the dashboard sends `time_range`. So a query built with the clause
+`{"op": "TEMPORAL_RANGE", "val": "Last week"}` *and* `"time_range": "No filter"` returns everything — the SQL
+has no `WHERE` at all. The engine's own filter probe was built that way and reported a working filter as broken.
+→ `chart_agent.query_context` sends the chart's clause always, and `time_range` only when the dashboard would.
+
+**A colour scheme set on the DASHBOARD turns the country map categorical.**
+Superset pushes the dashboard's scheme into every chart, and the map reads its presence as « colour by
+category »: sixteen regions in six unrelated colours that say nothing about the metric, with no error.
+→ no dashboard-level scheme; each chart carries the template's scheme itself, and the map its sequential one.
+
+**Horizontal bars are drawn from the bottom up.** Sorted descending for display, a ranking shows its best
+region at the bottom. → sorted ascending on screen (`x_axis_sort_asc`), while the rows *fetched* are still the
+largest (`order_desc`, `row_limit`): two different settings.
+
+**The Morocco map shipped in 6.1 is the older sixteen-region division** (`MA-01` … `MA-16`: « Grand Casablanca »,
+« Souss - Massa - Draâ »…), not today's twelve regions. A reference table using the current codes joins
+perfectly and draws an empty map. → `dbt/seeds/dim_region.csv` was written from the image's own geometry.
+
+**Superset's image has no browser, so its screenshot endpoints cannot work here** — and there is no dashboard
+version history or restore in the API at all. → the engine renders with its own headless browser, and keeps
+versions itself, in git.
+
+**A chart that is not on screen is not drawn** (`DASHBOARD_VIRTUALIZATION` is on by default). A screenshot taken
+through an ordinary window reports everything below the fold as empty. → the engine's browser window is 2600 px
+tall, and the picture is cut to where the dashboard ends.
+
+**The histogram has no margin control for its y-axis title**, and draws it over the tick labels. → no y-axis
+title on that chart.
+
+**A KPI card under 128 px draws its caption at 8 px.** The number shrinks with the card, the caption with the
+number. → every template's KPI row is 16 grid units, and visual QA fails any text under 9 px.
+
+**The dashboard's own title can lose its last letters.** Superset sizes the title field from the text and comes
+up a few pixels short for some titles (« CEM QoE regional Operatio… », 284 px needed, 281 given). Nothing in a
+specification can cure it. → reported as a warning, with both numbers.
+
+**What a measurement cannot see.** Chart text drawn on a canvas — axis labels, values — has no DOM, so two
+axis labels printed into each other (« Wed 29 August ») pass every check. That is the one class of defect the
+visual QA knowingly misses; it is what reading the picture, by a person or a model, is for.
+
+**A browser signed in through the sign-in page can be signed out by that page.** The page fires requests of
+its own before anyone is signed in (its event log, the language pack). When one is answered *after* the sign-in,
+its `Set-Cookie` replaces the fresh session with an anonymous one, and the next request is redirected to
+`/login/`. Seen once in some twenty-five renders: the engine waited ninety seconds for charts on a page that was
+a login form, and Superset's access log showed `GET /superset/dashboard/7/ → 302`.
+→ the engine signs in without a browser — the form's `csrf_token`, one `POST /login/`, a check on `/api/v1/me/`
+— and hands the session cookie to the browser, which never loads the sign-in page.
+
+**An export names its files and its references after ids the engine assigned.** `charts/QoE_Score_218.yaml`,
+`chartId`, `chartsInScope: [218, …]`, `datasource: 45__table`. Delete a chart and create it again and every one
+of them changes while the dashboard is identical. Comparing exports byte for byte to detect a hand edit
+therefore refuses any restored dashboard. → the engine compares content: each chart named by its place on the
+dashboard, each dataset by its table (`lifecycle.canonical_assets`), and a re-created chart keeps its uuid.
+
+**Refreshing a dataset rewrites it even when nothing changed** — every column's `expression: null` becomes
+`expression: ''` — and in 6.1 it also logs, for each date column, a failed connection to a database named after
+the *schema* (`FATAL: database "bi" does not exist`, from `datetime_format_detector`): the catalog confusion
+again, harmless but alarming. → a dataset is refreshed only when the registry has a column the engine lacks.
+
+**`docker compose up --build` rebuilds every image in the project**, and a rebuilt image — identical or not —
+makes compose recreate a container that was running perfectly well. Starting the engine that way restarted the
+kit's own Superset. → `ai-bi.sh` builds the engine's image only, then `up -d`.
+
+**dbt.** 1.10 announces at every run that it is no longer patched; the engine pins 1.12. A generic test's
+inputs go under `arguments:` (`require_generic_test_arguments_property`), or every test warns. And `dbt docs
+generate` rewrites `run_results.json` with its own compile — the build's results must be copied aside first.

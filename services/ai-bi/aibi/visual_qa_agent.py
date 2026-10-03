@@ -15,12 +15,17 @@ thing on every run; a vision model, when one is chosen, adds judgement on top an
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
+
+import prison
+import requests
 
 from .models import ComponentOptions, DashboardSpec, TemplateDef, ValidationReport
 
@@ -37,6 +42,12 @@ _COMPONENTS_JS = """
     clipped.push({text: el.textContent.trim().slice(0, 80), needs: el.scrollWidth, has: el.clientWidth,
                   in_title: !!el.closest('.header-title, [data-test="slice-header"]')});
   });
+  let smallest = null;
+  holder.querySelectorAll('*').forEach(el => {
+    if (el.children.length !== 0 || !el.textContent.trim() || el.closest('svg')) return;
+    const size = parseFloat(getComputedStyle(el).fontSize);
+    if (size && (!smallest || size < smallest.px)) smallest = {px: size, text: el.textContent.trim().slice(0, 60)};
+  });
   const alert = holder.querySelector('[role="alert"], .ant-alert-error, [data-test="chart-error"]');
   const loading = holder.querySelector('[data-test="loading-indicator"], .loading');
   return {
@@ -46,11 +57,22 @@ _COMPONENTS_JS = """
     rect: {x: Math.round(box.x + window.scrollX), y: Math.round(box.y + window.scrollY),
            w: Math.round(box.width), h: Math.round(box.height)},
     clipped: clipped.slice(0, 6),
+    smallest_text: smallest,
     error: alert ? alert.textContent.trim().slice(0, 240) : null,
     loading: !!loading,
     drawn: !!holder.querySelector('canvas, svg path, svg rect, table'),
   };
 })
+"""
+
+# The dashboard's own title. The engine's header sizes it from the text, and gets it wrong by a few pixels
+# for some titles: the last word then ends in an ellipsis (seen on « CEM QoE regional Operations »).
+_HEADER_JS = """
+() => {
+  const title = document.querySelector('[data-test="editable-title-input"]');
+  return title ? {text: (title.value || title.textContent || '').trim(), needs: title.scrollWidth,
+                  has: title.clientWidth} : null;
+}
 """
 
 _SETTLED_JS = """
@@ -72,6 +94,7 @@ class Render:
     components: list[dict[str, Any]] = field(default_factory=list)
     calls: list[dict[str, Any]] = field(default_factory=list)
     console_errors: list[str] = field(default_factory=list)
+    header: Optional[dict[str, Any]] = None
     page_width: int = 0
     error: Optional[str] = None
 
@@ -97,9 +120,34 @@ class VisualQaAgent:
         self._password = password
         self.policies = policies
 
+    # ── signing in ──────────────────────────────────────────────────────────────────────────────────────────
+    _CSRF = re.compile(r'name="csrf_token"[^>]*?value="([^"]+)"')
+
+    def session_cookie(self) -> dict[str, Any]:
+        """A signed-in session, obtained WITHOUT a browser, for the browser to carry.
+
+        The first version typed the password into the sign-in page. That page fires requests of its own
+        before anyone is signed in (its event log, the language pack); when one of them is answered AFTER the
+        sign-in, its `Set-Cookie` replaces the fresh session with an anonymous one, and the dashboard request
+        that follows is sent back to the sign-in page. It lost that race once in some twenty-five renders
+        (2026-10-03: a render that waited ninety seconds for charts on a page that was a login form).
+
+        Here nothing is loaded that was not asked for: the form's own token, one POST, one check."""
+        session = requests.Session()
+        form = session.get(f"{self.base_url}/login/", timeout=30)
+        token = self._CSRF.search(form.text)
+        if token is None:
+            raise RuntimeError("the BI engine's sign-in form carries no csrf_token: its sign-in has changed")
+        session.post(f"{self.base_url}/login/", timeout=30, allow_redirects=False,
+                     data={"username": self._username, "password": self._password, "csrf_token": token.group(1)})
+        if session.get(f"{self.base_url}/api/v1/me/", timeout=30).status_code != 200:
+            raise RuntimeError("the BI engine did not accept the service account's sign-in")
+        cookie = next(c for c in session.cookies if "session" in c.name)
+        return {"name": cookie.name, "value": cookie.value, "url": self.base_url, "httpOnly": True}
+
     # ── rendering ───────────────────────────────────────────────────────────────────────────────────────────
     def render(self, dashboard_id: int, expected_charts: int, out_dir: Path, viewport: str, width: int,
-               timeout_ms: int = 90000) -> Render:
+               timeout_ms: int = 90000, native_filters: Optional[dict[str, Any]] = None) -> Render:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
 
@@ -115,20 +163,21 @@ class VisualQaAgent:
                     # was never drawn would be reported as empty.
                     context = browser.new_context(viewport={"width": width, "height": 2600},
                                                   device_scale_factor=1, locale="en-US")
+                    context.add_cookies([self.session_cookie()])
                     page = context.new_page()
                     page.on("console", lambda m: render.console_errors.append(m.text[:300])
                             if m.type == "error" else None)
-                    page.goto(f"{self.base_url}/login/", wait_until="domcontentloaded", timeout=timeout_ms)
-                    page.fill("#username", self._username, timeout=30000)
-                    page.fill("#password", self._password)
-                    page.press("#password", "Enter")
-                    page.wait_for_url(lambda url: "/login" not in url, timeout=30000)
 
                     page.on("response", lambda r: responses.append(r)
                             if ("/api/v1/chart/data" in r.url or "/explore_json" in r.url) else None)
+                    address = f"{self.base_url}/superset/dashboard/{dashboard_id}/?standalone=1"
+                    if native_filters:
+                        address += "&native_filters=" + quote(prison.dumps(native_filters), safe="")
                     started = time.monotonic()
-                    page.goto(f"{self.base_url}/superset/dashboard/{dashboard_id}/?standalone=1",
-                              wait_until="domcontentloaded", timeout=timeout_ms)
+                    page.goto(address, wait_until="domcontentloaded", timeout=timeout_ms)
+                    if "/login" in page.url:
+                        raise RuntimeError("the BI engine sent the browser to its sign-in page: the session "
+                                           "it was given was not accepted")
                     page.wait_for_selector(".dashboard-component-chart-holder", timeout=timeout_ms)
                     page.wait_for_function(_SETTLED_JS, arg=expected_charts, timeout=timeout_ms)
                     try:
@@ -137,10 +186,14 @@ class VisualQaAgent:
                         pass
                     render.load_ms = int((time.monotonic() - started) * 1000)
                     page.wait_for_timeout(1500)        # let the charts finish animating before the picture
-                    page.screenshot(path=str(shot), full_page=True)
-                    render.screenshot = str(shot)
                     render.components = page.evaluate(_COMPONENTS_JS)
+                    render.header = page.evaluate(_HEADER_JS)
                     render.page_width = page.evaluate("() => document.documentElement.scrollWidth")
+                    # the picture stops where the dashboard does, not at the bottom of a tall window
+                    bottom = max((c["rect"]["y"] + c["rect"]["h"] for c in render.components), default=900) + 24
+                    page.screenshot(path=str(shot), clip={"x": 0, "y": 0, "width": width,
+                                                          "height": min(bottom, 2600)})
+                    render.screenshot = str(shot)
                     render.calls = [self._call(r) for r in responses]
                 finally:
                     browser.close()
@@ -161,7 +214,7 @@ class VisualQaAgent:
             pass
         call: dict[str, Any] = {"kind": "chart" if chart_id else "filter", "chart_id": chart_id,
                                 "status": response.status, "duration_ms": None, "bytes": None,
-                                "rowcount": None, "error": None}
+                                "rowcount": None, "error": None, "digest": None}
         try:
             timing = request.timing
             if timing.get("responseEnd", -1) >= 0:
@@ -174,6 +227,9 @@ class VisualQaAgent:
             payload = json.loads(body)
             result = (payload.get("result") or [payload])[0] if isinstance(payload, dict) else {}
             call["rowcount"] = result.get("rowcount")
+            # a fingerprint of the rows, kept instead of the rows: enough to tell that two answers differ
+            call["digest"] = hashlib.sha1(
+                json.dumps(result.get("data"), sort_keys=True, default=str).encode()).hexdigest()
             call["error"] = result.get("error") or (payload.get("message") if response.status >= 400 else None)
             if call["error"] is None and payload.get("errors"):
                 call["error"] = str(payload["errors"][0].get("message", payload["errors"][0]))[:300]
@@ -216,6 +272,17 @@ class VisualQaAgent:
         mandatory = {slot for slot, body in template.slots.items() if body.mandatory}
         blank_at = float(self.policies.get("visual", {}).get("blank_ratio", 0.995))
         min_px = int(self.policies.get("visual", {}).get("min_px_per_category", 16))
+        min_font = float(self.policies.get("visual", {}).get("min_font_px", 9))
+
+        # A warning, not a failure: the specification cannot cure it (the title is the template's pattern
+        # and the request's subject) and the cut is the engine's own sizing. A reviewer should still know.
+        header = render.header
+        if header and header["needs"] > header["has"] + 1:
+            report.add("visual", "dashboard title is not clipped", "warn", view,
+                       f"« {header['text']} » needs {header['needs']} px and the header gives it {header['has']}",
+                       code="dashboard_title_clipped")
+        elif header:
+            report.add("visual", "dashboard title is not clipped", "pass", view, header["text"])
 
         missing = [slot for slot, chart in charts.items() if chart["id"] not in by_chart]
         report.add("visual", "every component is on the page", "fail" if missing else "pass", view,
@@ -290,6 +357,14 @@ class VisualQaAgent:
                            code="text_clipped", slot=slot)
             else:
                 report.add("visual", "text is not clipped", "pass", subject)
+
+            smallest = component.get("smallest_text")
+            if smallest and smallest["px"] < min_font:
+                report.add("visual", "text is large enough to read", "fail", subject,
+                           f"« {smallest['text']} » is drawn at {smallest['px']:g} px, under {min_font:g}",
+                           code="text_too_small", slot=slot)
+            elif smallest:
+                report.add("visual", "text is large enough to read", "pass", subject, f"smallest {smallest['px']:g} px")
 
             # labels: a ranking needs room for each of its categories, and for the longest of their names
             if spec_component is not None and spec_component.type == "bar" and rows:

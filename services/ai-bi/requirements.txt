@@ -1,0 +1,16 @@
+# The AI BI service. Exact versions: the ones this kit was built and run with on 2026-10-03. Everything they
+# pulled in with them is written to /app/requirements.lock inside the image (pip freeze).
+fastapi==0.119.1
+uvicorn==0.39.0
+pydantic==2.13.5
+PyYAML==6.0.3
+requests==2.34.2
+prison==0.2.1
+sqlglot==27.29.0
+psycopg2-binary==2.9.13
+# dbt 1.10 announces at every run that it is no longer patched; 1.12 is the supported line.
+dbt-core==1.12.5
+dbt-postgres==1.11.0
+playwright==1.63.0
+Pillow==11.3.0
+pytest==8.4.2

@@ -306,6 +306,27 @@ class DashboardAgent:
                 }
         return position
 
+    @staticmethod
+    def filter_id(spec: DashboardSpec, column: str) -> str:
+        return f"NATIVE_FILTER-{spec.dashboard.id}-{column}"
+
+    def filter_state(self, spec: DashboardSpec, values: dict[str, Any]) -> dict[str, Any]:
+        """The dashboard's filters, set to the given values, as the engine reads them from an address."""
+        used = [self.registry.dataset(ds) for ds in spec.datasets()]
+        mask: dict[str, Any] = {}
+        for column in spec.filters:
+            holder = next((d for d in used if column in d.columns), None)
+            if holder is None or column not in values:
+                continue
+            fid, value = self.filter_id(spec, column), values[column]
+            if holder.columns[column].role == "time":
+                mask[fid] = {"id": fid, "extraFormData": {"time_range": value},
+                             "filterState": {"value": value}, "ownState": {}}
+            else:
+                mask[fid] = {"id": fid, "extraFormData": {"filters": [{"col": column, "op": "IN", "val": [value]}]},
+                             "filterState": {"value": [value]}, "ownState": {}}
+        return mask
+
     def native_filters(self, spec: DashboardSpec, engine_dataset_ids: dict[str, int],
                        charts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         datasets = {c.slot: self.registry.dataset(c.dataset) for c in spec.components if c.slot in charts}
@@ -319,7 +340,7 @@ class DashboardAgent:
             excluded = [charts[slot]["id"] for slot, d in datasets.items() if column not in d.columns]
             is_time = holder.columns[column].role == "time"
             filters.append({
-                "id": f"NATIVE_FILTER-{spec.dashboard.id}-{column}",
+                "id": self.filter_id(spec, column),
                 "name": label(column),
                 "type": "NATIVE_FILTER",
                 "filterType": "filter_time" if is_time else "filter_select",
@@ -345,7 +366,7 @@ class DashboardAgent:
         font = lambda use, default: tokens.typography[template.typography.get(use, default)]  # noqa: E731
         space = lambda use, default: tokens.spacing[template.spacing.get(use, default)]  # noqa: E731
         radius = tokens.radius.get("card", 8)
-        title, heading = font("chart_title", "heading_s"), font("dashboard_title", "heading_l")
+        title = font("chart_title", "heading_s")
         border = f"1px solid {tokens.colors['border']}" if template.components.get("chart_card") == "bordered" else "none"
         rules = [
             f"/* SharpSight template {template.id}@{template.version} — generated from design tokens */",
@@ -354,8 +375,6 @@ class DashboardAgent:
             f"border-radius: {radius}px; padding: {space('card_padding', 'sm')}px; }}",
             f".dashboard-component-chart-holder .header-title {{ font-size: {title['size_px']}px; "
             f"font-weight: {title['weight']}; color: {tokens.colors['text']}; }}",
-            f".dashboard-header-container .editable-title, .dashboard-header-container [data-test='editable-title'] "
-            f"{{ font-size: {heading['size_px']}px; font-weight: {heading['weight']}; }}",
         ]
         if template.components.get("kpi_card") == "accent_top":
             rules.append(".dashboard-component-chart-holder:has([data-test-viz-type='big_number_total']) "
@@ -363,9 +382,12 @@ class DashboardAgent:
         return "\n".join(rules) + "\n"
 
     def json_metadata(self, spec: DashboardSpec, template: TemplateDef, filters: list[dict[str, Any]]) -> dict[str, Any]:
+        # NO dashboard-level colour scheme. Superset pushes one into every chart, and the country map reads
+        # its presence as « colour by category »: the regions came out in six unrelated colours that said
+        # nothing about the metric (first render, 2026-10-03). Each chart already carries the template's
+        # scheme itself, so series colours stay the same across the dashboard.
         return {
             "native_filter_configuration": filters,
-            "color_scheme": spec.theme.color_scheme or template.theme.color_scheme,
             "cross_filters_enabled": True,
             "filter_bar_orientation": template.filters.orientation.upper(),
             "refresh_frequency": 0,

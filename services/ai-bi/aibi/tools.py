@@ -60,6 +60,7 @@ class ToolSpec:
     name: str
     description: str
     arguments: type[BaseModel]
+    capability: str = "tools.use"
 
 
 class NoArgs(BaseModel):
@@ -123,8 +124,14 @@ class ValidateArgs(BaseModel):
     visual: bool = True
 
 
-def tool(name: str, description: str, arguments: type[BaseModel] = NoArgs) -> Callable:
-    """Register a tool. Whatever happens inside — success, refusal, crash — one audit record is written."""
+def tool(name: str, description: str, arguments: type[BaseModel] = NoArgs,
+         capability: str = "tools.use") -> Callable:
+    """Register a tool. Whatever happens inside — success, refusal, crash — one audit record is written.
+
+    `capability` is what the caller must hold. Looking something up in the registries needs only `bi.read` —
+    a reviewer must be able to see what a dashboard is made of. Anything that runs a query, builds a model
+    or touches the BI engine needs `tools.use`. Which datasets either may see is a separate question, asked
+    inside each tool."""
 
     def wrap(fn: Callable) -> Callable:
         @functools.wraps(fn)
@@ -133,7 +140,7 @@ def tool(name: str, description: str, arguments: type[BaseModel] = NoArgs) -> Ca
             note: dict[str, Any] = {}
             started = time.monotonic()
             try:
-                self.policy.require(ctx.identity, "tools.use")
+                self.policy.require(ctx.identity, capability)
                 result = fn(self, ctx, note, **{k: getattr(args, k) for k in type(args).model_fields})
             except Exception as exc:
                 self.audit.record(
@@ -150,7 +157,7 @@ def tool(name: str, description: str, arguments: type[BaseModel] = NoArgs) -> Ca
                 duration_ms=int((time.monotonic() - started) * 1000))
             return result
 
-        inner.spec = ToolSpec(name, description, arguments)  # type: ignore[attr-defined]
+        inner.spec = ToolSpec(name, description, arguments, capability)  # type: ignore[attr-defined]
         return inner
 
     return wrap
@@ -217,6 +224,12 @@ class Toolbox:
                               "found valid (save_dashboard_spec)", "spec_not_validated")
         return body, DashboardSpec(**body["spec"])
 
+    @staticmethod
+    def live_charts(engine: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """The charts that are in the BI engine now. A slot dropped from the specification keeps its record
+        (so the chart can come back as itself) but has no id until it does."""
+        return {slot: chart for slot, chart in engine.get("charts", {}).items() if chart.get("id") is not None}
+
     def bi_database_id(self) -> int:
         if self._bi_database_id is None:
             self._bi_database_id = self.superset.ensure_database(*self._bi_database)
@@ -251,7 +264,8 @@ class Toolbox:
                 "datasets": self.project(ctx)["engine"]["datasets"]}
 
     # ── datasets and metrics ────────────────────────────────────────────────────────────────────────────────
-    @tool("list_datasets", "List the datasets the requesting user may read, with owner and certification.")
+    @tool("list_datasets", "List the datasets the requesting user may read, with owner and certification.",
+          capability="bi.read")
     def list_datasets(self, ctx: ToolContext, note: dict) -> list[dict[str, Any]]:
         permitted = self.policy.permitted_datasets(ctx.identity)
         note["datasets"] = [d.id for d in permitted]
@@ -259,7 +273,7 @@ class Toolbox:
                  "domain": d.domain, "grain": d.grain, "description": d.description} for d in permitted]
 
     @tool("get_dataset", "Registry metadata of one dataset: owner, certification, source model, grain, SLA.",
-          DatasetArgs)
+          DatasetArgs, capability="bi.read")
     def get_dataset(self, ctx: ToolContext, note: dict, dataset_id: str) -> dict[str, Any]:
         dataset = self.policy.require_dataset(ctx.identity, dataset_id)
         note["datasets"] = [dataset.id]
@@ -267,7 +281,8 @@ class Toolbox:
         body["relation"] = dataset.relation
         return body
 
-    @tool("get_dataset_schema", "Columns of one dataset: type, role, classification, declared range.", DatasetArgs)
+    @tool("get_dataset_schema", "Columns of one dataset: type, role, classification, declared range.", DatasetArgs,
+          capability="bi.read")
     def get_dataset_schema(self, ctx: ToolContext, note: dict, dataset_id: str) -> dict[str, Any]:
         dataset = self.policy.require_dataset(ctx.identity, dataset_id)
         note["datasets"] = [dataset.id]
@@ -294,14 +309,15 @@ class Toolbox:
         return {"dataset": dataset.id, "columns": result.columns, "rows": result.rows}
 
     @tool("get_metric", "A governed metric: expression, format, dimensions, owner, certification, lineage.",
-          MetricArgs)
+          MetricArgs, capability="bi.read")
     def get_metric(self, ctx: ToolContext, note: dict, metric_id: str) -> dict[str, Any]:
         metric = self.registry.metric(metric_id)
         if not any(self.policy.can_read(ctx.identity, self.registry.dataset(ds)) for ds in metric.lineage.datasets):
             raise PolicyError(f"{ctx.identity.user} has no access to the datasets behind {metric_id}", "dataset_denied")
         return self.semantic.describe(metric)
 
-    @tool("list_metrics", "The governed metrics the user may use, certified ones first.", ListMetricsArgs)
+    @tool("list_metrics", "The governed metrics the user may use, certified ones first.", ListMetricsArgs,
+          capability="bi.read")
     def list_metrics(self, ctx: ToolContext, note: dict, domain: Optional[str], certified_only: bool) -> list[dict]:
         found = []
         for metric in self.registry.metrics.values():
@@ -313,20 +329,20 @@ class Toolbox:
                 found.append(self.semantic.describe(metric))
         return sorted(found, key=lambda m: (not m["certified"], m["id"]))
 
-    @tool("list_dashboard_templates", "The predefined dashboard templates.")
+    @tool("list_dashboard_templates", "The predefined dashboard templates.", capability="bi.read")
     def list_dashboard_templates(self, ctx: ToolContext, note: dict) -> list[dict[str, Any]]:
         return [{"id": t.id, "name": t.template.name, "version": t.version, "description": t.template.description,
                  "slots": {s: {"purpose": b.purpose, "accepts": b.accepts, "mandatory": b.mandatory}
                            for s, b in t.slots.items()}} for t in self.registry.templates.values()]
 
     @tool("get_dashboard_template", "One template: layout, slots and what each accepts, theme, filters.",
-          TemplateArgs)
+          TemplateArgs, capability="bi.read")
     def get_dashboard_template(self, ctx: ToolContext, note: dict, template_id: str) -> dict[str, Any]:
         return self.registry.template(template_id).model_dump()
 
     # ── SQL ─────────────────────────────────────────────────────────────────────────────────────────────────
     @tool("validate_sql", "Say whether a statement would be allowed to run, and why not if not. Runs nothing.",
-          ValidateSqlArgs)
+          ValidateSqlArgs, capability="bi.read")
     def validate_sql(self, ctx: ToolContext, note: dict, sql: str) -> dict[str, Any]:
         verdict = self.policy.validate_sql(sql, ctx.identity)
         note.update(sql=sql, datasets=verdict.datasets, detail={"ok": verdict.ok, "problems": verdict.problems})
@@ -372,7 +388,8 @@ class Toolbox:
         note["detail"] = {**result.summary(), "failures": [f["unique_id"] for f in result.failures()]}
         if not result.ok:
             note["detail"]["output"] = result.output_tail
-        return {"ok": result.ok, **result.summary(), "failures": result.failures(), "output": result.output_tail}
+        return {"ok": result.ok, **result.summary(), "results": result.results, "failures": result.failures(),
+                "output": result.output_tail}
 
     @tool("compile_dbt", "Compile the selected models in the project's workspace (target dev).", DbtSelectArgs)
     def compile_dbt(self, ctx: ToolContext, note: dict, select: str, exclude: Optional[str]) -> dict[str, Any]:
@@ -384,13 +401,36 @@ class Toolbox:
         workspace = self._workspace(ctx)
         outcome = self._dbt_note(note, self.dbt.run(workspace, select))
         if outcome["ok"]:
+            built = {r["unique_id"]: r["status"] for r in outcome["results"]}
             self.dbt.docs(workspace, select)
-            self.store.save_lineage(lineage_from_artifacts(workspace / "target", "dev"))
+            self._record_generated(workspace, built)
         return outcome
+
+    def _record_generated(self, workspace: Path, outcomes: dict[str, str]) -> None:
+        """Keep what dbt knows about the GENERATED models. Only those: the workspace's manifest also lists
+        the governed models — as the dev target would name them, in a schema they were never built in — and
+        those are known, correctly, from the production build.
+
+        dbt rewrites run_results.json on every command, so each call sees one command's outcomes. They are
+        therefore passed in and MERGED: a model's build status and its columns survive the test run that
+        follows, and a test already seen passing is not turned back into « not run » by a later compile."""
+        for node in lineage_from_artifacts(workspace / "target", "dev"):
+            if "ai_generated" not in node["tags"]:
+                continue
+            previous = self.store.lineage_by_id(node["unique_id"]) or {}
+            known = {t["name"]: t["status"] for t in previous.get("tests", [])}
+            node["status"] = outcomes.get(node["unique_id"]) or previous.get("status")
+            node["columns"] = node["columns"] or previous.get("columns", {})
+            for test in node["tests"]:
+                test["status"] = outcomes.get(test["unique_id"]) or known.get(test["name"], "not run")
+            self.store.save_lineage([node])
 
     @tool("run_dbt_test", "Run the dbt tests of the selected models.", DbtSelectArgs)
     def run_dbt_test(self, ctx: ToolContext, note: dict, select: str, exclude: Optional[str]) -> dict[str, Any]:
-        return self._dbt_note(note, self.dbt.test(self._workspace(ctx), select, exclude))
+        workspace = self._workspace(ctx)
+        outcome = self._dbt_note(note, self.dbt.test(workspace, select, exclude))
+        self._record_generated(workspace, {r["unique_id"]: r["status"] for r in outcome["results"]})
+        return outcome
 
     # ── the specification ───────────────────────────────────────────────────────────────────────────────────
     @tool("save_dashboard_spec", "Validate a dashboard specification and save it as the project's own. The BI "
@@ -419,9 +459,14 @@ class Toolbox:
             engine_id = self.superset.create_dataset(database_id, dataset.db_schema, dataset.source_model)
         else:
             engine_id = found["id"]
-            self.superset.refresh_dataset(engine_id)
 
         current = self.superset.get_dataset(engine_id)
+        # Re-read the table's columns ONLY when the engine is missing one the registry has — a generated model
+        # rebuilt with another shape. A refresh that changes nothing still rewrites the dataset (and, in 6.1,
+        # logs a failed connection to a database named after the schema for every date column).
+        if not set(dataset.columns) <= {column["column_name"] for column in current.get("columns", [])}:
+            self.superset.refresh_dataset(engine_id)
+            current = self.superset.get_dataset(engine_id)
         ours = {m["metric_name"]: m for m in (self.semantic.engine_metric(metric)
                                               for metric in self.registry.metrics.values()
                                               if self.semantic.valid_on(metric, dataset)[0])}
@@ -494,11 +539,16 @@ class Toolbox:
             spec.theme.color_scheme or template.theme.color_scheme,
             spec.theme.sequential_scheme or template.theme.sequential_scheme, body["project_id"], headline)
 
-        known = engine.get("charts", {}).get(slot, {}).get("id")
+        previous = engine.get("charts", {}).get(slot, {})
+        known = previous.get("id")
         if known and self.superset.get_chart(known) is not None:
             self.superset.update_chart(known, payload)
             chart_id, action = known, "updated"
         else:
+            # A chart that was deleted and comes back for the same slot keeps its uuid: it is the same chart
+            # to anything outside the engine that refers to it — an export, an embed, a link.
+            if previous.get("uuid"):
+                payload["uuid"] = previous["uuid"]
             chart_id, action = self.superset.create_chart(payload), "created"
         chart = self.superset.get_chart(chart_id) or {}
         engine.setdefault("charts", {})[slot] = {"id": chart_id, "uuid": chart.get("uuid"),
@@ -521,9 +571,14 @@ class Toolbox:
         specified = {c.slot for c in spec.components}
         removed = []
         for slot in [s for s in engine.get("charts", {}) if s not in specified]:
-            self.superset.delete_chart(engine["charts"][slot]["id"])
-            removed.append({"type": "chart", "id": engine["charts"].pop(slot)["id"], "slot": slot, "action": "deleted"})
-        charts = {slot: chart for slot, chart in engine.get("charts", {}).items() if slot in specified}
+            chart = engine["charts"][slot]
+            if chart.get("id") is None:
+                continue
+            self.superset.delete_chart(chart["id"])
+            removed.append({"type": "chart", "id": chart["id"], "slot": slot, "action": "deleted"})
+            # the record stays, without its id: should the slot return, the chart returns with the same uuid
+            engine["charts"][slot] = {**chart, "id": None}
+        charts = {slot: chart for slot, chart in self.live_charts(engine).items() if slot in specified}
 
         filters = self.dashboards.native_filters(spec, engine["datasets"], charts)
         self.superset.update_dashboard(engine["dashboard"]["id"], {
@@ -564,7 +619,7 @@ class Toolbox:
                 baseline = self.superset.chart_data(self.charts.query_context(kpi, dataset, metric, engine_id))
                 if dataset.columns[column].role == "time":
                     value: Any = "Last week"
-                    clause = {"col": column, "op": "TEMPORAL_RANGE", "val": value}
+                    context = self.charts.query_context(kpi, dataset, metric, engine_id, time_range=value)
                     distinct = 2
                 else:
                     values = self._run_sql(ctx, self.sql.distinct_values(dataset, column, 50),
@@ -572,10 +627,10 @@ class Toolbox:
                     if not values:
                         continue
                     value, distinct = values[0]["value"], len(values)
-                    clause = {"col": column, "op": "IN", "val": [value]}
-                filtered = self.superset.chart_data(self.charts.query_context(kpi, dataset, metric, engine_id, [clause]))
+                    context = self.charts.query_context(kpi, dataset, metric, engine_id,
+                                                        [{"col": column, "op": "IN", "val": [value]}])
                 probes.append({"filter": column, "dataset": dataset_id, "value": value, "baseline": baseline,
-                               "filtered": filtered, "expect_change": distinct > 1})
+                               "filtered": self.superset.chart_data(context), "expect_change": distinct > 1})
 
         self.evidence.setdefault(body["project_id"], {}).update(data=data, probes=probes)
         note.update(datasets=spec.datasets(),
@@ -591,13 +646,27 @@ class Toolbox:
         engine = body.get("engine", {})
         template = self.registry.template(spec.dashboard.template)
         out_dir = self.state_dir / "work" / body["project_id"] / "renders"
-        renders = [self.visual.render(engine["dashboard"]["id"], len(engine.get("charts", {})), out_dir,
-                                      viewport.name, viewport.width)
+        charts = len(self.live_charts(engine))
+        renders = [self.visual.render(engine["dashboard"]["id"], charts, out_dir, viewport.name, viewport.width)
                    for viewport in template.responsive.viewports]
-        self.evidence.setdefault(body["project_id"], {})["renders"] = renders
+        evidence = self.evidence.setdefault(body["project_id"], {})
+        evidence["renders"] = renders
+
+        # Once more, with every filter of the specification SET — to the values the probes found. What each
+        # chart then asks for is compared with what it asked unfiltered: the only proof that the filters, as
+        # configured on the dashboard, reach the charts they are scoped to.
+        values = {p["filter"]: p["value"] for p in evidence.get("probes", [])}
+        mask = self.dashboards.filter_state(spec, values)
+        evidence["filtered_render"] = evidence["filters_applied"] = None
+        if mask:
+            evidence["filtered_render"] = self.visual.render(
+                engine["dashboard"]["id"], charts, out_dir, "filtered", template.responsive.viewports[0].width,
+                native_filters=mask)
+            evidence["filters_applied"] = {column: values[column] for column in spec.filters if column in values}
         note["detail"] = {"renders": [{"viewport": r.viewport, "width": r.width, "load_ms": r.load_ms,
                                        "components": len(r.components), "requests": len(r.calls),
-                                       "error": r.error} for r in renders]}
+                                       "error": r.error} for r in renders],
+                          "filtered_render": bool(mask), "filters_applied": evidence["filters_applied"]}
         return renders
 
     @tool("validate_dashboard", "The whole validation — data, SQL, BI, security, performance, visual — over the "
@@ -623,6 +692,10 @@ class Toolbox:
                                            lambda sql, purpose: self._run_sql(ctx, sql, purpose)))
         engine_datasets = {ds: self.superset.get_dataset(engine_id) for ds, engine_id in engine.get("datasets", {}).items()}
         report.extend(self.validation.bi(spec, template, engine_datasets, data, probes, renders))
+        if visual:
+            report.extend(self.validation.dashboard_filters(
+                spec, self.live_charts(engine), renders, evidence.get("filtered_render"),
+                evidence.get("filters_applied")))
         report.extend(self.validation.security(spec, ctx.identity, ctx.query_log,
                                                self.superset.find_database(self._bi_database[0])))
         report.extend(self.validation.performance(data, renders))
@@ -637,7 +710,7 @@ class Toolbox:
             report.add("visual", "screenshot generated", "fail", "", "the dashboard has not been rendered",
                        code="render_failed")
         for render in renders:
-            report.extend(self.visual.check(render, spec, template, engine.get("charts", {}), data))
+            report.extend(self.visual.check(render, spec, template, self.live_charts(engine), data))
 
         evidence["report"] = report
         note.update(datasets=spec.datasets(), validation=report.summary(),

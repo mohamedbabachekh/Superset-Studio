@@ -13,7 +13,8 @@ roles:
     datasets: ["cem.*"]
     classifications: [public, internal]
   bi_release_manager:
-    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore]
+    # tools.use: a restore re-applies a specification through the same tools a generation uses
+    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore, tools.use]
     datasets: ["cem.*"]
     classifications: [public, internal]
   auditor:

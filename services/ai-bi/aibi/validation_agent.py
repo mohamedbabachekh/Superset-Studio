@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 
 from .data_gateway import QueryLog, QueryResult
 from .models import DashboardSpec, DatasetDef, MetricDef, TemplateDef, ValidationReport
-from .policy_engine import Identity, PolicyEngine, PolicyError
+from .policy_engine import Identity, PolicyEngine
 from .registry import Registry
 from .sql_agent import SqlAgent
 from .store import Store
@@ -225,6 +225,44 @@ class ValidationAgent:
                 report.add("bi", "filters work", "pass", subject, f"applied {probe['value']!r} through the BI engine")
         return report
 
+    def dashboard_filters(self, spec: DashboardSpec, charts: dict[str, dict[str, Any]], renders: list[Any],
+                          filtered: Optional[Any], applied: Optional[dict[str, Any]]) -> ValidationReport:
+        """The filters as CONFIGURED on the dashboard — their targets, their scopes — tried on the dashboard:
+        it is opened with every filter set, and each chart in scope must then ask for something else than it
+        did unfiltered, and still get an answer."""
+        report = ValidationReport()
+        if not spec.filters:
+            return report
+        base = next((r for r in renders if not r.error), None)
+        what = ", ".join(f"{k}={v!r}" for k, v in (applied or {}).items())
+        if filtered is None or filtered.error or base is None:
+            report.add("bi", "filters work", "fail", "on the dashboard",
+                       (filtered.error if filtered is not None else None) or "the filtered dashboard was not rendered")
+            return report
+        before = {c["chart_id"]: c for c in base.calls if c["kind"] == "chart"}
+        after = {c["chart_id"]: c for c in filtered.calls if c["kind"] == "chart"}
+        for component in spec.components:
+            dataset = self.registry.dataset(component.dataset)
+            reached = [f for f in (applied or {}) if f in dataset.columns]
+            chart_id = (charts.get(component.slot) or {}).get("id")
+            if not reached or chart_id is None:
+                continue
+            subject = f"on the dashboard → {component.slot}"
+            answer = after.get(chart_id)
+            if answer is None:
+                report.add("bi", "filters work", "fail", subject, "the chart made no request once filtered",
+                           slot=component.slot)
+            elif answer["status"] != 200 or answer["error"]:
+                report.add("bi", "filters work", "fail", subject,
+                           f"{answer['status']} {answer['error'] or ''}".strip(), slot=component.slot)
+            elif answer["digest"] == (before.get(chart_id) or {}).get("digest"):
+                report.add("bi", "filters work", "fail", subject,
+                           f"with {what} the chart received exactly what it receives unfiltered", slot=component.slot)
+            else:
+                report.add("bi", "filters work", "pass", subject, f"with {what}: {answer['rowcount']} rows",
+                           slot=component.slot)
+        return report
+
     # ── security ────────────────────────────────────────────────────────────────────────────────────────────
     def security(self, spec: DashboardSpec, identity: Identity, log: QueryLog,
                  connection: Optional[dict[str, Any]]) -> ValidationReport:
@@ -327,4 +365,4 @@ def _in_range(value: Any, valid: Optional[list[Optional[float]]]) -> tuple[bool,
 
 
 def _short(exc: Exception) -> str:
-    return str(exc).strip().splitlines()[0][:200] if isinstance(exc, (PolicyError, Exception)) else ""
+    return str(exc).strip().splitlines()[0][:200]

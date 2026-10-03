@@ -209,6 +209,9 @@ class Registry:
         existing = self.datasets.get(dataset.id)
         if existing is not None and not existing.generated_by:
             raise RegistryError(f"{dataset.id} is a governed dataset and cannot be replaced by a generated one")
+        if existing is not None and existing.project != dataset.project:
+            raise RegistryError(f"{dataset.id} was generated for BI project {existing.project} and cannot be "
+                                f"replaced by {dataset.project}")
         self.generated_dir.mkdir(parents=True, exist_ok=True)
         body = dataset.model_dump(exclude_none=True)
         columns = body.pop("columns")

@@ -3,6 +3,24 @@
 Versions are the date a bundle was built (`sharpsight-superset-devkit-<version>.tar.gz`). Everything below was
 built and verified on a running kit before it was written down.
 
+## Not in a bundle yet — the AI BI engine (2026-10-03)
+
+An optional overlay; the kit itself is unchanged and starts without it. See [docs/ai-bi.md](docs/ai-bi.md).
+
+- **A request becomes a dashboard awaiting review.** `bash ai-bi.sh demo` takes the POC's own sentence through
+  twenty-two steps: certified datasets and metrics found, the one missing column (the map's region code)
+  supplied by a generated dbt model on a branch of its own, a dashboard specification validated before Superset
+  is called, seven charts and three filters created through the REST API, 179 checks, a screenshot, a git commit,
+  `READY_FOR_REVIEW`. Then `approve … UAT` and `approve … PROD`, by two other people.
+- **What is governed stays governed**: registries in `registry/`, a real dbt project in `dbt/`, three database
+  roles (the service that would talk to a model can write to one schema of drafts and nothing else), every action
+  a tool with a policy check and an audit record, an `.ssbi` package built from the commit that was validated.
+- **Which language model drives it is left open.** The planner is deterministic today; `aibi/llm.py` is the seam.
+- Verified on a running kit, from an erased engine: the request (four times), fifteen review cases, a forced
+  failure that wrote no version and put the reviewed dashboard back, the fix loop once under a stricter policy.
+  Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
+  the offline bundle does not carry the engine's image.
+
 ## 20261002
 
 - **The import sets the connection's URI again after importing.** `import-dashboards` matches a database by

@@ -55,6 +55,8 @@ visual:
   blank_ratio: 0.995
   # fewer pixels than this per category and the labels of a ranking are on top of each other
   min_px_per_category: 16
+  # text drawn smaller than this is not read by anyone
+  min_font_px: 9
   max_fix_iterations: 3
 
 deployment:

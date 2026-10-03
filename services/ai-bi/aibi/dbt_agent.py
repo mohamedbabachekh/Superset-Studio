@@ -46,9 +46,13 @@ class DbtAgent:
         short = base.id.split(".", 1)[-1]
         domain = base.id.split(".", 1)[0]
         added = ", ".join(c for j in joins for c in j.add_columns)
+        # The project is in BOTH names. Two projects needing the same join get two drafts, each rebuilt and
+        # promoted with its own project — never one table that a second project's run rewrites under a
+        # dashboard the first already has in production.
+        owner = slugify(project_id).replace("-", "_")
         return ModelPlan(
-            name=f"aigen_{slugify(project_id).replace('-', '_')}__{short}_{suffix}",
-            dataset_id=f"{domain}.{short}_{suffix}",
+            name=f"aigen_{owner}__{short}_{suffix}",
+            dataset_id=f"{domain}.{owner}__{short}_{suffix}",
             description=(f"{base.name} with {added} from "
                          + ", ".join(self.registry.dataset(j.dataset).name for j in joins)
                          + f". Generated for BI project {project_id}; same grain as {base.id}."),
@@ -106,8 +110,8 @@ class DbtAgent:
             "meta": {"sharpsight_dataset": plan.dataset_id, "generated_by": "sharpsight-ai-bi",
                      "project": project_id, "certified": False, "derived_from": plan.base_dataset},
             "data_tests": [
-                {"unique_combination": {"combination_of_columns": plan.grain}},
-                {"equal_rowcount": {"compare_model": f"ref('{plan.base_model}')"}},
+                {"unique_combination": {"arguments": {"combination_of_columns": plan.grain}}},
+                {"equal_rowcount": {"arguments": {"compare_model": f"ref('{plan.base_model}')"}}},
             ],
             "columns": columns,
         }]}

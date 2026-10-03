@@ -54,7 +54,6 @@ theme:
   variant: light
 
 typography:
-  dashboard_title: heading_l
   chart_title: heading_s
   kpi_value: display
 

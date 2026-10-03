@@ -83,6 +83,9 @@ class Pipeline:
             run.status = "succeeded"
         except Exception as exc:  # noqa: BLE001 — whatever stopped it, the run must say so
             run.status, run.error = "failed", f"{type(exc).__name__}: {str(exc)[:1500]}"
+            aftermath = self._put_back(run, ctx)
+            if aftermath:
+                run.error += f" — {aftermath}"
             self.audit.record(action="run:failed", user=identity.user, request_id=run.request_id, actor="ai",
                               ai_model=run.ai_model, project_id=run.project_id,
                               outcome="refused" if isinstance(exc, PolicyError) else "error",
@@ -90,6 +93,30 @@ class Pipeline:
         run.ended_at = utcnow()
         self.store.save_run(run)
         return run
+
+    def _put_back(self, run: RunRecord, ctx: ToolContext) -> Optional[str]:
+        """A run that failed AFTER it changed the BI engine must not leave a reviewed dashboard altered: the
+        latest version's specification is re-applied from git. Returns what to tell the requester."""
+        touched = next(s for s in run.steps if s.key == "create_superset_assets").status != "pending"
+        if not touched or not ctx.project_id:
+            return None
+        latest = self.store.latest_version(ctx.project_id)
+        if latest is None:
+            return "the dashboard in the BI engine holds this failed attempt, as an unpublished draft"
+        try:
+            spec = self.lifecycle.specification_at(ctx.project_id, latest.version)
+            if not self.tools.save_dashboard_spec(ctx, spec=spec).passed:
+                raise PipelineError("its specification is no longer valid")
+            self.tools.apply_specification(ctx)
+            drift = self.lifecycle.drift(latest)
+        except Exception as exc:  # noqa: BLE001
+            return (f"the dashboard in the BI engine holds this failed attempt and could NOT be put back as "
+                    f"version {latest.version}: {str(exc)[:300]}")
+        self.audit.record(action="restore", user=ctx.identity.user, request_id=ctx.request_id, actor="ai",
+                          ai_model=ctx.ai_model, project_id=ctx.project_id,
+                          detail={"restored_version": latest.version, "reason": "the run failed", "drift": drift})
+        return (f"the dashboard was put back as version {latest.version}" +
+                ("" if drift is None else f", but {drift}"))
 
     # ── the twenty-two steps ────────────────────────────────────────────────────────────────────────────────
     def _run(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str]) -> None:
@@ -111,10 +138,11 @@ class Pipeline:
                 raise PolicyError(f"{identity.user} has no access to BI project {project_id}", "tenant")
             latest = self.store.latest_version(project_id)
             if latest and latest.state in ("UAT", "PROD") and latest.review_status != "REJECTED":
+                way_out = ("ask under another subject, or have it rejected in review first" if latest.state == "UAT"
+                           else "ask under another subject")
                 raise PipelineError(
                     f"BI project {project_id} v{latest.version} is in {latest.state}. This kit has ONE BI engine, "
-                    "so regenerating it would rewrite the promoted dashboard in place; ask under another subject, "
-                    "or have the promotion rejected first.")
+                    f"so regenerating it would rewrite the promoted dashboard in place; {way_out}.")
             project.update(title=requirement.subject, template=template.id, spec_valid=False)
             tools.save_project(project)
             step.summary = {"project_id": project_id, "subject": requirement.subject, "template": template.id,
@@ -127,7 +155,7 @@ class Pipeline:
         with steps.step("find_datasets") as step:
             permitted = [registry.dataset(d["id"]) for d in tools.list_datasets(ctx)]
             wanted = [registry.metrics[m] for m in requirement.metrics if m in registry.metrics]
-            candidates = self.datasets.discover(requirement, permitted, wanted)
+            candidates = self.datasets.discover(requirement, permitted, wanted, project_id)
             if not candidates:
                 raise PipelineError(f"no dataset {identity.user} may read matches « {requirement.subject} »")
             for candidate in candidates[:3]:

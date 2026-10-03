@@ -5,17 +5,20 @@ models:
     description: Quality of experience per day, site and radio access technology.
     data_tests:
       - unique_combination:
-          combination_of_columns: [date, site_id, rat]
+          arguments:
+            combination_of_columns: [date, site_id, rat]
     columns:
       - name: qoe_score
         description: Quality of experience on a 1 to 5 scale.
         data_tests:
           - not_null
           - accepted_range:
-              min_value: 1
-              max_value: 5
+              arguments:
+                min_value: 1
+                max_value: 5
       - name: active_users
         data_tests:
           - not_null
           - accepted_range:
-              min_value: 0
+              arguments:
+                min_value: 0

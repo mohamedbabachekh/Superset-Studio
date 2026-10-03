@@ -20,6 +20,8 @@ clean-targets: [target, dbt_packages]
 # dbt reports anonymous usage to its vendor by default. This kit runs air-gapped and announces itself to nobody.
 flags:
   send_anonymous_usage_stats: false
+  # a generic test's inputs are written under `arguments:`, the shape dbt is moving to
+  require_generic_test_arguments_property: true
 
 vars:
   # where the CEM extract is landed. In this kit it is synthetic (services/ai-bi/sql/bootstrap.sql); with a

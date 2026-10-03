@@ -14,3 +14,7 @@ exports/*
 *.tgz
 *.tar.gz
 *.tar.gz.sha256
+
+# Python leftovers, when the engine's tests are run from a checkout.
+__pycache__/
+.pytest_cache/

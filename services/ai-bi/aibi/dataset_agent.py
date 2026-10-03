@@ -51,12 +51,16 @@ class DatasetAgent:
         self.registry = registry
         self.semantic = semantic
 
-    def discover(self, requirement: Requirement, permitted: list[DatasetDef],
-                 metrics: list[MetricDef]) -> list[Candidate]:
+    def discover(self, requirement: Requirement, permitted: list[DatasetDef], metrics: list[MetricDef],
+                 project_id: Optional[str] = None) -> list[Candidate]:
         words = {w for w in re.findall(r"[a-z0-9]+", requirement.subject.lower()) if len(w) > 1}
         wanted = {ds for metric in metrics for ds in metric.lineage.datasets}
         candidates: list[Candidate] = []
         for dataset in permitted:
+            # another project's draft is not a dataset to build on: it is uncertified, and its owner may
+            # rebuild or drop it at any time. What is shared between projects is what is governed.
+            if dataset.project and dataset.project != project_id:
+                continue
             score, reasons = 0.0, []
             if dataset.certified:
                 score += 3

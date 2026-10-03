@@ -118,9 +118,10 @@ class Store:
                             json.dumps(node, ensure_ascii=False)))
 
     def lineage_for(self, model_name: str) -> Optional[dict[str, Any]]:
-        """A model's own record, preferring the generated (dev) one when both environments know the name."""
+        """A model's own record: the production build's when it knows the model, the workspace's otherwise."""
         with self._connect() as db:
-            rows = db.execute("select body from lineage where name = ? order by environment", (model_name,)).fetchall()
+            rows = db.execute("select body from lineage where name = ? order by environment desc",
+                              (model_name,)).fetchall()
         return json.loads(rows[0]["body"]) if rows else None
 
     def lineage_by_id(self, unique_id: str) -> Optional[dict[str, Any]]:

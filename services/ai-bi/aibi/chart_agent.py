@@ -59,8 +59,12 @@ class ChartAgent:
         }
         kind = component.type
         if kind == "big_number":
-            form.update(metric=metric.key, y_axis_format=number_format, header_font_size=0.4,
-                        subtitle=metric.unit, subtitle_font_size=0.15, time_format="smart_date",
+            # The engine sizes a headline number as a share of its card, in five steps; the template names a
+            # typography token, and the token's size picks the step.
+            token = self.registry.tokens.typography[template.typography.get("kpi_value", "display")]
+            share = next(s for px, s in ((36, 0.6), (28, 0.5), (22, 0.4), (0, 0.3)) if token["size_px"] >= px)
+            form.update(metric=metric.key, y_axis_format=number_format, header_font_size=share,
+                        subtitle=metric.unit, subtitle_font_size=0.2, time_format="smart_date",
                         force_timestamp_formatting=False)
             # a headline number too long for its card is shown compact — decided by the template, not here
             form["_compact_above"] = compact_above
@@ -75,9 +79,13 @@ class ChartAgent:
                         # a score between 3.1 and 3.6 drawn from zero is a flat line that says nothing
                         truncateYAxis=True, y_axis_bounds=[None, None], truncateXAxis=True)
         elif kind == "bar":
+            # Horizontal bars are drawn from the bottom up, so the FIRST category lands at the bottom: a
+            # ranking that should read best-first from the top is therefore sorted ascending for display
+            # (seen on the first render, 2026-10-03: the best region was at the bottom). Which rows are
+            # fetched is decided separately, by order_desc and row_limit.
             form.update(x_axis=component.dimension, metrics=[metric.key], groupby=[],
                         orientation="horizontal", x_axis_sort=metric.key,
-                        x_axis_sort_asc=options.sort == "asc", row_limit=options.row_limit or 100,
+                        x_axis_sort_asc=options.sort != "asc", row_limit=options.row_limit or 100,
                         order_desc=options.sort != "asc", truncate_metric=True, show_empty_columns=True,
                         color_scheme=color_scheme, show_value=True, show_legend=False, rich_tooltip=True,
                         y_axis_format=number_format, y_axis_bounds=[None, None], truncateXAxis=True,
@@ -86,7 +94,9 @@ class ChartAgent:
             form.update(column=metric.distribution_column, groupby=[], bins=options.bins or 12,
                         normalize=False, cumulative=False, row_limit=10000, color_scheme=color_scheme,
                         show_value=False, show_legend=False, x_axis_title=metric.name,
-                        y_axis_title="Observations")
+                        # no y-axis title: this chart has no margin control for it, and the engine draws it
+                        # over the tick labels (seen on the first render)
+                        x_axis_format=number_format)
         elif kind == "pie":
             form.update(groupby=[component.dimension], metric=metric.key, row_limit=options.row_limit or 12,
                         sort_by_metric=True, color_scheme=color_scheme, show_labels=True,
@@ -134,12 +144,23 @@ class ChartAgent:
 
     # ── the same component, as a plain query ────────────────────────────────────────────────────────────────
     def query_context(self, component: ComponentSpec, dataset: DatasetDef, metric: MetricDef,
-                      engine_dataset_id: int, filters: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+                      engine_dataset_id: int, filters: Optional[list[dict[str, Any]]] = None,
+                      time_range: Optional[str] = None) -> dict[str, Any]:
         """What the component asks of the data, sent through the engine's own query API. Used to retrieve and
-        validate the dashboard's data independently of how any chart plugin builds its request."""
-        query: dict[str, Any] = {"filters": list(filters or []), "extras": {"where": "", "having": ""},
+        validate the dashboard's data independently of how any chart plugin builds its request.
+
+        A dashboard's time filter is NOT one more filter clause. The chart carries its own clause on the time
+        column, saying « No filter », and the dashboard sends a query-level `time_range` that replaces it — a
+        `time_range` of « No filter » at that level therefore silences any range written in a clause
+        (measured against 6.1 on 2026-10-03, after a probe built the other way reported a working filter as
+        broken). So: the chart's clause always, and `time_range` only when the dashboard would send one."""
+        own = ([{"col": dataset.time_column, "op": "TEMPORAL_RANGE", "val": "No filter"}]
+               if dataset.time_column else [])
+        query: dict[str, Any] = {"filters": [*own, *(filters or [])], "extras": {"where": "", "having": ""},
                                  "columns": [], "metrics": [metric.key], "orderby": [], "row_limit": 5000,
-                                 "time_range": "No filter", "post_processing": []}
+                                 "post_processing": []}
+        if time_range:
+            query["time_range"] = time_range
         kind = component.type
         if kind in ("line", "area"):
             query["columns"] = [component.dimension or dataset.time_column]

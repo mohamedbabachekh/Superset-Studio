@@ -120,7 +120,7 @@ def lineage_from_artifacts(target_dir: Path, environment: str) -> list[dict[str,
             continue
         for parent in node.get("depends_on", {}).get("nodes", []):
             tests_by_model.setdefault(parent, []).append(
-                {"name": node.get("name"), "status": outcomes.get(unique_id, "not run")})
+                {"name": node.get("name"), "unique_id": unique_id, "status": outcomes.get(unique_id, "not run")})
 
     found: list[dict[str, Any]] = []
     for unique_id, node in nodes.items():

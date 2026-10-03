@@ -3,7 +3,8 @@
   DEV   the AI and the developer create and modify. A generation that passes validation ends here as
         READY_FOR_REVIEW.
   UAT   a reviewer approves. Refused unless the version's validation passed AND the dashboard in the BI
-        engine is still, byte for byte, the one that was validated. The .ssbi package is built here.
+        engine is still the one that was validated — same content, whatever ids the engine gave it
+        (canonical_assets). The .ssbi package is built here.
   PROD  an explicit approval by a second person. What ships is the package UAT built — its checksum is
         verified again — not whatever the BI engine holds that day.
 
@@ -43,22 +44,102 @@ class LifecycleError(Exception):
     pass
 
 
-def asset_version(bundle: bytes) -> str:
-    """A fingerprint of a dashboard export that depends on its CONTENT only: not on the export's timestamped
-    folder, its metadata file, or the marks a promotion sets."""
-    digest = hashlib.sha256()
+def _meaningful(value: Any) -> Any:
+    """A document without its empties. The BI engine writes « nothing » three ways — null, an empty string,
+    an empty list — and moves between them on its own: refreshing a dataset turned every column's
+    `expression: null` into `expression: ''`, and a dashboard nobody had touched was reported as changed."""
+    if isinstance(value, dict):
+        kept = {k: _meaningful(v) for k, v in value.items()}
+        return {k: v for k, v in kept.items() if v not in (None, "", [], {})}
+    if isinstance(value, list):
+        return [_meaningful(v) for v in value]
+    return value
+
+
+# What the engine assigns, or derives, and a person did not decide.
+_ENGINE_KEYS = ("uuid", "theme_uuid", "database_uuid", "version")
+_DERIVED_METADATA = ("color_scheme_domain", "shared_label_colors", "map_label_colors", "chart_configuration",
+                     "global_chart_configuration")
+
+
+def canonical_assets(bundle: bytes) -> dict[str, Any]:
+    """A dashboard export, re-told without anything the BI engine assigned: every chart is named by its PLACE
+    on the dashboard, every dataset by its table, and numeric ids, uuids and file names are gone.
+
+    Two exports are the same here exactly when a reviewer would call the dashboards the same. That matters
+    the day a chart is deleted and re-created — by a restore, or by a failed regeneration being put back:
+    the engine gives it a new id, the export names its file after that id, and a byte-level comparison
+    would refuse, as « changed after validation », a dashboard that is identical."""
+    documents: dict[str, Any] = {}
     with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
-        for name in sorted(archive.namelist(), key=lambda n: n.split("/", 1)[-1]):
+        for name in archive.namelist():
             inner = name.split("/", 1)[-1]
-            if name.endswith("/") or inner == "metadata.yaml":
+            if name.endswith("/") or "/" not in inner:          # metadata.yaml, tags.yaml: about the export
                 continue
             document = yaml.safe_load(archive.read(name))
             if isinstance(document, dict):
-                for key in _GOVERNANCE_KEYS:
-                    document.pop(key, None)
-            digest.update(inner.encode())
-            digest.update(json.dumps(document, sort_keys=True, default=str, ensure_ascii=False).encode())
-    return "sha256:" + digest.hexdigest()
+                documents[inner] = document
+
+    tables = {doc.get("uuid"): f"{doc.get('schema')}.{doc.get('table_name')}"
+              for path, doc in documents.items() if path.startswith("datasets/")}
+    place_by_uuid: dict[Any, str] = {}
+    place_by_id: dict[Any, str] = {}
+    for path, doc in documents.items():
+        if path.startswith("dashboards/"):
+            for key, entry in (doc.get("position") or {}).items():
+                if isinstance(entry, dict) and entry.get("type") == "CHART":
+                    place_by_uuid[entry.get("meta", {}).get("uuid")] = key
+                    place_by_id[entry.get("meta", {}).get("chartId")] = key
+
+    def places(ids: Any) -> list[str]:
+        return sorted(place_by_id.get(i, f"chart {i}") for i in (ids or []))
+
+    def strip(doc: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in doc.items() if k not in _ENGINE_KEYS and k not in _GOVERNANCE_KEYS}
+
+    told: dict[str, Any] = {}
+    for path, doc in documents.items():
+        kind = path.split("/", 1)[0]
+        body = strip(doc)
+        if kind == "dashboards":
+            position = {}
+            for key, entry in (body.get("position") or {}).items():
+                if isinstance(entry, dict) and entry.get("type") == "CHART":
+                    entry = {**entry, "meta": {k: v for k, v in entry.get("meta", {}).items()
+                                               if k not in ("chartId", "uuid")}}
+                position[key] = entry
+            metadata = {k: v for k, v in (body.get("metadata") or {}).items() if k not in _DERIVED_METADATA}
+            filters = []
+            for flt in metadata.get("native_filter_configuration") or []:
+                flt = dict(flt)
+                flt["chartsInScope"] = places(flt.get("chartsInScope"))
+                scope = dict(flt.get("scope") or {})
+                scope["excluded"] = places(scope.get("excluded"))
+                flt["scope"] = scope
+                flt["targets"] = [{**{k: v for k, v in target.items() if k not in ("datasetUuid", "datasetId")},
+                                   "dataset": tables.get(target.get("datasetUuid"))}
+                                  if target else target for target in flt.get("targets") or []]
+                filters.append(flt)
+            metadata["native_filter_configuration"] = filters
+            told[f"dashboard {body.get('slug')}"] = {**body, "position": position, "metadata": metadata}
+        elif kind == "charts":
+            place = place_by_uuid.get(doc.get("uuid"), f"{doc.get('slice_name')} ({doc.get('viz_type')})")
+            params = {k: v for k, v in (body.get("params") or {}).items()
+                      if k not in ("datasource", "slice_id", "dashboards")}
+            body.pop("dataset_uuid", None)
+            told[f"chart {place}"] = {**body, "params": params, "dataset": tables.get(doc.get("dataset_uuid"))}
+        elif kind == "datasets":
+            told[f"dataset {doc.get('schema')}.{doc.get('table_name')}"] = body
+        elif kind == "databases":
+            told[f"database {doc.get('database_name')}"] = body
+    return _meaningful(told)
+
+
+def asset_version(bundle: bytes) -> str:
+    """The fingerprint of a dashboard as validated: a hash of its content (canonical_assets), and of nothing
+    else — not the export's timestamped folder, not the marks a promotion sets, not an id."""
+    told = canonical_assets(bundle)
+    return "sha256:" + hashlib.sha256(json.dumps(told, sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
 
 
 def _dump(path: Path, document: Any) -> None:
@@ -347,7 +428,7 @@ class Lifecycle:
                      "certified_by": f"{identity.user} (SharpSight)",
                      "certification_details": f"SharpSight BI project {project_id} v{record.version} — PROD. "
                                               f"Package sha256 {record.package['sha256'][:16]}…"}
-            for chart in self.store.get_project(project_id)["engine"]["charts"].values():
+            for chart in self.tools.live_charts(self.store.get_project(project_id)["engine"]).values():
                 self.superset.update_chart(chart["id"], {"is_managed_externally": True})
             self.superset.update_dashboard(dashboard_id, marks)
 

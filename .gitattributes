@@ -7,3 +7,5 @@
 *.png binary
 *.jar binary
 *.tar.gz binary
+*.ssbi binary
+*.zip binary
