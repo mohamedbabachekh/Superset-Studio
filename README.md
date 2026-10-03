@@ -10,6 +10,7 @@
 > | [docs/architecture.md](docs/architecture.md) | the containers, the databases, what happens on a start |
 > | [docs/connecting-sharpsight.md](docs/connecting-sharpsight.md) | the Roaming Hub and Bassin de vie, the CEM, what must match |
 > | [docs/cem.md](docs/cem.md) | the cluster: the five settings, the two routes, what each refusal means |
+> | [docs/building-a-bundle.md](docs/building-a-bundle.md) | building, verifying and shipping a deployable bundle |
 > | [docs/lessons.md](docs/lessons.md) | every trap this kit has already paid for, with how it was measured |
 > | [CHANGELOG.md](CHANGELOG.md) | what each bundle changed |
 
@@ -349,7 +350,8 @@ is baked into the image or the bundle.
 | [cem_to_mart.py](cem_to_mart.py) | a CEM query landed in the kit's own database |
 | [docker-compose.yaml](docker-compose.yaml) | the four containers, isolated from everything else |
 | [install.sh](install.sh) | first run, start, stop, erase |
-| [build-devkit-bundle.sh](build-devkit-bundle.sh) | one tar for a machine with no internet |
+| [build-devkit-bundle.sh](build-devkit-bundle.sh) | one tar for a machine with no internet ([how](docs/building-a-bundle.md)) |
+| [verify-bundle.sh](verify-bundle.sh) | checks a bundle before it leaves the machine; `INSTALL=1` rehearses the install |
 | [.env.example](.env.example) | every setting, with the URI of every source |
 | [cem.env.example](cem.env.example) | the CEM's settings, ready but for the host, the user and the password |
 | [devkit_seed.py](devkit_seed.py) | the two connections and the starting queries, created on every start |

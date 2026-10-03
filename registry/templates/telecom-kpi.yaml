@@ -1,0 +1,83 @@
+# A wall of network KPIs: six headline numbers, two trends side by side, then ranking and detail.
+template:
+  id: telecom-kpi
+  name: Telecom KPI board
+  version: "1.0"
+  aliases: [telecom-kpi, telecom kpi, kpi board]
+  description: Six headline KPIs, two trends compared, a ranking and a detail table.
+  title_pattern: "{subject} KPIs"
+
+grid:
+  columns: 12
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    height: 14
+    slots:
+      - {id: kpi_1, width: 2}
+      - {id: kpi_2, width: 2}
+      - {id: kpi_3, width: 2}
+      - {id: kpi_4, width: 2}
+      - {id: kpi_5, width: 2}
+      - {id: kpi_6, width: 2}
+  - row: trends
+    height: 42
+    slots:
+      - {id: trend_1, width: 6}
+      - {id: trend_2, width: 6}
+  - row: breakdown
+    height: 46
+    slots:
+      - {id: ranking_1, width: 6}
+      - {id: detail_1, width: 6}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_4: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_5: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_6: {purpose: kpi, accepts: [big_number], mandatory: false}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: true}
+  trend_2: {purpose: trend, accepts: [line, area], mandatory: false}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  detail_1: {purpose: detail, accepts: [table], mandatory: false}
+
+filters:
+  max: 6
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_1
+  variant: light
+
+typography:
+  dashboard_title: heading_l
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  gutter: sm
+  card_padding: sm
+
+colors:
+  background: surface_muted
+  card: surface
+  accent: primary
+
+components:
+  kpi_card: accent_top
+  chart_card: plain
+
+kpi_formatting:
+  compact_above: 100000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

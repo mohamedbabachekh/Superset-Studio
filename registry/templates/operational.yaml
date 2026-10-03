@@ -1,0 +1,77 @@
+# For the people who act on it: the trend across the full width, then what to look at and the rows behind it.
+template:
+  id: operational
+  name: Operational monitoring
+  version: "1.0"
+  aliases: [operational, operations, ops]
+  description: Four KPIs, one wide trend, then a ranking beside the detail rows.
+  title_pattern: "{subject} Operations"
+
+grid:
+  columns: 12
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    height: 14
+    slots:
+      - {id: kpi_1, width: 3}
+      - {id: kpi_2, width: 3}
+      - {id: kpi_3, width: 3}
+      - {id: kpi_4, width: 3}
+  - row: trend
+    height: 40
+    slots:
+      - {id: trend_1, width: 12}
+  - row: breakdown
+    height: 50
+    slots:
+      - {id: ranking_1, width: 5}
+      - {id: detail_1, width: 7}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_4: {purpose: kpi, accepts: [big_number], mandatory: false}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: true}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  detail_1: {purpose: detail, accepts: [table], mandatory: false}
+
+filters:
+  max: 6
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_1
+  variant: light
+
+typography:
+  dashboard_title: heading_m
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  gutter: sm
+  card_padding: xs
+
+colors:
+  background: surface
+  card: surface
+  accent: info
+
+components:
+  kpi_card: plain
+  chart_card: bordered
+
+kpi_formatting:
+  compact_above: 1000000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

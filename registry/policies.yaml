@@ -1,0 +1,62 @@
+# The limits the policy engine and the validation engine hold everything to.
+sql:
+  # enforced twice: as a statement_timeout on the read-only connection, and as a check on the measured time
+  timeout_ms: 30000
+  max_rows: 10000
+  # schemas a query may read. A table anywhere else is refused before it reaches the database.
+  allowed_schemas: [bi, bi_dev]
+  forbidden_functions:
+    - pg_sleep
+    - pg_read_file
+    - pg_read_binary_file
+    - pg_ls_dir
+    - pg_stat_file
+    - lo_import
+    - lo_export
+    - dblink
+    - dblink_exec
+    - copy
+    - set_config
+    - current_setting
+    - pg_terminate_backend
+    - pg_cancel_backend
+    - pg_reload_conf
+    - query_to_xml
+    - txid_current
+
+dbt:
+  # what a generated model may never contain: each one runs SQL outside the model's own select
+  forbidden_patterns:
+    - pre_hook
+    - post_hook
+    - "pre-hook"
+    - "post-hook"
+    - run_query
+    - "{% call statement"
+    - "{% do "
+    - adapter.
+    - "{{ target."
+    - env_var
+  generated_models_path: models/marts/ai_generated
+  generated_materializations: [table]
+
+performance:
+  chart_query_ms: 5000
+  dashboard_load_ms: 45000
+  max_queries: 25
+  max_result_rows: 5000
+  max_result_bytes: 1000000
+
+data:
+  min_rows: 1
+
+visual:
+  # a chart body whose pixels are this uniform has drawn nothing
+  blank_ratio: 0.995
+  # fewer pixels than this per category and the labels of a ranking are on top of each other
+  min_px_per_category: 16
+  max_fix_iterations: 3
+
+deployment:
+  # the person who approves production must not be the person who asked for the dashboard
+  four_eyes_for_prod: true

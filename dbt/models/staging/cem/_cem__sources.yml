@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: cem_landing
+    description: The CEM extract as it is landed — synthetic in this kit, cem_to_mart.py's output with a real cluster.
+    schema: "{{ var('cem_source_schema') }}"
+    loaded_at_field: landed_at
+    freshness:
+      warn_after: {count: 36, period: hour}
+      error_after: {count: 72, period: hour}
+    tables:
+      - name: site_kpi_daily
+        description: One row per day, site and radio access technology.
+        columns:
+          - name: kpi_date
+            data_tests: [not_null]
+          - name: site_id
+            data_tests: [not_null]
+          - name: rat
+            data_tests: [not_null]

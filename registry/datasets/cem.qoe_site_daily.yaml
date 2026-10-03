@@ -1,0 +1,67 @@
+# The site-level layer under the mart. NOT certified: it is there for engineers, and the planner will always
+# prefer cem.qoe_daily when both can answer.
+dataset:
+  id: cem.qoe_site_daily
+  name: CEM QoE Site Daily
+  owner: CEM
+  certified: false
+  source_type: dbt
+  source_model: int_cem__qoe_site_daily
+  freshness_sla_minutes: 1440
+  domain: cem
+  tenant: default
+  version: "0.9"
+  description: Quality of experience per day, site and radio access technology. Not certified.
+  grain: [date, site_id, rat]
+  time_column: date
+  tags: [cem, qoe, site]
+
+columns:
+  date:
+    type: date
+    role: time
+    classification: public
+  site_id:
+    type: string
+    role: dimension
+    classification: internal
+    description: Network site identifier.
+  site_name:
+    type: string
+    role: dimension
+    classification: internal
+  region:
+    type: string
+    role: dimension
+    classification: public
+  rat:
+    type: string
+    role: dimension
+    classification: public
+  qoe_score:
+    type: decimal
+    role: measure
+    classification: internal
+    range: [1, 5]
+  active_users:
+    type: bigint
+    role: measure
+    classification: internal
+    range: [0, null]
+  degraded_users:
+    type: bigint
+    role: measure
+    classification: internal
+    range: [0, null]
+  avg_throughput_mbps:
+    type: decimal
+    role: measure
+    classification: internal
+  avg_latency_ms:
+    type: decimal
+    role: measure
+    classification: internal
+  drop_rate_pct:
+    type: decimal
+    role: measure
+    classification: internal

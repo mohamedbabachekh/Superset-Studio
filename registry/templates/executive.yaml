@@ -1,0 +1,84 @@
+# The executive overview: the headline numbers, how they move, where they stand.
+#
+# A template fixes WHERE things go and WHAT may go there. The AI fills slots; it never draws a layout.
+template:
+  id: executive
+  name: Executive overview
+  version: "1.0"
+  aliases: [executive, exec, executive-telecom-v1]
+  description: Headline KPIs on top, the trend and its distribution, then ranking and geography.
+  title_pattern: "{subject} Overview"
+
+grid:
+  columns: 12
+  # Superset's grid unit, in pixels. Heights below are in these units.
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    height: 16
+    slots:
+      - {id: kpi_1, width: 3}
+      - {id: kpi_2, width: 3}
+      - {id: kpi_3, width: 3}
+      - {id: kpi_4, width: 3}
+  - row: trend
+    height: 44
+    slots:
+      - {id: trend_1, width: 8}
+      - {id: distribution_1, width: 4}
+  - row: breakdown
+    height: 52
+    slots:
+      - {id: ranking_1, width: 6}
+      - {id: map_1, width: 6}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_4: {purpose: kpi, accepts: [big_number], mandatory: false}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: true}
+  distribution_1: {purpose: distribution, accepts: [histogram, pie], mandatory: false}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  map_1: {purpose: geo, accepts: [map, table], mandatory: false}
+
+filters:
+  max: 5
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_1
+  variant: light
+
+typography:
+  dashboard_title: heading_l
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  gutter: md
+  card_padding: sm
+
+colors:
+  background: surface_muted
+  card: surface
+  accent: primary
+
+components:
+  kpi_card: accent_top
+  chart_card: bordered
+
+kpi_formatting:
+  # a headline number over this is shown compact (1.2M), under it in full
+  compact_above: 1000000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  # an optional slot left empty gives its columns to its neighbours instead of leaving a hole
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

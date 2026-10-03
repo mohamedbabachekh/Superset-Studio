@@ -1,0 +1,47 @@
+# The visualizations the AI may select, and what each becomes in the BI engine.
+#
+# The left-hand names are SharpSight's. The right-hand keys are Superset's, verified present in the 6.1
+# frontend bundle on 2026-10-03. Replacing Superset means rewriting this column and the adapter, not the
+# dashboard specifications, which only ever say `line`.
+visualizations:
+  big_number:
+    engine_type: big_number_total
+    status: available
+    needs: {metric: true}
+  line:
+    engine_type: echarts_timeseries_line
+    status: available
+    needs: {metric: true, dimension_role: time}
+  area:
+    engine_type: echarts_area
+    status: available
+    needs: {metric: true, dimension_role: time}
+  bar:
+    engine_type: echarts_timeseries_bar
+    status: available
+    needs: {metric: true, dimension: true}
+  histogram:
+    engine_type: histogram_v2
+    status: available
+    needs: {metric: true}
+  pie:
+    engine_type: pie
+    status: available
+    needs: {metric: true, dimension: true}
+  table:
+    engine_type: table
+    status: available
+    needs: {metric: true, dimension: true}
+  map:
+    engine_type: country_map
+    status: available
+    # a column holding the map's own region code; without one the planner knows a transformation is needed
+    needs: {metric: true, dimension_role: geo_region}
+  # The POC's custom visualization (section 11 of the brief). Listed so the approval mechanism is real, and
+  # marked for what it is: its plugin is not built into this kit's Superset, so a specification asking for
+  # it is refused at validation rather than failing at render.
+  telecom_qoe:
+    engine_type: telecom_qoe_chart
+    status: not_installed
+    kind: custom_plugin
+    needs: {metric: true, dimension: true}

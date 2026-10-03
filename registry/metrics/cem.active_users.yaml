@@ -1,0 +1,25 @@
+metric:
+  id: cem.active_users
+  name: Active Users
+  short_name: Active
+  # Additive across regions and technologies, NOT across days: the same subscriber is active on Monday and
+  # on Tuesday. Summing a month would print thirty times the customer base, so a period shows its daily mean.
+  expression: "SUM(active_users) / NULLIF(COUNT(DISTINCT date), 0)"
+  aggregation: daily_average
+  dimensions: [date, region, rat]
+  format: "#,##0"
+  unit: users per day
+  certified: true
+  owner: CEM
+  version: "1.0"
+  documentation: >
+    Subscribers with at least one session, as a daily average over the selected period. On a single day it
+    is that day's count.
+  synonyms: [active users, active subscribers, users]
+  valid_range: [0, null]
+  higher_is_better: true
+  distribution_column: active_users
+  lineage:
+    datasets: [cem.qoe_daily]
+    columns: [active_users, date]
+    dbt_models: [mart_cem_qoe_daily]

@@ -1,0 +1,26 @@
+metric:
+  id: cem.qoe_score
+  name: QoE Score
+  short_name: QoE
+  # Weighted by users, never a plain average: a region's score is not the mean of its technologies' scores
+  # when nine subscribers in ten are on one of them.
+  expression: "SUM(qoe_score * active_users) / NULLIF(SUM(active_users), 0)"
+  aggregation: weighted_average
+  dimensions: [date, region, rat]
+  format: "0.00"
+  unit: score, 1 to 5
+  certified: true
+  owner: CEM
+  version: "1.0"
+  documentation: >
+    Quality of experience on a 1 to 5 scale, weighted by the active users behind each row, so it can be
+    read at any level of region, technology or period without re-weighting.
+  synonyms: [qoe score, qoe, quality of experience, experience score]
+  valid_range: [1, 5]
+  higher_is_better: true
+  # what a distribution of this metric is drawn over
+  distribution_column: qoe_score
+  lineage:
+    datasets: [cem.qoe_daily]
+    columns: [qoe_score, active_users]
+    dbt_models: [mart_cem_qoe_daily]

@@ -1,0 +1,16 @@
+version: 2
+
+seeds:
+  - name: dim_region
+    description: >
+      Regions and their ISO 3166-2 code, in the sixteen-region division Superset 6.1's Morocco map is drawn
+      with (dataset cem.region). The names and codes were read out of the image's own geometry.
+    meta:
+      sharpsight_dataset: cem.region
+      owner: CEM
+      certified: true
+    columns:
+      - name: region
+        data_tests: [not_null, unique]
+      - name: region_iso
+        data_tests: [not_null, unique]

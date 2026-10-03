@@ -1,0 +1,75 @@
+# The map leads. Everything else explains it.
+template:
+  id: geographic
+  name: Geographic view
+  version: "1.0"
+  aliases: [geographic, geo, map, territorial]
+  description: A large map beside its ranking, three KPIs above, the trend underneath.
+  title_pattern: "{subject} by Region"
+
+grid:
+  columns: 12
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    height: 14
+    slots:
+      - {id: kpi_1, width: 4}
+      - {id: kpi_2, width: 4}
+      - {id: kpi_3, width: 4}
+  - row: geography
+    height: 62
+    slots:
+      - {id: map_1, width: 8}
+      - {id: ranking_1, width: 4}
+  - row: trend
+    height: 38
+    slots:
+      - {id: trend_1, width: 12}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  map_1: {purpose: geo, accepts: [map], mandatory: true}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: false}
+
+filters:
+  max: 5
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_1
+  variant: light
+
+typography:
+  dashboard_title: heading_l
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  gutter: md
+  card_padding: sm
+
+colors:
+  background: surface_muted
+  card: surface
+  accent: info
+
+components:
+  kpi_card: accent_top
+  chart_card: bordered
+
+kpi_formatting:
+  compact_above: 1000000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

@@ -1,0 +1,23 @@
+metric:
+  id: cem.degraded_rate
+  name: Degraded Rate
+  short_name: Degraded %
+  expression: "SUM(degraded_users) * 1.0 / NULLIF(SUM(active_users), 0)"
+  aggregation: ratio
+  dimensions: [date, region, rat]
+  format: "0.0%"
+  unit: share of active users
+  certified: true
+  owner: CEM
+  version: "1.0"
+  documentation: >
+    Share of active users whose experience was degraded. A ratio of sums, so it reads correctly at any
+    level and over any period.
+  synonyms: [degraded rate, degradation rate, share of degraded users]
+  valid_range: [0, 1]
+  higher_is_better: false
+  distribution_column: null
+  lineage:
+    datasets: [cem.qoe_daily]
+    columns: [degraded_users, active_users]
+    dbt_models: [mart_cem_qoe_daily]

@@ -1,0 +1,64 @@
+# The certified CEM QoE mart: one row per day, region and radio technology.
+#
+# Every column carries a classification. The loader REFUSES a dataset with an unclassified column, because
+# "nobody said it was sensitive" is how a subscriber number ends up in a prompt.
+dataset:
+  id: cem.qoe_daily
+  name: CEM QoE Daily
+  owner: CEM
+  certified: true
+  source_type: dbt
+  source_model: mart_cem_qoe_daily
+  # Daily data: a day and a half old is late, an hour old is not. Measured on `loaded_at`.
+  freshness_sla_minutes: 1440
+  domain: cem
+  tenant: default
+  version: "1.0"
+  description: >
+    Quality of experience per day, region and radio access technology, aggregated from the site-level KPIs.
+    Aggregates only: no subscriber, no site.
+  grain: [date, region, rat]
+  time_column: date
+  freshness_column: loaded_at
+  tags: [cem, qoe, quality of experience, customer experience]
+
+columns:
+  date:
+    type: date
+    role: time
+    classification: public
+    description: The day the KPIs were measured.
+  region:
+    type: string
+    role: dimension
+    classification: public
+    description: Administrative region, as named by the bundled map.
+  rat:
+    type: string
+    role: dimension
+    classification: public
+    description: Radio access technology.
+    accepted_values: ["2G", "3G", "4G", "5G"]
+  qoe_score:
+    type: decimal
+    role: measure
+    classification: internal
+    description: Quality of experience on a 1 to 5 scale, weighted by active users.
+    range: [1, 5]
+  active_users:
+    type: bigint
+    role: measure
+    classification: internal
+    description: Subscribers with at least one session that day.
+    range: [0, null]
+  degraded_users:
+    type: bigint
+    role: measure
+    classification: internal
+    description: Active users whose experience fell under the acceptable threshold.
+    range: [0, null]
+  loaded_at:
+    type: timestamp
+    role: audit
+    classification: internal
+    description: When this row was built.

@@ -1,0 +1,36 @@
+# The governed vocabulary the planner reads a request with.
+#
+# This is what the deterministic planner understands today. When a language model is wired in (aibi/llm.py),
+# it produces the SAME structured requirement from freer wording, and everything downstream is unchanged —
+# so this file is also the list of intents a model is allowed to return.
+intents:
+  trend:
+    purpose: trend
+    phrases: [daily trend, weekly trend, monthly trend, trend, over time, evolution, time series, timeline]
+  ranking:
+    purpose: ranking
+    phrases: [regional ranking, ranking, rank, top, league table, comparison by, breakdown by]
+  distribution:
+    purpose: distribution
+    phrases: [distribution, histogram, spread]
+  geo:
+    purpose: geo
+    phrases: [geographic view, geographical view, geographic, geography, map, territorial view]
+  detail:
+    purpose: detail
+    phrases: [detail table, details, detail, table of]
+
+# words that name a column. Checked as whole words, longest first.
+dimensions:
+  date: [date, daily, day, days]
+  region: [region, regional, regions]
+  rat: [rat, radio access technology, technology, technologies]
+  site_id: [site, sites]
+
+# a ranking with no dimension named ranks by the first of these the dataset has
+default_ranking_dimensions: [region, rat]
+
+time_grains:
+  P1D: [daily, day]
+  P1W: [weekly, week]
+  P1M: [monthly, month]

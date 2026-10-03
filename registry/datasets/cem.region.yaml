@@ -1,0 +1,36 @@
+# The region reference: the name the marts use, and the code the map is keyed on.
+#
+# THE CODES ARE THE MAP'S, NOT THE COUNTRY'S CURRENT ONES. Superset 6.1 ships Morocco's geometry in its older
+# sixteen-region division (MA-01 … MA-16), read out of the image on 2026-10-03. A reference using today's twelve
+# regions would join perfectly and draw an empty map with no error anywhere.
+dataset:
+  id: cem.region
+  name: CEM Regions
+  owner: CEM
+  certified: true
+  kind: dimension
+  source_type: dbt
+  source_model: dim_region
+  freshness_sla_minutes: null
+  domain: cem
+  tenant: default
+  version: "1.0"
+  description: Regions with their ISO 3166-2 code, one row per region.
+  grain: [region]
+  join_keys: [region]
+  tags: [cem, region, geography, map]
+
+columns:
+  region:
+    type: string
+    role: key
+    classification: public
+    description: Region name, the join key shared with the marts.
+  region_iso:
+    type: string
+    role: geo_region
+    classification: public
+    description: ISO 3166-2 code, as the bundled country map expects it.
+    geo:
+      standard: iso_3166_2
+      country: morocco

@@ -1,0 +1,79 @@
+# How customers experience the network: the score, how it is spread, and who is under the line.
+template:
+  id: customer-experience
+  name: Customer experience
+  version: "1.0"
+  aliases: [customer-experience, customer experience, cx, cem]
+  description: Four KPIs, the distribution beside the trend, then ranking and geography.
+  title_pattern: "{subject} Customer Experience"
+
+grid:
+  columns: 12
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    height: 16
+    slots:
+      - {id: kpi_1, width: 3}
+      - {id: kpi_2, width: 3}
+      - {id: kpi_3, width: 3}
+      - {id: kpi_4, width: 3}
+  - row: experience
+    height: 44
+    slots:
+      - {id: distribution_1, width: 6}
+      - {id: trend_1, width: 6}
+  - row: breakdown
+    height: 50
+    slots:
+      - {id: ranking_1, width: 6}
+      - {id: map_1, width: 6}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_4: {purpose: kpi, accepts: [big_number], mandatory: false}
+  distribution_1: {purpose: distribution, accepts: [histogram, pie], mandatory: true}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: true}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  map_1: {purpose: geo, accepts: [map, table], mandatory: false}
+
+filters:
+  max: 5
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_2
+  variant: light
+
+typography:
+  dashboard_title: heading_l
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  gutter: md
+  card_padding: sm
+
+colors:
+  background: surface_muted
+  card: surface
+  accent: success
+
+components:
+  kpi_card: accent_top
+  chart_card: bordered
+
+kpi_formatting:
+  compact_above: 1000000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

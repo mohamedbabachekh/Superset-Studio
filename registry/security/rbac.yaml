@@ -1,0 +1,55 @@
+# Who may do what, and read what. A STAND-IN for the SharpSight portal's own RBAC: in the target
+# architecture the identity arrives from Keycloak through the gateway, and these grants live in the platform.
+# The file keeps the same shape so the policy engine does not change when the source does.
+tenants: [default]
+
+roles:
+  bi_developer:
+    capabilities: [bi.read, bi.generate, tools.use]
+    datasets: ["cem.*"]
+    classifications: [public, internal]
+  bi_reviewer:
+    capabilities: [bi.read, bi.approve_uat, bi.reject]
+    datasets: ["cem.*"]
+    classifications: [public, internal]
+  bi_release_manager:
+    capabilities: [bi.read, bi.approve_uat, bi.approve_prod, bi.reject, bi.restore]
+    datasets: ["cem.*"]
+    classifications: [public, internal]
+  auditor:
+    capabilities: [bi.read, audit.read]
+    datasets: []
+    classifications: []
+  viewer:
+    capabilities: [bi.read]
+    datasets: []
+    classifications: [public]
+
+users:
+  dev.user:
+    type: human
+    tenant: default
+    roles: [bi_developer]
+  lead.reviewer:
+    type: human
+    tenant: default
+    roles: [bi_reviewer, auditor]
+  release.manager:
+    type: human
+    tenant: default
+    roles: [bi_release_manager, auditor]
+  guest.user:
+    type: human
+    tenant: default
+    roles: [viewer]
+  # The engine's own identity. It can never approve anything: approval capabilities are refused to a
+  # non-human whatever its roles say.
+  sharpsight-ai:
+    type: ai
+    tenant: default
+    roles: [bi_developer]
+
+# Row-level policies, per role and dataset: a SQL predicate over that dataset's columns. The data gateway
+# rewrites every reference to the dataset into a filtered subquery before the query runs.
+# None are declared for the CEM marts, which hold regional aggregates only.
+row_filters: {}

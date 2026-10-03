@@ -1,0 +1,24 @@
+metric:
+  id: cem.degraded_users
+  name: Degraded Users
+  short_name: Degraded
+  # Same rule as cem.active_users, for the same reason: a daily mean over the period, not a sum of days.
+  expression: "SUM(degraded_users) / NULLIF(COUNT(DISTINCT date), 0)"
+  aggregation: daily_average
+  dimensions: [date, region, rat]
+  format: "#,##0"
+  unit: users per day
+  certified: true
+  owner: CEM
+  version: "1.0"
+  documentation: >
+    Active users whose experience fell under the acceptable threshold, as a daily average over the selected
+    period.
+  synonyms: [degraded users, degraded subscribers, impacted users]
+  valid_range: [0, null]
+  higher_is_better: false
+  distribution_column: degraded_users
+  lineage:
+    datasets: [cem.qoe_daily]
+    columns: [degraded_users, date]
+    dbt_models: [mart_cem_qoe_daily]
