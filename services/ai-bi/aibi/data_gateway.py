@@ -97,6 +97,19 @@ class DataGateway:
                                 "duration_ms": duration_ms, "row_count": len(rows), "truncated": truncated})
         return result
 
+    def server_version(self) -> Optional[str]:
+        """The warehouse's version. The service's own fixed question, not a statement anyone supplies."""
+        try:
+            connection = psycopg2.connect(self._dsn, connect_timeout=5)
+        except psycopg2.Error:
+            return None
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("show server_version")
+                return str(cursor.fetchone()[0]).split()[0]
+        finally:
+            connection.close()
+
     def ping(self) -> bool:
         connection = psycopg2.connect(self._dsn, connect_timeout=5)
         try:

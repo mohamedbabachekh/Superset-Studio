@@ -11,7 +11,8 @@ from aibi.semantic_agent import d3_format
 
 def test_the_registries_load_and_hold_together(registry):
     assert {"cem.qoe_daily", "cem.region", "cem.qoe_site_daily"} <= set(registry.datasets)
-    assert set(registry.templates) == {"executive", "telecom-kpi", "operational", "geographic", "customer-experience"}
+    assert set(registry.templates) == {"executive", "telecom-kpi", "operational", "geographic", "customer-experience",
+                                       "management"}
     assert registry.metric("cem.qoe_score").certified
     assert registry.template("Executive").id == "executive"
     assert registry.template("executive-telecom-v1").id == "executive"      # the brief's own name for it
@@ -63,6 +64,8 @@ def test_the_briefs_request_is_read_as_the_brief_means_it(requirement):
     assert requirement.views[0].time_grain == "P1D"
     assert requirement.filters == ["date", "region", "rat"]
     assert requirement.unresolved == []
+    # « the CEM Executive template » is not a registered name; it is read, and the reading is said
+    assert requirement.assumptions == ["template « CEM Executive » read as Executive overview (executive)"]
     assert slugify(requirement.subject) == "cem-qoe"
 
 

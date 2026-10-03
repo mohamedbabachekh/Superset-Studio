@@ -11,6 +11,7 @@
     python -m aibi.cli people --user release.manager           BI-engine accounts given the roles rbac.yaml says
     python -m aibi.cli person <rbac user> --user release.manager   an account for someone who has none yet
     python -m aibi.cli audit [--project <id>] [--request <id>] --user lead.reviewer
+    python -m aibi.cli compatibility                           the matrix, beside what is actually running
 
 It calls the service like any other client: with the gateway's token, and a user named on each call.
 """
@@ -25,10 +26,10 @@ from typing import Any
 
 import requests
 
-DEMO = ("Create a CEM QoE dashboard using the executive template.\n\n"
-        "Use QoE Score, Active Users and Degraded Users.\n"
-        "Show daily trend, regional ranking, QoE distribution and geographic view.\n"
-        "Add date, region and RAT filters.")
+DEMO = ("Create a CEM QoE dashboard using the CEM Executive template.\n\n"
+        "Use QoE Score, Active Users and Degraded Users.\n\n"
+        "Show daily trend, regional ranking, QoE distribution and geographic view.\n\n"
+        "Add Date, Region and RAT filters.")
 
 BASE = os.environ.get("AIBI_URL", "http://127.0.0.1:8080")
 MARK = {"done": "✓", "skipped": "–", "failed": "✗", "running": "…", "pending": " "}
@@ -52,7 +53,7 @@ def _brief(summary: dict[str, Any]) -> str:
     """One line of what a step found — the facts a person looks for, not the whole record."""
     picks = []
     for key in ("reason", "project_id", "template", "transformation_needed", "model", "dataset", "rows",
-                "version", "git_commit", "review_status", "checks", "failures", "warnings", "iterations"):
+                "version", "git_commit", "status", "package", "checks", "failures", "warnings", "iterations"):
         if key in summary and not isinstance(summary[key], (dict, list)):
             value = summary[key]
             picks.append(f"{key}={value[:12] if key == 'git_commit' and isinstance(value, str) else value}")
@@ -98,10 +99,13 @@ def generate(prompt: str, user: str) -> int:
     run = follow(started["run_id"], user)
     print()
     if run["status"] != "succeeded":
-        print(f"the run FAILED: {run['error']}")
+        print(f"the run FAILED, and left the project at {run.get('quality_gate')}: {run['error']}")
         return 1
     record = call("GET", f"/projects/{run['project_id']}/versions/{run['version']}", user)
-    print(f"{record['project_id']} {record['version']} — {record['state']} · {record['review_status']}")
+    print(f"{record['project_id']} {record['version']} — {record['status']}")
+    print("  gates          " + " → ".join(h["status"] for h in record["history"]))
+    print(f"  package        {record['package'].get('exported_to') or record['package'].get('file')}  "
+          f"sha256 {record['package'].get('sha256', '')[:16]}…")
     print(f"  dashboard      {record['dashboard'].get('url')}")
     print(f"  git commit     {record['git_commit']}")
     print(f"  dbt commit     {record['dbt_commit']}")
@@ -116,7 +120,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="aibi", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health", "people",
-                 "person"):
+                 "person", "compatibility"):
         command = sub.add_parser(name)
         command.add_argument("--user", default="dev.user")
         if name == "generate":
@@ -151,13 +155,27 @@ def main() -> int:
     elif args.command == "approve":
         record = call("POST", f"/projects/{args.project_id}/approve", args.user,
                       json={"target": args.target, "comment": args.comment, "confirm": args.confirm})
-        print(f"{record['project_id']} {record['version']} — {record['state']} · {record['review_status']}")
+        print(f"{record['project_id']} {record['version']} — {record['status']}")
+        print("  gates    " + " → ".join(h["status"] for h in record["history"]))
         if record.get("package"):
             print(f"  package  {record['package'].get('exported_to') or record['package']['file']}  "
-                  f"sha256 {record['package']['sha256']}")
+                  f"sha256 {record['package']['sha256']}  (verified: the file cut when the version was generated)")
     elif args.command == "reject":
         record = call("POST", f"/projects/{args.project_id}/reject", args.user, json={"comment": args.comment})
-        print(f"{record['project_id']} {record['version']} — {record['state']} · {record['review_status']}")
+        print(f"{record['project_id']} {record['version']} — {record['status']}")
+    elif args.command == "compatibility":
+        found = call("GET", "/compatibility", args.user)
+        own = found["sharpsight_ai_bi"]
+        print(f"  {'sharpsight ai-bi':<14} running {own['running']:<10} matrix written for {own['matrix_written_for']}")
+        for name, body in found["components"].items():
+            if body.get("status") == "not_used":
+                print(f"  {name:<14} not used      {body.get('note', '')}")
+            else:
+                print(f"  {name:<14} running {str(body['running']):<10} tested with {', '.join(body['tested']):<8} "
+                      f"→ {body['verdict']}")
+        print("  connectors     " + ", ".join(f"{n}: {b['status'].replace('_', ' ')}" for n, b in found["connectors"].items()))
+        print("  " + ("everything running is a tested version" if found["ok"]
+                      else "UNTESTED: " + "; ".join(found["untested"])))
     elif args.command == "discard":
         done = call("POST", f"/projects/{args.project_id}/discard", args.user)
         print(f"{done['project_id']} discarded — {done['removed_from_bi_engine']} assets removed from the BI engine"

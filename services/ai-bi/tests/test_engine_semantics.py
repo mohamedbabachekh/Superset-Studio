@@ -62,7 +62,7 @@ def test_reading_the_registries_needs_less_than_acting(policy):
     from aibi.tools import Toolbox
 
     needs = {spec.name: spec.capability for spec in Toolbox.specs()}
-    reading = {"list_datasets", "get_dataset", "get_dataset_schema", "get_metric", "list_metrics",
+    reading = {"list_datasets", "get_dataset", "get_dataset_schema", "get_metric", "list_metrics", "get_dimension",
                "list_dashboard_templates", "get_dashboard_template", "validate_sql"}
     assert {name for name, capability in needs.items() if capability == "bi.read"} == reading
     # everything that runs a query, builds a model or touches the BI engine
@@ -71,12 +71,12 @@ def test_reading_the_registries_needs_less_than_acting(policy):
                                      "commit_project_version")} == {"tools.use"}
     reviewer = policy.identify("lead.reviewer")
     assert "bi.read" in reviewer.capabilities and "tools.use" not in reviewer.capabilities
-    # the brief's twenty tools are all there
-    assert {"get_dataset", "get_dataset_schema", "get_dataset_sample", "get_metric", "list_metrics",
-            "get_dashboard_template", "execute_readonly_sql", "validate_sql", "generate_dbt_model", "compile_dbt",
-            "run_dbt_model", "run_dbt_test", "create_superset_dataset", "create_superset_chart",
+    # the brief's tools (section 19) are all there, under its own names
+    assert {"get_dataset", "get_dataset_schema", "get_dataset_sample", "list_datasets", "get_metric", "list_metrics",
+            "get_dimension", "get_dashboard_template", "execute_readonly_sql", "validate_sql", "generate_dbt_model",
+            "compile_dbt", "run_dbt_model", "run_dbt_test", "create_superset_dataset", "create_superset_chart",
             "create_superset_dashboard", "update_superset_dashboard", "get_dashboard_data", "validate_dashboard",
-            "render_dashboard_screenshot", "commit_project_version"} <= set(needs)
+            "render_dashboard_screenshot", "commit_project_version", "create_deployment_package"} <= set(needs)
 
 
 def test_the_dashboard_carries_no_colour_scheme_of_its_own(dashboards, registry):
@@ -179,11 +179,11 @@ def test_a_column_is_shown_under_the_name_people_read(registry):
     table = _component(slot="detail_1", type="table", dimension="rat")
     ranking = _component(slot="ranking_1", type="bar", dimension="region")
     metric = registry.metric("cem.qoe_score")
-    assert agent.title(table, metric, "detail") == "QoE Score by RAT"          # it read « by rat »
+    assert agent.title(table, metric, "detail") == "QoE Score, detail by RAT"   # it read « by rat »
     assert agent.title(ranking, metric, "ranking") == "QoE Score by region"
 
 
-def test_one_pixel_of_overflow_is_a_clipped_title():
+def test_one_pixel_of_overflow_is_a_clipped_title(registry):
     """« CEM experience Customer Experien… » needed 372 px and had 371."""
     from aibi.visual_qa_agent import VisualQaAgent
 
@@ -194,11 +194,8 @@ def test_one_pixel_of_overflow_is_a_clipped_title():
          "blank_ratio": 0.9}])
     render.header = {"text": "CEM experience Customer Experience", "needs": 372, "has": 371}
 
-    class Template:
-        slots = {"kpi_1": type("S", (), {"mandatory": True})()}
-        layout = []
-
-    report = agent.check(render, spec, Template, {"kpi_1": {"id": 1}}, {"kpi_1": {"rowcount": 1, "data": []}})
+    report = agent.check(render, spec, registry.template("executive"), {"kpi_1": {"id": 1}},
+                         {"kpi_1": {"rowcount": 1, "data": []}})
     assert [c.code for c in report.warnings] == ["dashboard_title_clipped"]
 
 
@@ -258,4 +255,8 @@ def test_an_area_starts_at_zero_and_a_pie_draws_every_part(registry):
     share = _component(slot="distribution_1", type="pie", metric=users.id, dimension="region")
     pie = agent.form_data(share, dataset, users, 7, template, "inwi", "superset_seq_1")
     assert pie["row_limit"] == 100 and pie["show_legend"] is False and pie["groupby"] == ["region"]
+    # no legend, so a slice is named by its label or by nothing: with few parts every one is labelled
+    labelled_from = lambda parts: agent.form_data(share, dataset, users, 7, template, "inwi", "superset_seq_1",  # noqa: E731
+                                                  parts)["show_labels_threshold"]
+    assert (labelled_from(4), labelled_from(8), labelled_from(16), labelled_from(None)) == (0, 0, 4, 4)
     assert agent.title(share, users, "distribution") == "Active Users, share by region"

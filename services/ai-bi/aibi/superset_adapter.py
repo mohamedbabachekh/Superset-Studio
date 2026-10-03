@@ -122,6 +122,14 @@ class SupersetAdapter:
         except requests.RequestException:
             return False
 
+    def version(self) -> Optional[str]:
+        """The BI engine's version, as it states it itself."""
+        try:
+            answer = requests.get(f"{self.base_url}/version", timeout=10)
+            return str(answer.json()["version_string"]) if answer.status_code == 200 else None
+        except (requests.RequestException, ValueError, KeyError):
+            return None
+
     # ── database connections ────────────────────────────────────────────────────────────────────────────────
     def find_database(self, name: str) -> Optional[dict[str, Any]]:
         found = self._list("database", [{"col": "database_name", "opr": "eq", "value": name}])

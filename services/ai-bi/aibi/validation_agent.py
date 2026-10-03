@@ -52,9 +52,13 @@ class ValidationAgent:
         self.store = store
 
     # ── data ────────────────────────────────────────────────────────────────────────────────────────────────
-    def data(self, datasets: list[DatasetDef], metrics_on: dict[str, list[MetricDef]], run_sql: RunSql) -> ValidationReport:
+    def data(self, datasets: list[DatasetDef], metrics_on: dict[str, list[MetricDef]], run_sql: RunSql,
+             readable: Optional[dict[str, list[str]]] = None) -> ValidationReport:
+        """`readable`: per dataset, the columns the requester is cleared to read — the null rate is measured
+        on those, since a column withheld from the requester cannot be named in their query."""
         report = ValidationReport()
         minimum = int(self.registry.policies.get("data", {}).get("min_rows", 1))
+        tolerated = float(self.registry.policies.get("data", {}).get("max_null_rate", 0.05))
         for dataset in datasets:
             ds = dataset.id
             try:
@@ -78,12 +82,22 @@ class ValidationAgent:
 
             required = list(dict.fromkeys([*dataset.grain, *dataset.columns_with_role("measure"),
                                            *dataset.columns_with_role("geo_region")]))
-            if required:
-                counts = run_sql(self.sql.null_counts(dataset, required), f"nulls in {ds}").records()[0]
-                holes = {k: v for k, v in counts.items() if v}
-                report.add("data", "nulls", "fail" if holes else "pass", ds,
-                           ", ".join(f"{k}: {v} null" for k, v in holes.items())
-                           or f"none in {', '.join(required)}")
+            # Null rate: none at all where a null breaks the dataset (its grain, its measures, its
+            # geography); elsewhere, up to the policy's share.
+            measured = [c for c in (readable or {}).get(ds, list(dataset.columns)) if c in dataset.columns]
+            if measured:
+                counts = run_sql(self.sql.null_counts(dataset, measured), f"null rate of {ds}").records()[0]
+                rates = {k: (v or 0) / rows for k, v in counts.items()}
+                over = [f"{k}: {counts[k]} null" for k in required if counts.get(k)]
+                over += [f"{k}: {rate:.1%} null, over {tolerated:.0%}" for k, rate in rates.items()
+                         if k not in required and rate > tolerated]
+                others = [k for k in measured if k not in required]
+                worst = max(others, key=lambda k: rates[k], default=None)
+                report.add("data", "null rate", "fail" if over else "pass", ds,
+                           "; ".join(over) or (f"0 % in {', '.join(c for c in required if c in counts)}" + (
+                               "" if worst is None else
+                               f"; highest elsewhere: {worst} at {rates[worst]:.1%}, {tolerated:.0%} allowed")),
+                           highest_rate=round(max(rates.values(), default=0.0), 4))
 
             if dataset.grain:
                 repeated = run_sql(self.sql.duplicate_groups(dataset), f"duplicates in {ds}").scalar() or 0
@@ -108,9 +122,10 @@ class ValidationAgent:
             for name, column in dataset.columns.items():
                 if column.accepted_values:
                     odd = run_sql(self.sql.unexpected_values(dataset, name, column.accepted_values),
-                                  f"accepted values of {ds}.{name}").scalar() or 0
-                    report.add("data", "accepted values", "fail" if odd else "pass", f"{ds}.{name}",
-                               f"{odd} rows outside {column.accepted_values}" if odd else "all values accepted")
+                                  f"expected values of {ds}.{name}").scalar() or 0
+                    report.add("data", "expected values", "fail" if odd else "pass", f"{ds}.{name}",
+                               f"{odd} rows outside {column.accepted_values}" if odd
+                               else f"every value is one of {column.accepted_values}")
 
             for metric in metrics_on.get(ds, []):
                 value = run_sql(self.sql.metric_query(dataset, [metric]), f"{metric.id} on {ds}").scalar()
@@ -159,6 +174,52 @@ class ValidationAgent:
         return report
 
     # ── BI ──────────────────────────────────────────────────────────────────────────────────────────────────
+    def dependencies(self, spec: DashboardSpec, engine_datasets: dict[str, dict[str, Any]],
+                     found: dict[str, Any]) -> ValidationReport:
+        """Dependencies exist: each component, followed down — its chart on the dashboard, the chart's dataset
+        in the BI engine on the read-only connection, the dbt model behind the dataset — and each filter's
+        target. `found` is what the BI engine was asked: the charts on the dashboard, the project's charts
+        by slot, the connection's name, the filters as configured."""
+        report = ValidationReport()
+        on_dashboard = set(found["on_dashboard"])
+        for component in spec.components:
+            chart = found["charts"].get(component.slot) or {}
+            dataset = self.registry.dataset(component.dataset)
+            engine = engine_datasets.get(dataset.id) or {}
+            model = self.store.lineage_for(dataset.source_model)
+            visualization = self.registry.visualizations.get(component.type)
+            missing = []
+            if chart.get("id") is None:
+                missing.append("it has no chart in the BI engine")
+            elif chart["id"] not in on_dashboard:
+                missing.append(f"chart {chart['id']} is not on the dashboard")
+            if not engine:
+                missing.append(f"dataset {dataset.id} is not in the BI engine")
+            elif (engine.get("database") or {}).get("database_name") != found["connection"]:
+                missing.append(f"dataset {dataset.id} is not on « {found['connection']} »")
+            if model is None:
+                missing.append(f"dbt model {dataset.source_model} is not one SharpSight knows")
+            if visualization is None or visualization.status != "available":
+                missing.append(f"the {component.type} visualization is not installed")
+            report.add("bi", "dependencies exist", "fail" if missing else "pass",
+                       f"{component.slot} ({component.type})",
+                       "; ".join(missing) or
+                       f"chart {chart['id']} → BI dataset {engine['id']} on « {found['connection']} » → "
+                       f"dbt model {dataset.source_model} ({model['relation']})", slot=component.slot)
+        ours = {c["id"] for c in found["charts"].values() if c.get("id") is not None}
+        strangers = sorted(on_dashboard - ours)
+        report.add("bi", "dependencies exist", "fail" if strangers else "pass", "the dashboard",
+                   f"it holds chart(s) the specification does not name: {strangers}" if strangers
+                   else f"its {len(on_dashboard)} charts are the specification's, and no other")
+        for target in found["filters"]:
+            engine = next((e for e in engine_datasets.values() if e.get("id") == target["dataset_id"]), None)
+            columns = {c["column_name"] for c in (engine or {}).get("columns", [])}
+            ok = engine is not None and target["column"] in columns
+            report.add("bi", "dependencies exist", "pass" if ok else "fail", f"filter {target['name']}",
+                       f"column {target['column']} of BI dataset {target['dataset_id']}" if ok else
+                       f"its target, column {target['column']} of BI dataset {target['dataset_id']}, does not exist")
+        return report
+
     def bi(self, spec: DashboardSpec, template: TemplateDef, engine_datasets: dict[str, dict[str, Any]],
            data: dict[str, dict[str, Any]], filter_probes: list[dict[str, Any]],
            renders: list[Any]) -> ValidationReport:
@@ -322,6 +383,29 @@ class ValidationAgent:
                        f"dashboard → {probe['dashboard']}; data → "
                        + ", ".join(f"{ds}: {status}" for ds, status in probe["data"].items()))
 
+            # Export permissions: what leaves the BI engine as a file. Asked here as the account with no
+            # role; each role of the audience is asked the same at publication, when its grant takes effect.
+            policy = access.get("export_policy", {})
+            taken = access.get("export_problems", [])
+            report.add("security", "export permissions", "fail" if taken else "pass", probe["account"],
+                       "; ".join(taken) or
+                       "definition → " + ", ".join(f"{k}: {v}" for k, v in probe["export"]["assets"].items())
+                       + "; data as a file → " + ", ".join(f"{k}: {v}" for k, v in probe["export"]["data"].items())
+                       + f" (policy: data to {policy.get('data', 'audience')}, definition to "
+                         f"{policy.get('assets', 'nobody')})")
+
+            # Direct URL access: every address of the dashboard and of what it is made of, asked for
+            # outright — signed in with no role, and not signed in at all.
+            reached = access.get("direct_problems", [])
+            anonymous = access.get("anonymous", {})
+            open_to_all = [what for what, answer in anonymous.items() if not answer["refused"]]
+            report.add("security", "direct URL access", "fail" if reached or open_to_all else "pass",
+                       "addresses asked for outright",
+                       "; ".join([*reached, *(f"{w} is served to someone not signed in" for w in open_to_all)]) or
+                       "with no role: " + ", ".join(f"{k} → {v}" for k, v in probe["direct"].items())
+                       + "; not signed in: " + ", ".join(
+                           f"{k} → {'sign-in page' if a['to_sign_in'] else a['status']}" for k, a in anonymous.items()))
+
         if connection is not None:
             writable = [k for k in ("allow_dml", "allow_ctas", "allow_cvas", "allow_file_upload") if connection.get(k)]
             report.add("security", "BI engine connection is read-only", "fail" if writable else "pass",
@@ -330,7 +414,8 @@ class ValidationAgent:
         return report
 
     # ── performance ─────────────────────────────────────────────────────────────────────────────────────────
-    def performance(self, data: dict[str, dict[str, Any]], renders: list[Any]) -> ValidationReport:
+    def performance(self, data: dict[str, dict[str, Any]], renders: list[Any],
+                    concurrency: Optional[dict[str, Any]] = None) -> ValidationReport:
         report = ValidationReport()
         limits = self.registry.policies.get("performance", {})
         query_ms = int(limits.get("chart_query_ms", 5000))
@@ -358,6 +443,14 @@ class ValidationAgent:
             report.add("performance", "result size", "fail" if heavy else "pass", render.viewport,
                        "; ".join(f"chart {c['chart_id']}: {c['rowcount']} rows, {c['bytes']} bytes" for c in heavy[:4])
                        or f"largest response {biggest} bytes, budget {max_bytes}", largest_bytes=biggest)
+        if concurrency:
+            budget = int(limits.get("concurrent_query_ms", 8000))
+            ok = concurrency["failed"] == 0 and concurrency["slowest_ms"] <= budget
+            report.add("performance", "concurrency", "pass" if ok else "fail",
+                       f"{concurrency['users']} users at once",
+                       f"{concurrency['queries']} uncached queries in {concurrency['wall_ms']} ms, "
+                       f"{concurrency['failed']} failed, slowest {concurrency['slowest_ms']} ms "
+                       f"(alone: {slowest} ms), budget {budget}", **concurrency)
         return report
 
 

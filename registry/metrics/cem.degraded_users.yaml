@@ -18,6 +18,8 @@ metric:
   valid_range: [0, null]
   distribution_column: degraded_users
   additive: true
+  # who may be shown it: the same scale as a column's (public · internal · confidential · sensitive · pii)
+  classification: internal
   lineage:
     datasets: [cem.qoe_daily]
     columns: [degraded_users, date]

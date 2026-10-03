@@ -22,15 +22,18 @@ bash ai-bi.sh demo
 `demo` sends, as `dev.user`:
 
 ```
-Create a CEM QoE dashboard using the executive template.
+Create a CEM QoE dashboard using the CEM Executive template.
 
 Use QoE Score, Active Users and Degraded Users.
+
 Show daily trend, regional ranking, QoE distribution and geographic view.
-Add date, region and RAT filters.
+
+Add Date, Region and RAT filters.
 ```
 
-and prints each of the twenty-two steps as it finishes. It ends on a version `1.0.0`, in `DEV`,
-`READY_FOR_REVIEW`, with its git commit, and a dashboard at `http://127.0.0.1:3002/superset/dashboard/cem-qoe-overview/`.
+— the brief's own words (section 18) — and prints each of the twenty-two steps as it finishes. It ends on a
+version `1.0.0` at the gate `READY_FOR_REVIEW`, with its git commit, its `.ssbi` package in `./exports/`, and a
+dashboard at `http://127.0.0.1:3002/superset/dashboard/cem-qoe-overview/`.
 
 Then, as two other people:
 
@@ -47,6 +50,7 @@ bash ai-bi.sh discard <project>          # a project still in DEV, or rejected: 
 bash ai-bi.sh check-adapter <project>    # every road of the Superset adapter, driven on a copy of its dashboard
 bash ai-bi.sh person east.analyst        # a Superset account for a person of rbac.yaml; its password is shown once
 bash ai-bi.sh people                     # every Superset account given the SharpSight roles rbac.yaml says, no others
+bash ai-bi.sh compatibility              # the compatibility matrix, beside the versions actually running
 ```
 
 | | |
@@ -68,7 +72,7 @@ changes.
 
 | # | Step | What actually happens here |
 |---|---|---|
-| 1 | Parse the requirement | the request is read against the governed vocabulary (`registry/lexicon.yaml`) into a `Requirement`: a template, metrics, filters, and views — trend, ranking, distribution, share (a pie), volume over time (an area), geographic view, detail. What is not recognised is **reported**, never guessed |
+| 1 | Parse the requirement | the request is read against the governed vocabulary (`registry/lexicon.yaml`) into a `Requirement`: a template, metrics, filters, and views — trend, ranking, distribution, share (a pie), volume over time (an area), geographic view, detail. A template is what its phrase **ends** with: « the CEM Executive template » is `executive`, and the run says it read it so. What is not recognised is **reported**, never guessed |
 | 2 | Find certified datasets | only what the requester may read; certified first |
 | 3 | Find certified metrics | registered metrics only — a metric that is not in the registry is refused, not improvised |
 | 4 | Identify missing data | each view is laid into a template slot and asked: which dataset serves it? Here the map needs a region **code**, and the certified mart has only the region's name |
@@ -78,20 +82,46 @@ changes.
 | 8 | Run dbt tests | the tests of what the model is built **from**, before it is built |
 | 9 | Run the model | `dbt run` into `bi_dev`, deferring every other model to production; then the model's own tests |
 | 10 | Register the dataset | as `cem.cem_qoe__qoe_daily_region_iso` — generated, **not certified**, this project's own, with its lineage from dbt's artifacts |
-| 11 | Generate the specification | the normalized document of the brief's section 6 |
+| 11 | Generate the specification | the normalized document of the brief's section 23, carrying the version it is about to become |
 | 12 | Validate the specification | template, slots, types, metrics, roles, RBAC, theme. Superset has not been called yet |
 | 13 | Create Superset assets | datasets with their certified metrics saved on them, one chart per slot, the dashboard, its filters — and **who may open it**: the roles SharpSight grants, and each role's row-level rule |
 | 14 | Retrieve the dashboard's data | each component's query, through Superset's own query API; each filter is probed |
-| 15 | Validate the query results | data, SQL, BI, security, performance |
+| 15 | Validate the query results | data, SQL, BI, security, performance — the last with every query sent again by four people at once |
 | 16 | Render a screenshot | a headless browser opens the dashboard at each of the template's viewports — and once more with every filter set |
-| 17 | Visual QA | geometry, clipped text, empty or failed charts — and what the dashboard itself requested |
+| 17 | Visual QA | geometry, clipped text, empty or failed charts, holes in the page, the template's own widths and heights — and what the dashboard itself requested |
 | 18 | Fix detected problems | bounded fixes on the specification (top N, a shorter title, a compact number, another approved type). The brief's request needs none; see « what was verified » |
 | 19 | Re-render | and validate again. If it still fails, **the run fails**: no version is written |
 | 20 | Store the final version | the project's folder, which is the `.ssbi` layout |
 | 21 | Git commit | in `bi-projects`, tagged `cem-qoe/v1.0.0` |
-| 22 | READY_FOR_REVIEW | |
+| 22 | READY_FOR_REVIEW | the version is marked, and its `.ssbi` package is cut — once, by the tool `create_deployment_package` |
 
 A run is a record (`GET /runs/<id>`): every step with its times, what it found, and why it was skipped.
+
+**The quality gates** (the brief's section 31) run beside the steps. A project is in exactly one:
+
+```
+DRAFT → AI_GENERATED → VALIDATING → READY_FOR_REVIEW → APPROVED_FOR_UAT → UAT → APPROVED_FOR_PROD → PROD
+                           └→ VALIDATION_FAILED                            └→ UAT_FAILED
+```
+
+| Gate | Reached when | Moved by |
+|---|---|---|
+| `DRAFT` | the request is received (steps 1–10: reading, discovery, the dbt model) | the requester |
+| `AI_GENERATED` | the specification exists (step 11) | the engine |
+| `VALIDATING` | steps 12–19 | the engine |
+| `VALIDATION_FAILED` | anything in steps 12–19 stops the run, or the generated dbt model does not compile, build or pass its tests | the engine |
+| `READY_FOR_REVIEW` | every check passed; the version is committed and its package cut | the engine |
+| `APPROVED_FOR_UAT` → `UAT` | a reviewer approves; then the package is checked against the checksum recorded when it was cut | a person, then the system |
+| `UAT_FAILED` | that check fails, or the version is rejected in UAT | the system, or a person |
+| `APPROVED_FOR_PROD` → `PROD` | a second person approves; then the dashboard is published and every role is asked what it gets | a person, then the system |
+
+A version is written only by a run that reached `READY_FOR_REVIEW` — there is still no half-valid *version* for
+a reviewer to find. A run stopped earlier leaves its record on the **project**: `last_attempt` in
+`GET /projects`, with the gate the last generation stopped at, the way there, and the error; the run keeps the
+same in `quality_gate`. In the audit trail the engine's own moves are `gate:<name>` records, reaching review is
+`version:ready_for_review`, and each approval and each promotion is a record of its own. A version keeps its
+whole way (`history`: gate, who, when, why). Sent back from review a version is a `DRAFT` again; either way the
+next thing that happens to the project is a new version.
 
 ---
 
@@ -105,12 +135,13 @@ service.
 | | |
 |---|---|
 | `datasets/` | owner, certification, source model, grain, freshness SLA — and a **classification on every column**. A column without one fails the load |
-| `metrics/` | the governed metrics: expression, aggregation, dimensions, format, owner, documentation, certification, version, lineage |
-| `templates/` | `executive`, `telecom-kpi`, `operational`, `geographic`, `customer-experience`: layout, slots and what each accepts, theme, typography, spacing, colours, KPI formatting, filters, responsive rules |
+| `metrics/` | the governed metrics: expression, aggregation, dimensions, format, owner, documentation, certification, version, lineage — and a **security classification** of its own. A metric without one fails the load |
+| `templates/` | `executive`, `telecom-kpi`, `operational`, `geographic`, `customer-experience`, `management`: layout, slots and what each accepts, theme, typography, spacing, colours, KPI formatting, filters, responsive rules |
 | `design/tokens.yaml` | the approved colours, schemes, type scale, spacing, component variants |
 | `visualizations.yaml` | what the AI may select, and what each is in the BI engine |
 | `security/rbac.yaml` | users, roles, dataset grants, row-level policies — a stand-in for the portal's RBAC. One declaration, enforced by the data gateway **and** given to Superset |
-| `policies.yaml` | the limits: SQL, dbt, performance budgets, visual thresholds |
+| `policies.yaml` | the limits: SQL, dbt, performance budgets (concurrency among them), the null rate a column may have, visual thresholds, and what may leave Superset as a file |
+| `compatibility.yaml` | the compatibility matrix: the versions this service was built and run against (below) |
 | `lexicon.yaml` | the vocabulary a request is read with |
 
 Where a dataset physically lives is **not** in these files: it is read from dbt's `manifest.json`.
@@ -147,12 +178,21 @@ writes one). Lineage and model metadata from them are kept in SharpSight's store
 ### The tool layer — `aibi/tools.py`
 
 The engine acts only through tools: a name, typed arguments, a policy check, an audit record. `GET /tools`
-lists them with JSON schemas. The brief's twenty are there (`get_dataset`, `get_dataset_schema`,
-`get_dataset_sample`, `get_metric`, `list_metrics`, `get_dashboard_template`, `execute_readonly_sql`,
-`validate_sql`, `generate_dbt_model`, `compile_dbt`, `run_dbt_model`, `run_dbt_test`,
-`create_superset_dataset`, `create_superset_chart`, `create_superset_dashboard`, `update_superset_dashboard`,
-`get_dashboard_data`, `validate_dashboard`, `render_dashboard_screenshot`, `commit_project_version`), plus
-`list_datasets`, `list_dashboard_templates`, `save_dashboard_spec` and `apply_superset_access`.
+lists the 26 of them with JSON schemas. The brief's (its section 19) are all there under its own names —
+`get_dataset`, `get_dataset_schema`, `get_dataset_sample`, `list_datasets`, `get_metric`, `list_metrics`,
+`get_dimension`, `get_dashboard_template`, `execute_readonly_sql`, `validate_sql`, `generate_dbt_model`,
+`compile_dbt`, `run_dbt_model`, `run_dbt_test`, `create_superset_dataset`, `create_superset_chart`,
+`create_superset_dashboard`, `update_superset_dashboard`, `get_dashboard_data`, `validate_dashboard`,
+`render_dashboard_screenshot`, `commit_project_version`, `create_deployment_package` — plus
+`list_dashboard_templates`, `save_dashboard_spec` and `apply_superset_access`.
+
+`get_dimension` answers for a word of the business (« regional » is `region`): the column, the datasets it is
+found in among those the caller may read, its type, role and classification there, and the metrics that may be
+broken down by it. `create_deployment_package` asks the lifecycle for the latest version's package; it does not
+build one for a version that did not reach review, and it does not build one twice.
+
+A specification may leave a component's dataset out, as the brief's own example does: `save_dashboard_spec`
+then takes it from the registry — a governed dataset before a generated one — and says which it took.
 
 The tools that write to Superset take **a slot, or nothing**. What they create is derived from the project's
 saved specification, and they refuse to run until one has been saved and found valid.
@@ -192,6 +232,15 @@ SharpSight's RBAC is the only place this is decided; Superset is told, and then 
   the dashboard is published, each role's account must open it, get its data, and get **exactly the rows the
   data gateway gives that role**; if not, the dashboard is withdrawn and nothing is recorded as PROD.
 
+**A metric has a classification too.** A requester not cleared for it does not see it in `list_metrics`,
+is refused it by `get_metric`, and a specification naming it fails validation. A dashboard is for the roles
+granted every one of its datasets **and** cleared for every one of its metrics.
+
+**What leaves as a file** is in `registry/policies.yaml` (`security.export`): a dashboard's *data* may be
+exported by the roles it is granted to — the rows their policy gives them, counted against the data gateway's —
+and by nobody else; its *definition* leaves through the `.ssbi` package only. Both are asked of Superset: of
+the account with no role during validation, of every role at publication.
+
 **People.** A role opens nothing until a person holds it, and who holds what is in `rbac.yaml`.
 `bash ai-bi.sh people` carries that to Superset: every account whose name is a user there is given exactly that
 user's SharpSight roles, and an account that is not loses any it holds — a role handed out by hand in Superset
@@ -220,18 +269,30 @@ Nothing above the adapter says "slice" or "form_data": `registry/visualizations.
 (`chart_agent.py`, `superset_adapter.py`) are what replacing Superset would rewrite. The registries, the
 specifications, git and dbt would not notice.
 
+### The compatibility matrix — `registry/compatibility.yaml`, `aibi/compatibility.py`
+
+What this version of the service was built and run against — Superset, dbt-core, dbt-postgres, Python,
+PostgreSQL, Playwright, sqlglot — and the connectors a governed dataset was actually built on (PostgreSQL;
+Trino, Spark, Oracle, SQL Server and Hadoop are listed as not tested). Airflow is listed as not used: this kit
+has no scheduler. The matrix is a statement; `GET /compatibility` (`bash ai-bi.sh compatibility`) reads what
+is really running — Superset is asked its version, the warehouse its own — and says, component by component,
+whether the statement covers it. A version outside the matrix refuses nothing: it is named in `/health`
+(`untested_components`) and in the audit record of the service's start, for a person to decide about. After a
+Superset upgrade: `bash ai-bi.sh check-adapter <project>`, then add the version to the file.
+
 ### Validation — `aibi/validation_agent.py`, `aibi/visual_qa_agent.py`
 
 Every check is a measurement, recorded whether it passed or not. One failure keeps a version out of review.
+The list is the brief's section 27, name for name.
 
 | | |
 |---|---|
-| **Data** | schema (registered columns exist, typed as dbt's catalog says), nulls, duplicates on the grain, freshness against the SLA, row count, declared ranges, accepted values, metric validity (overall and per day) |
+| **Data** | schema (registered columns exist, typed as dbt's catalog says), **null rate** (none at all in the grain, the measures and the geography; up to 5 % in any other column), duplicates on the grain, row count, freshness against the SLA, declared ranges, **expected values**, metric validity (overall and per day) |
 | **SQL** | syntax, allowed database, read-only, timeout, result size, forbidden operations — over every statement the run executed — plus **probes**: nine hostile statements the guard must refuse |
-| **BI** | dataset exists, saved metrics match the registry's expression, each chart's query succeeds, the dashboard's own requests succeed, no empty mandatory chart. **Filters twice**: each one through Superset's query API, and all of them on the dashboard itself — it is opened with the filters set, and every chart in scope must receive something else than it does unfiltered |
-| **Security** | RBAC, row-level policies applied, a user with no grant is refused every dataset, tenant isolation (the same roles in another tenant are refused), the BI connection is read-only — and **in Superset itself**: the dashboard's roles and row-level rules are the ones SharpSight grants, and an account with no SharpSight role is refused the dashboard and its data |
-| **Performance** | query duration, dashboard load duration, query count, result size — against `registry/policies.yaml` |
-| **Visual** | screenshot produced, every component on the page, no overlap, layout follows the template, nothing empty, no clipped text, no text under 9 px, labels have room; a clipped dashboard title is a warning |
+| **BI** | dataset exists, saved metrics match the registry's expression, each chart's query succeeds, the dashboard's own requests succeed, no empty mandatory chart. **Dependencies exist**: each component followed down — its chart on the dashboard, the chart's dataset in Superset on the read-only connection, the dbt model behind it — each filter's target column, and no chart on the dashboard that the specification does not name. **Filters twice**: each one through Superset's query API, and all of them on the dashboard itself — it is opened with the filters set, and every chart in scope must receive something else than it does unfiltered |
+| **Security** | RBAC, row-level policies applied, a user with no grant is refused every dataset, tenant isolation (the same roles in another tenant are refused), the BI connection is read-only — and **in Superset itself**: the dashboard's roles and row-level rules are the ones SharpSight grants, and an account with no SharpSight role is refused the dashboard and its data. **Export permissions**: that account can take out neither the dashboard's definition nor its data as a file. **Direct URL access**: the dashboard's page, a chart, the chart's data, the chart in the editor, the dataset and SQL Lab, each asked for outright — signed in with no role, and not signed in at all |
+| **Performance** | query duration, dashboard load duration, query count, result size, and **concurrency** — every chart's query, uncached, by four people in the same instant — against `registry/policies.yaml` |
+| **Visual** | screenshot produced, every component on the page, no overlap, layout follows the template, nothing empty, no clipped text, no text under 9 px, labels have room. **Excessive whitespace**: the cards cover the grid and rows follow each other (a failure), and a chart reaches across its card (a warning under 30 %). **Template violations**: each card has its slot's width in grid columns and its row's height, shows a chart its slot accepts, and the dashboard's stylesheet is the template's own. A clipped dashboard title is a warning |
 
 The visual checks are measurements too: DOM geometry, pixel statistics of each chart's body, and the network
 traffic of the real page. No model looks at the picture today — and one class of defect is therefore missed
@@ -241,17 +302,23 @@ each other pass. That is what a person, or a model reading the picture, is for.
 ### Versions and promotion — `aibi/lifecycle.py`
 
 Every version records `project_id`, `version`, `git_commit`, `dbt_commit`, `superset_asset_version`,
-`dataset_versions`, `metric_versions`, `template_version`.
+`dataset_versions`, `metric_versions`, `template_version` — and `status`, the gate it is at, with the `history`
+of every gate before it. `state` (DEV, UAT, PROD) is derived from the gate.
 
 | | Who | Gate |
 |---|---|---|
-| `DEV` | the AI and the developer | a version exists only if validation passed |
-| → `UAT` | a reviewer (`bi.approve_uat`), a person | validation passed **and** the dashboard in Superset is still the one that was validated: its content is fingerprinted, its roles and row-level rules are compared with SharpSight's, and anything changed by hand afterwards is refused. The `.ssbi` package is built here |
-| → `PROD` | a release manager (`bi.approve_prod`), a **second** person | explicit confirmation and a comment; the package's checksum is verified again. The dashboard is published, certified and locked against editing — then every role's probe account is asked what it gets, and the publication is withdrawn if Superset's answer is not SharpSight's |
+| `READY_FOR_REVIEW` (DEV) | the AI and the developer | a version exists only if validation passed. Its `.ssbi` package is cut here, once — a reviewer can download what they are about to approve |
+| → `APPROVED_FOR_UAT` → `UAT` | a reviewer (`bi.approve_uat`), a person | validation passed **and** the dashboard in Superset is still the one that was validated: its content is fingerprinted, its roles and row-level rules are compared with SharpSight's, and anything changed by hand afterwards is refused. Then the package on disk is checked against the checksum recorded when it was cut; a file that changed sends the version to `UAT_FAILED` |
+| → `APPROVED_FOR_PROD` → `PROD` | a release manager (`bi.approve_prod`), a **second** person | explicit confirmation and a comment; the package's checksum is verified again. The dashboard is published, certified and locked against editing — then every role's probe account is asked what it gets on screen, in a file it exports and by a direct address, and the publication is withdrawn (back to `UAT`) if Superset's answer is not SharpSight's |
+
+The approval and the deployment are two records: `APPROVED_FOR_…` is the person's decision, written before
+anything is done on the strength of it; `UAT` and `PROD` are the system's, written when its own checks passed.
 
 The `.ssbi` package is the project's folder as committed — `manifest.yaml`, `dbt/`, `semantic/`, `datasets/`,
 `metrics/`, `superset/`, `dashboards/`, `charts/`, `security/`, `tests/`, `documentation/` — zipped, with the
-commit and a checksum per file in its manifest. It is copied to `./exports/`.
+commit and a checksum per file in its manifest. It is copied to `./exports/`. It is **immutable**: a package
+that has gone missing or no longer matches its checksum is not rebuilt — the checksum is what the later gates
+hold it to — and the way on is a new version.
 
 The fingerprint (`superset_asset_version`) is a hash of the dashboard's **content**: every chart named by
 its place on the dashboard, every dataset by its table — no engine id, no uuid, no file name, none of the marks a
@@ -267,9 +334,13 @@ would be given.
 
 ### Audit — `aibi/audit.py`
 
-One JSON line per action: user, actor (AI, human, system), AI model, request id, datasets accessed, SQL
-generated, dbt files generated (with hashes), Superset assets modified, validation results, deployment,
-timestamp. Each line carries the hash of the one before, so a line edited or removed afterwards breaks the chain
+One JSON line per action — the fields of the brief's section 32: user, project, request id, AI model, the
+prompt (on the `request` record, which every later record refers to by its request id), datasets accessed,
+**metrics accessed**, SQL generated, dbt files generated (with hashes), Superset assets created or modified,
+validation results, **visual QA results** (each render, and what the visual checks failed or warned), the
+**git commit** the action made or acted on, deployment, timestamp — and the actor (AI, human, system). An
+automatic correction is a record of its own (`fix`), as is each quality gate (`gate:<name>`) and the package
+(`package`). Each line carries the hash of the one before, so a line edited or removed afterwards breaks the chain
 and `GET /audit/verify` says where. Secrets are scrubbed; rows of data never enter it.
 
 ---
@@ -299,11 +370,12 @@ holds nothing that can change a governed table.
 | | |
 |---|---|
 | `POST /projects/generate` `{prompt}` | start a generation → a run id |
-| `GET /runs/<id>` | the run, step by step |
-| `GET /projects` · `/projects/<id>` · `/projects/<id>/versions/<v>` | projects and versions |
+| `GET /runs/<id>` | the run, step by step, and the quality gate it left its project at |
+| `GET /projects` · `/projects/<id>` · `/projects/<id>/versions/<v>` | projects (`status`, and `last_attempt` — also for a project whose only run failed) and versions (`status`, `history`) |
 | `GET …/versions/<v>/spec` · `/validation` · `/screenshot?viewport=desktop` · `/package` | what a version is |
 | `POST /projects/<id>/approve` `{target, comment, confirm}` · `/reject` · `/restore` · `/discard` | review, and taking a draft away |
-| `GET /datasets` · `/datasets/<id>` · `/datasets/<id>/lineage` · `/metrics` · `/templates` | the registries |
+| `GET /datasets` · `/datasets/<id>` · `/datasets/<id>/lineage` · `/metrics` · `/dimensions/<word>` · `/templates` | the registries |
+| `GET /compatibility` | the matrix, beside what is running |
 | `GET /tools` · `POST /tools/<name>` | the tool layer, as a model would use it |
 | `POST /people/sync` · `/people/<user>` | accounts in Superset given their roles; an account made (`access.manage`) |
 | `GET /audit` · `/audit/verify` | the trail (`audit.read`) |
@@ -319,8 +391,8 @@ All three are a YAML file in `registry/` and a restart of the service.
   (`geo_region`, with `geo: {standard, country}`). A `label` is what people read in a table header or a filter.
 - **A metric** — an expression over a dataset's columns, the datasets and columns it is valid on (`lineage`),
   what it may be broken down by (`dimensions`, enforced), whether its parts add up to its whole (`additive`:
-  a pie is refused for a score or a rate), and the words people use for it (`synonyms`): that last line is how
-  a request finds it.
+  a pie is refused for a score or a rate), who may be shown it (`classification`, required), and the words
+  people use for it (`synonyms`): that last line is how a request finds it.
 - **A template** — rows of slots on a twelve-column grid, what each slot is for and accepts, and names from
   `design/tokens.yaml`. A name that is not a token fails the load.
 
@@ -333,28 +405,30 @@ platform that was not touched:
 
 | | |
 |---|---|
-| The brief's request, from nothing | all 22 steps; 184 checks, none failed, none warning; version `1.0.0`, `READY_FOR_REVIEW`, committed and tagged. Run from an erased engine six times over the day |
+| The brief's request, from nothing | in the brief's own words (« the CEM Executive template »): all 22 steps; 217 checks, none failed, none warning; version `1.0.0`, `READY_FOR_REVIEW` by way of `DRAFT → AI_GENERATED → VALIDATING`, committed, tagged and packaged. Run from an erased engine seven times over the day |
 | The generated model | built in `bi_dev` on branch `ai/cem-qoe`: 5 760 rows, the same count as its base, its six tests passing |
 | The picture | looked at by a person, at 1440 and 1180 px, and with the three filters set — which is how four of the entries in [lessons.md](lessons.md) were found |
 | The review path | fifteen cases: no token, an unknown user, a user with no grant, the developer and the AI's own identity trying to approve, PROD before UAT, a chart edited by hand in Superset after validation (refused as drift), restore from git (drift gone), UAT, PROD without confirmation, PROD — and a regeneration refused once in PROD |
-| The package | the eleven entries of the brief, the commit and 32 checksums in its manifest, no secret in any file |
-| The audit trail | every tool call and every statement; the chain verifies; no secret and no row of data in it |
+| The package | cut at generation; the eleven entries of the brief, the commit and 32 checksums in its manifest, no secret in any file. Downloaded by a reviewer before approving. Altered on disk by one byte after generation, on a second project: approved for UAT, and stopped at `UAT_FAILED` naming the checksum; a second approval refused; the project discarded, and its package gone from `exports/` |
+| The audit trail | every tool call and every statement; the chain verifies; no secret and no row of data in it. For the brief's request: 119 records, 37 naming the metrics they read, 10 naming a git commit, 3 carrying visual QA results; an approval and the promotion that follows it are two records |
 | The fix loop | **not triggered by the brief's request.** Triggered on its own by the `telecom-kpi` template, whose ranking slot gives sixteen regions 16 px each: cut to « Top 14 », re-rendered, passed. Also exercised once under a threshold raised on purpose. The other three fixes are unit-tested only |
-| All five templates, every chart type | `executive`, `operational`, `telecom-kpi`, `geographic` (its own generated model, in its own project) and `customer-experience`, each from a request, each looked at. Big number, line, area, bar, histogram, pie, table and map have all been drawn |
-| A run that cannot pass | forced with a label threshold no chart can meet: one fix tried, the run **failed**, no version was written, and the dashboard — which the attempt had cut to three charts — was put back as `1.0.0`, still matching its validated fingerprint |
-| Access, in Superset | an account with no SharpSight role: 404 on the dashboard, 403 on both datasets. Four roles: the dashboard and all 16 regions. The regional analyst: 3 regions on the mart **and** on the generated dataset, the same rows the data gateway returns. Roles removed by hand, then a row-level rule rewritten to `1 = 1`: promotion refused both times, naming the difference |
+| All six templates, every chart type | `executive`, `operational`, `telecom-kpi`, `geographic` (its own generated model, in its own project), `customer-experience` and `management` (200 checks; a weekly trend, a share by RAT as a pie, a ranking, a detail table), each from a request, each looked at. Big number, line, area, bar, histogram, pie, table and map have all been drawn |
+| A run that cannot pass | forced with a label threshold no chart can meet: one fix tried, the run **failed**, no version was written, and the dashboard — which the attempt had cut to three charts — was put back as `1.0.0`, still matching its validated fingerprint. Forced again on a project with no version yet (text under 40 px fails): the project is listed at `VALIDATION_FAILED` with the way there and the error, no version, three `gate:` records in the trail; the same request under the real policy then reaches `READY_FOR_REVIEW` |
+| Access, in Superset | an account with no SharpSight role: 404 on the dashboard, 403 on both datasets, 404 or 403 on every direct address and every export; not signed in: the sign-in page, or 401. Four roles: the dashboard and all 16 regions, on screen and in an exported file. The regional analyst: 3 regions on the mart **and** on the generated dataset — on screen, in the file, and from the data gateway. No role reaches a chart, a dataset or SQL Lab on its own, and none can export the dashboard's definition. Roles removed by hand, then a row-level rule rewritten to `1 = 1`: promotion refused both times, naming the difference |
 | The adapter's other roads | copy, export, embedded configuration, delete, import: all pass on a copy, which is removed. The first run found the copy had no layout, and that an import is not identical to its export until « {} » counts as empty |
 | Discard | a DEV project taken away with its generated dataset; one standing in UAT refused; a reviewer refused |
 | A person, not a probe | `east.analyst`, created by the command, signs in: the PROD dashboard and nothing else; three regions in every chart, on the map, and in the region filter's own choices; SQL Lab refused. A role given to `admin` by hand in Superset was taken back by `people` |
-| The engine's rules | 106 tests, no database needed: `bash ai-bi.sh test` |
+| The brief's specification | section 23's example given to `save_dashboard_spec` as written — `version: "1.0"`, `template: executive-telecom-v1`, no dataset on any component: read, its four datasets found in the registry, and one finding, the map by a column called `site` that this registry does not have. Without that component it is valid |
+| The engine's rules | 136 tests, no database needed: `bash ai-bi.sh test` |
 
 ## 8 · What is not here yet
 
 | | State |
 |---|---|
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
+| **BI Studio** (the updated brief's sections 1 to 15) | not built: the asset library and its search, sections as first-class objects, the outline, design / data / governance modes, impact analysis (« where is this metric used »). What exists is the factory underneath it — sections 16 to 32 |
 | **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file, and people reach Superset through a command an administrator runs |
-| **Airflow** | not running. The `dbt-runner` one-shot builds the governed models at each start |
+| **Airflow** | not running, and listed as not used in the compatibility matrix. The `dbt-runner` one-shot builds the governed models at each start |
 | **Separate UAT and PROD environments** | one Superset, one warehouse: promotion is the gate, the package and the record |
 | **`TelecomQoEChart`** (the custom visualization) | not built. It is listed in `registry/visualizations.yaml` as approved-but-not-installed, and a specification asking for it is refused. Building it means compiling Superset's frontend with the plugin |
 | **RabbitMQ, MinIO, a reverse proxy** | not needed by the slice; generations run one at a time in-process, packages are files |
@@ -362,5 +436,7 @@ platform that was not touched:
 | **The offline bundle** | `build-devkit-bundle.sh` does not carry the engine's image yet |
 | **A site-level map** | the geographic view is by region: a map of sites needs tiles from outside, and this kit calls nobody |
 | **Choosing a theme from a request** | a specification may name an approved colour scheme, and the validator holds it to the tokens — but nothing in the planner ever sets one: every dashboard takes its template's |
-| **Other warehouses** | the engine speaks PostgreSQL only (dbt profile, SQL policy dialect, data gateway). The kit's Superset has drivers for SQL Server, Oracle and Hive; the engine does not use them |
+| **Other warehouses** | the engine speaks PostgreSQL only (dbt profile, SQL policy dialect, data gateway), and the compatibility matrix says so: the other connectors of the brief are listed as not tested. The kit's Superset has drivers for SQL Server, Oracle and Hive; the engine does not use them |
+| **Sections in a template** | a template has rows of slots. The updated brief lists « sections » among what a template defines; a row here has a name and nothing more — no title on the page, no section a dashboard can reuse |
+| **Spark** as a transformation engine, **Version retrieval** from Superset | transformations are dbt on PostgreSQL. Superset keeps no versions of a dashboard: SharpSight does, in git, and `restore` re-applies one |
 | **Other transformations** | a generated model is one shape: a governed base joined to a governed dimension to add columns. No aggregation to another grain, no filter, no derived column |

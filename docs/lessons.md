@@ -294,3 +294,47 @@ a KPI card beside it.
 
 **A share-of-total chart must draw every part.** A pie limited to its top twelve shows shares of something
 that is not the whole. → no row limit on a pie; thin slices keep their place and lose their label.
+
+**Superset states its version at `/version`** — `{"version_string": "6.1.0", …}`, no session needed. Nothing
+under `/api/v1/` does. That is what the compatibility matrix is checked against.
+
+**Dashboard RBAC gives a role the dashboard — and nothing it is made of.** Measured on 2026-10-03, with an
+account holding Gamma and one `sharpsight_<role>` granted the dashboard: the dashboard and its charts' data
+through it, 200; the same chart asked for by itself (`/api/v1/chart/<id>`, its `/data/`, `/api/v1/explore/`),
+the dataset, SQL Lab: 404 or 403. Which is the property wanted, and is now a check rather than a belief.
+
+**« Download as CSV » goes through the same road as the chart, row-level rules included.** The regional
+analyst's file has three regions; the analyst's, sixteen. The count is compared with the data gateway's.
+
+**A role that may not export a dashboard gets a 500, not a 403.** Gamma holds `can_export on Dashboard`; the
+export then fails on the datasets the role has no direct access to. Nothing is handed over — but a check that
+waited for a clean refusal would have called it a failure of the test. → the check is « was the definition
+served », not « was it refused politely ».
+
+**Any signed-in account gets 200 on `/explore/?slice_id=…`.** It is the page's empty shell; the chart inside it
+is refused by `/api/v1/explore/`. → direct-address checks ask the API, not the shell.
+
+**The audit scrubber took « pass » for a password.** Its pattern for secret key names matched `pass` and
+`passed`, so every validation summary in the trail read `"passed": "[redacted]"` and each category's count of
+passed checks with it — the one field that says whether the validation passed, withheld from the record of
+the validation. Nobody had read a record that far; it showed when the visual QA results were added to the
+trail and printed. → `password`, `passwd`, `passphrase` and `pwd` are secrets whatever they hold; a bare
+`pass` only when it holds text.
+
+**A fixed label threshold leaves a slice nobody can name.** A share by technology: 4G 60 %, 5G 18 %, 3G 18 %
+— and a fourth slice with no label, because 2G was 3.99 % and labels stopped at 4 %. The threshold had been
+chosen on sixteen regions, where thin slices crowd; with no legend, an unlabelled slice of four is anonymous.
+Every check passed: only the picture showed it. → the engine asks how many parts the dimension has; up to
+eight, every slice is labelled.
+
+**A ranking and a table beside it came out with the same title**, « Active Users by region » twice. → a detail
+table is « Active Users, detail by region ».
+
+**Two things were both called `Status`.** A check's verdict (pass, warn, fail, skipped) and a version's gate.
+With postponed annotations pydantic resolved each class against whichever was bound when the class was built,
+so it worked — by accident, and until somebody moved a class. → the gates are `Gate`.
+
+**A page measured in numbers before a threshold was written.** Cards cover 95 % of the grid; rows are 16 px
+apart; a card is its row's height in grid units × 8 px exactly, and its width within 0.1 of a column of the
+template's. The narrowest drawing is the country map: half its card, because Morocco is tall. → 85 % cover,
+32 px, 0.35 of a column, and a warning (not a failure) under 30 % of a card.

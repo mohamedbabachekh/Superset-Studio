@@ -6,7 +6,7 @@ The SharpSight AI BI service: a request in, a governed, validated, versioned das
 | | |
 |---|---|
 | `aibi/main.py` | the API the portal calls |
-| `aibi/pipeline.py` | the twenty-two steps of a generation |
+| `aibi/pipeline.py` | the twenty-two steps of a generation, and the quality gates beside them |
 | `aibi/planner.py` · `aibi/llm.py` | reading a request; where a language model plugs in |
 | `aibi/tools.py` | the tool layer — the only way the engine acts |
 | `aibi/policy_engine.py` · `aibi/data_gateway.py` | who may do what; the one read-only road to the data |
@@ -15,7 +15,8 @@ The SharpSight AI BI service: a request in, a governed, validated, versioned das
 | `aibi/dashboard_agent.py` · `aibi/chart_agent.py` | the specification; one component → one chart |
 | `aibi/superset_adapter.py` · `aibi/adapter_check.py` | Superset's REST API, and nothing but; every road of it driven on a copy (`bash ai-bi.sh check-adapter`) |
 | `aibi/validation_agent.py` · `aibi/visual_qa_agent.py` | the validation engine; looking at the result |
-| `aibi/lifecycle.py` · `aibi/git_adapter.py` | versions, the `.ssbi` package, DEV → UAT → PROD, restore |
+| `aibi/lifecycle.py` · `aibi/git_adapter.py` | versions, the `.ssbi` package, the gates from review to PROD, restore |
+| `aibi/compatibility.py` | the compatibility matrix, beside what is actually running |
 | `aibi/audit.py` · `aibi/store.py` | the audit trail; SharpSight's own memory of projects |
 | `sql/bootstrap.sql` | the warehouse roles, schemas and the landed extract |
 | `tests/` | the rules, held to account without a database (`bash ai-bi.sh test`) |

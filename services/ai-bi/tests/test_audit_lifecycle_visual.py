@@ -28,6 +28,17 @@ def test_no_secret_and_no_row_reaches_the_audit_log(tmp_path):
     assert record["detail"]["password"] == "[redacted]"
 
 
+def test_a_count_of_passed_checks_is_not_a_password(tmp_path):
+    """Every validation summary in the trail read `"passed": "[redacted]"`: the scrubber took the word for a
+    secret. A verdict and a count stay; text under that key is still withheld."""
+    log = AuditLog(tmp_path)
+    record = log.record(action="tool:validate_dashboard", user="dev.user", request_id="r",
+                        validation={"passed": True, "checks": 217, "by_category": {"visual": {"pass": 69, "fail": 0}}},
+                        detail={"pass": "hunter2", "passphrase": "open sesame", "pwd": "x", "db_password": "y"})
+    assert record["validation"] == {"passed": True, "checks": 217, "by_category": {"visual": {"pass": 69, "fail": 0}}}
+    assert set(record["detail"].values()) == {"[redacted]"}
+
+
 def test_the_audit_chain_notices_an_edit_and_a_deletion(tmp_path):
     log = AuditLog(tmp_path)
     for i in range(5):
@@ -167,7 +178,7 @@ def _data(rows=16):
 
 def _good():
     return [_component(1, 0, 100, 700, 128), _component(2, 720, 100, 700, 128),
-            _component(3, 0, 240, 1420, 352), _component(4, 0, 600, 700, 416)]
+            _component(3, 0, 240, 1420, 352), _component(4, 0, 600, 1420, 416)]
 
 
 def test_a_clean_render_passes(registry):

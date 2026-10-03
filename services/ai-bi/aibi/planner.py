@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
-from .models import Requirement, StepRecord, ViewIntent
+from .models import Requirement, StepRecord, TemplateDef, ViewIntent
 from .registry import Registry, RegistryError
 
 # The generation, step by step. The numbers are the brief's (section 9) and they are what a run reports.
@@ -90,10 +90,25 @@ class DeterministicParser:
                         for phrase in phrases]
         self._metrics = [(phrase, metric.id) for metric in registry.metrics.values()
                          for phrase in [metric.name, *metric.synonyms]]
+        self._templates = [(phrase.replace("-", " "), template.id) for template in registry.templates.values()
+                           for phrase in {template.id, template.template.name, *template.template.aliases}]
+
+    def _template(self, named: str) -> Optional[TemplateDef]:
+        """The template a request names. Its id, its name or an alias, exactly — or, failing that, what the
+        phrase ENDS with: in « the CEM Executive template » the template is Executive, and CEM says whose
+        dashboard it is. A name that only appears earlier in the phrase is not taken for the template."""
+        try:
+            return self.registry.template(named)
+        except RegistryError:
+            pass
+        phrase = " ".join(named.lower().split())
+        ending = [key for _, end, key in match_vocabulary(phrase, self._templates) if end == len(phrase)]
+        return self.registry.templates[ending[0]] if ending else None
 
     def parse(self, prompt: str) -> Requirement:
         text = " ".join(prompt.split())
         unresolved: list[str] = []
+        assumptions: list[str] = []
 
         subject_match = self._SUBJECT.search(text)
         subject = subject_match.group(1).strip() if subject_match else "Untitled"
@@ -101,10 +116,15 @@ class DeterministicParser:
         template: Optional[str] = None
         template_match = self._TEMPLATE.search(text)
         if template_match:
-            try:
-                template = self.registry.template(template_match.group(1)).id
-            except RegistryError:
-                unresolved.append(f"template « {template_match.group(1)} » is not a registered template")
+            named = template_match.group(1).strip()
+            found = self._template(named)
+            if found is None:
+                unresolved.append(f"template « {named} » is not a registered template")
+            else:
+                template = found.id
+                known = {found.id, found.template.name.lower(), *(a.lower() for a in found.template.aliases)}
+                if named.lower() not in known:
+                    assumptions.append(f"template « {named} » read as {found.template.name} ({found.id})")
 
         metrics = list(dict.fromkeys(key for _, _, key in match_vocabulary(text, self._metrics)))
         if not metrics:
@@ -146,4 +166,4 @@ class DeterministicParser:
                 ))
 
         return Requirement(prompt=prompt, subject=subject, template=template, metrics=metrics, views=views,
-                           filters=filters, unresolved=unresolved, parser=self.name)
+                           filters=filters, unresolved=unresolved, assumptions=assumptions, parser=self.name)

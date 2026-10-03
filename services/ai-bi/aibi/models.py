@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 Classification = Literal["public", "internal", "confidential", "sensitive", "pii"]
 # Never sampled, never shown to a model, and refused in SQL unless a role is granted the classification.
@@ -121,6 +121,10 @@ class MetricDef(Strict):
     # per region does not, and a pie of sixteen rates shows each as a « share » of a sum that means nothing.
     # False unless said otherwise: the safe side is to refuse the pie.
     additive: bool = False
+    # No default, on purpose, as for a column: a metric nobody classified fails the load. A metric may be
+    # LESS sensitive than the columns it is computed from (a count of customers is not a customer), which
+    # is why it is stated here and not derived.
+    classification: Classification
     lineage: MetricLineage
 
     @property
@@ -273,6 +277,8 @@ class Requirement(Strict):
     views: list[ViewIntent] = Field(default_factory=list)
     filters: list[str] = Field(default_factory=list)
     unresolved: list[str] = Field(default_factory=list)
+    # what was understood, but not word for word: « the CEM Executive template » read as `executive`
+    assumptions: list[str] = Field(default_factory=list)
     parser: str = "deterministic"
 
 
@@ -301,6 +307,9 @@ class DashboardHeader(Strict):
     template: str
     title: str = Field(max_length=120)
     description: str = Field(default="", max_length=500)
+    # The version of the BI project this specification is. The engine writes the one it is about to
+    # produce; a specification that arrives with its own (« 1.0 ») is accepted, and renumbered when stored.
+    version: Optional[str] = Field(default=None, pattern=r"^\d+(\.\d+){0,2}$")
 
     @field_validator("id")
     @classmethod
@@ -442,6 +451,8 @@ class RunRecord(Strict):
     ended_at: Optional[str] = None
     version: Optional[str] = None
     error: Optional[str] = None
+    # the quality gate the run left its project at (section 31): READY_FOR_REVIEW, VALIDATION_FAILED, …
+    quality_gate: Optional[str] = None
 
 
 class Approval(Strict):
@@ -452,11 +463,50 @@ class Approval(Strict):
     comment: str = ""
 
 
+# The quality gates, in the brief's own words (section 31). An AI-generated project does not become deployable
+# because the AI says it is complete: it is in exactly one of these, and only a gate moves it to the next.
+Gate = Literal["DRAFT", "AI_GENERATED", "VALIDATING", "VALIDATION_FAILED", "READY_FOR_REVIEW",
+               "APPROVED_FOR_UAT", "UAT", "UAT_FAILED", "APPROVED_FOR_PROD", "PROD"]
+
+# where a version stands when it is in each
+ENVIRONMENT = {"DRAFT": "DEV", "AI_GENERATED": "DEV", "VALIDATING": "DEV", "VALIDATION_FAILED": "DEV",
+               "READY_FOR_REVIEW": "DEV", "APPROVED_FOR_UAT": "DEV", "UAT": "UAT", "UAT_FAILED": "UAT",
+               "APPROVED_FOR_PROD": "UAT", "PROD": "PROD"}
+
+# Handed on: a version in one of these is neither regenerated in place nor discarded.
+HELD = ("APPROVED_FOR_UAT", "UAT", "APPROVED_FOR_PROD", "PROD")
+
+
+class StatusChange(Strict):
+    status: Gate
+    at: str = Field(default_factory=utcnow)
+    by: str
+    note: str = ""
+
+
+class Attempt(Strict):
+    """One generation's way through the gates, kept on the PROJECT. A version is only written by a run whose
+    validation passed — so this is where a run that did not get that far leaves its record: how far it
+    went, and what stopped it."""
+    run_id: str
+    request_id: str
+    by: str
+    status: Gate = "DRAFT"
+    history: list[StatusChange] = Field(default_factory=list)
+    version: Optional[str] = None
+    error: Optional[str] = None
+
+    def move(self, status: str, by: str, note: str = "") -> None:
+        self.status = status  # type: ignore[assignment]
+        self.history.append(StatusChange(status=status, by=by, note=note))  # type: ignore[arg-type]
+
+
 class ProjectVersion(Strict):
     project_id: str
     version: str
-    state: Literal["DEV", "UAT", "PROD"] = "DEV"
-    review_status: Literal["IN_PROGRESS", "READY_FOR_REVIEW", "APPROVED", "REJECTED"] = "IN_PROGRESS"
+    status: Gate = "DRAFT"
+    # every gate it went through, in order: who moved it, when, and why
+    history: list[StatusChange] = Field(default_factory=list)
     git_commit: Optional[str] = None
     dbt_commit: Optional[str] = None
     superset_asset_version: Optional[str] = None
@@ -471,3 +521,27 @@ class ProjectVersion(Strict):
     validation: dict[str, Any] = Field(default_factory=dict)
     package: dict[str, Any] = Field(default_factory=dict)
     approvals: list[Approval] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_older_records(cls, data: Any) -> Any:
+        """A record written before the ten states had two fields, `state` and `review_status`. It is read
+        as what it meant; and `state`, which is now derived, is never taken from a stored record."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        state, review = data.pop("state", None), data.pop("review_status", None)
+        if "status" not in data and state is not None:
+            data["status"] = {("DEV", "READY_FOR_REVIEW"): "READY_FOR_REVIEW", ("UAT", "READY_FOR_REVIEW"): "UAT",
+                              ("PROD", "APPROVED"): "PROD", ("UAT", "REJECTED"): "UAT_FAILED"}.get((state, review), "DRAFT")
+        return data
+
+    @computed_field
+    @property
+    def state(self) -> str:
+        """The environment the version stands in: DEV, UAT or PROD."""
+        return ENVIRONMENT[self.status]
+
+    def move(self, status: str, by: str, note: str = "") -> None:
+        self.status = status  # type: ignore[assignment]
+        self.history.append(StatusChange(status=status, by=by, note=note))  # type: ignore[arg-type]

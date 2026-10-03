@@ -17,10 +17,10 @@ from aibi.policy_engine import PolicyEngine
 from aibi.registry import Registry
 from aibi.semantic_agent import SemanticAgent
 
-DEMO = ("Create a CEM QoE dashboard using the executive template.\n\n"
-        "Use QoE Score, Active Users and Degraded Users.\n"
-        "Show daily trend, regional ranking, QoE distribution and geographic view.\n"
-        "Add date, region and RAT filters.")
+DEMO = ("Create a CEM QoE dashboard using the CEM Executive template.\n\n"
+        "Use QoE Score, Active Users and Degraded Users.\n\n"
+        "Show daily trend, regional ranking, QoE distribution and geographic view.\n\n"
+        "Add Date, Region and RAT filters.")
 
 
 def _registry_dir() -> Path:

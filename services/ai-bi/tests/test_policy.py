@@ -240,7 +240,9 @@ def test_validation_reports_access_that_is_not_what_sharpsight_grants(with_gener
 
     def checks(**access):
         base = {"differences": [], "granted": {"roles": ["cem_analyst"], "row_rules": ["r"]},
-                "outsider": {"account": "sharpsight-probe-outsider", "dashboard": 404, "data": {"cem.qoe_daily": 403}},
+                "outsider": {"account": "sharpsight-probe-outsider", "dashboard": 404, "data": {"cem.qoe_daily": 403},
+                             "direct": {"chart": 404}, "export": {"assets": {"dashboard": 404},
+                                                                  "data": {"cem.qoe_daily": 403}}},
                 "outsider_refused": True}
         report = agent.security(spec, dev, QueryLog(), None, access={**base, **access})
         return {c.name: c for c in report.checks}
@@ -253,7 +255,8 @@ def test_validation_reports_access_that_is_not_what_sharpsight_grants(with_gener
     assert drifted["BI engine access is what SharpSight grants"].status == "fail"
     assert "granted to no role" in drifted["BI engine access is what SharpSight grants"].detail
 
-    open_door = checks(outsider={"account": "sharpsight-probe-outsider", "dashboard": 200, "data": {"cem.qoe_daily": 200}},
+    open_door = checks(outsider={"account": "sharpsight-probe-outsider", "dashboard": 200, "data": {"cem.qoe_daily": 200},
+                                 "direct": {}, "export": {"assets": {}, "data": {}}},
                        outsider_refused=False)
     assert open_door["the BI engine refuses an account with no SharpSight role"].status == "fail"
 

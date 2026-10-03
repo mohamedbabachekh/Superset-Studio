@@ -20,6 +20,8 @@ metric:
   # what a distribution of this metric is drawn over
   distribution_column: qoe_score
   additive: false
+  # who may be shown it: the same scale as a column's (public · internal · confidential · sensitive · pii)
+  classification: internal
   lineage:
     datasets: [cem.qoe_daily]
     columns: [qoe_score, active_users]

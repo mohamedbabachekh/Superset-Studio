@@ -18,10 +18,12 @@ import functools
 import json
 import secrets
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import requests
 from pydantic import BaseModel, Field
 
 from .audit import AuditLog
@@ -80,6 +82,11 @@ class SampleArgs(BaseModel):
 
 class MetricArgs(BaseModel):
     metric_id: str
+
+
+class DimensionArgs(BaseModel):
+    dimension: str
+    dataset_id: Optional[str] = None
 
 
 class ListMetricsArgs(BaseModel):
@@ -148,15 +155,17 @@ def tool(name: str, description: str, arguments: type[BaseModel] = NoArgs,
                 self.audit.record(
                     action=f"tool:{name}", user=ctx.identity.user, request_id=ctx.request_id, actor=ctx.actor,
                     ai_model=ctx.ai_model, project_id=ctx.project_id, sql=note.get("sql"),
-                    datasets=note.get("datasets"), outcome="refused" if isinstance(exc, PolicyError) else "error",
+                    datasets=note.get("datasets"), metrics=note.get("metrics"),
+                    outcome="refused" if isinstance(exc, PolicyError) else "error",
                     detail={"error": str(exc)[:500]}, duration_ms=int((time.monotonic() - started) * 1000))
                 raise
             self.audit.record(
                 action=f"tool:{name}", user=ctx.identity.user, request_id=ctx.request_id, actor=ctx.actor,
                 ai_model=ctx.ai_model, project_id=ctx.project_id, datasets=note.get("datasets"),
                 sql=note.get("sql"), dbt_files=note.get("dbt_files"), superset_assets=note.get("superset_assets"),
-                validation=note.get("validation"), detail=note.get("detail"),
-                duration_ms=int((time.monotonic() - started) * 1000))
+                validation=note.get("validation"), detail=note.get("detail"), metrics=note.get("metrics"),
+                visual_qa=note.get("visual_qa"), git_commit=note.get("git_commit"),
+                deployment=note.get("deployment"), duration_ms=int((time.monotonic() - started) * 1000))
             return result
 
         inner.spec = ToolSpec(name, description, arguments, capability)  # type: ignore[attr-defined]
@@ -192,6 +201,9 @@ class Toolbox:
         self.validation = ValidationAgent(registry, policy, self.sql, store)
         # what the last retrieval and render of each project found — evidence for validate_dashboard
         self.evidence: dict[str, dict[str, Any]] = {}
+        # Who builds a package. The lifecycle sets it: a package is cut from a committed version, and what
+        # a version is, is the lifecycle's to know. The tool below only asks.
+        self.packager: Optional[Callable[[str], dict[str, Any]]] = None
 
     # ── the catalogue ───────────────────────────────────────────────────────────────────────────────────────
     @classmethod
@@ -237,11 +249,12 @@ class Toolbox:
             self._bi_database_id = self.superset.ensure_database(*self._bi_database)
         return self._bi_database_id
 
-    def _run_sql(self, ctx: ToolContext, sql: str, purpose: str, limit: Optional[int] = None) -> QueryResult:
+    def _run_sql(self, ctx: ToolContext, sql: str, purpose: str, limit: Optional[int] = None,
+                 metrics: Optional[list[str]] = None) -> QueryResult:
         """Every statement the engine runs, whichever tool asked for it, leaves its own audit record: the
-        SQL, the datasets it read, how many rows came back — and never the rows."""
+        SQL, the datasets it read, the metric it computed, how many rows came back — and never the rows."""
         common = dict(action="sql", user=ctx.identity.user, request_id=ctx.request_id, actor=ctx.actor,
-                      ai_model=ctx.ai_model, project_id=ctx.project_id, sql=sql)
+                      ai_model=ctx.ai_model, project_id=ctx.project_id, sql=sql, metrics=metrics)
         try:
             result = self.gateway.run(sql, ctx.identity, limit=limit, purpose=purpose, log=ctx.query_log)
         except Exception as exc:
@@ -314,9 +327,9 @@ class Toolbox:
     @tool("get_metric", "A governed metric: expression, format, dimensions, owner, certification, lineage.",
           MetricArgs, capability="bi.read")
     def get_metric(self, ctx: ToolContext, note: dict, metric_id: str) -> dict[str, Any]:
-        metric = self.registry.metric(metric_id)
-        if not any(self.policy.can_read(ctx.identity, self.registry.dataset(ds)) for ds in metric.lineage.datasets):
-            raise PolicyError(f"{ctx.identity.user} has no access to the datasets behind {metric_id}", "dataset_denied")
+        note["metrics"] = [metric_id]
+        metric = self.policy.require_metric(ctx.identity, metric_id)
+        note["datasets"] = metric.lineage.datasets
         return self.semantic.describe(metric)
 
     @tool("list_metrics", "The governed metrics the user may use, certified ones first.", ListMetricsArgs,
@@ -328,9 +341,36 @@ class Toolbox:
                 continue
             if domain and not metric.id.startswith(domain + "."):
                 continue
-            if any(self.policy.can_read(ctx.identity, self.registry.dataset(ds)) for ds in metric.lineage.datasets):
+            if self.policy.may_use(ctx.identity, metric):
                 found.append(self.semantic.describe(metric))
+        note["metrics"] = [m["id"] for m in found]
         return sorted(found, key=lambda m: (not m["certified"], m["id"]))
+
+    @tool("get_dimension", "A governed dimension: the column behind a word of the business (« regional » is "
+          "region), the datasets it is found in, its type, role, classification and expected values there, and "
+          "the metrics that may be broken down by it. Reads the registry; returns no data.", DimensionArgs,
+          capability="bi.read")
+    def get_dimension(self, ctx: ToolContext, note: dict, dimension: str, dataset_id: Optional[str]) -> dict[str, Any]:
+        wanted = " ".join(dimension.lower().replace("_", " ").split())
+        vocabulary = self.registry.lexicon.get("dimensions", {})
+        column = next((name for name, phrases in vocabulary.items()
+                       if wanted in (name.replace("_", " "), *(p.lower() for p in phrases))), dimension.strip())
+        scope = ([self.policy.require_dataset(ctx.identity, dataset_id)] if dataset_id
+                 else self.policy.permitted_datasets(ctx.identity))
+        holders = [d for d in scope if column in d.columns and d.columns[column].role != "measure"]
+        if not holders:
+            where = dataset_id or f"any dataset {ctx.identity.user} may read"
+            raise ToolError(f"« {dimension} » is not a dimension of {where}")
+        holders.sort(key=lambda d: (not d.certified, d.id))
+        usable = [m for m in self.registry.metrics.values() if self.policy.may_use(ctx.identity, m)
+                  and any(set(d.columns[column].determined_by or [column]) <= set(m.dimensions) for d in holders)]
+        note.update(datasets=[d.id for d in holders], metrics=[m.id for m in usable])
+        return {"dimension": column, "label": holders[0].label(column),
+                "synonyms": vocabulary.get(column, []),
+                "datasets": {d.id: {**d.columns[column].model_dump(exclude_none=True), "certified": d.certified,
+                                    "readable": column in self.policy.readable_columns(ctx.identity, d),
+                                    "part_of_grain": column in d.grain} for d in holders},
+                "metrics": [m.id for m in usable]}
 
     @tool("list_dashboard_templates", "The predefined dashboard templates.", capability="bi.read")
     def list_dashboard_templates(self, ctx: ToolContext, note: dict) -> list[dict[str, Any]]:
@@ -384,7 +424,9 @@ class Toolbox:
         body["model_plan"] = plan.model_dump()
         body["dbt"] = {"model": plan.name, "files": files, "commit": commit, "branch": f"ai/{body['project_id']}"}
         self.save_project(body)
-        note.update(dbt_files=files, detail={"model": plan.name, "branch": body["dbt"]["branch"], "commit": commit})
+        note.update(dbt_files=files, git_commit=commit,
+                    detail={"model": plan.name, "branch": body["dbt"]["branch"], "commit": commit,
+                            "repository": "dbt"})
         return {"model": plan.name, "files": files, "commit": commit, "verdict": verdict}
 
     def _dbt_note(self, note: dict, result: DbtResult) -> dict[str, Any]:
@@ -440,13 +482,15 @@ class Toolbox:
           "engine tools work from the saved specification, and only when it is valid.", SpecArgs)
     def save_dashboard_spec(self, ctx: ToolContext, note: dict, spec: DashboardSpec) -> ValidationReport:
         body = self.project(ctx)
+        resolved = self.dashboards.resolve(spec, ctx.identity)
         report = self.dashboards.validate(spec, ctx.identity)
         body["spec"] = spec.model_dump()
         body["spec_valid"] = report.passed
         self.save_project(body)
-        note.update(datasets=spec.datasets(), validation=report.summary(),
+        note.update(datasets=spec.datasets(), metrics=spec.metrics(), validation=report.summary(),
                     detail={"dashboard": spec.dashboard.id, "template": spec.dashboard.template,
-                            "components": len(spec.components),
+                            "version": spec.dashboard.version, "components": len(spec.components),
+                            "datasets_resolved_from_the_registry": resolved,
                             "failures": [f"{c.name}: {c.subject} {c.detail}".strip() for c in report.failures]})
         return report
 
@@ -498,6 +542,7 @@ class Toolbox:
         body["engine"]["database_id"] = database_id
         self.save_project(body)
         note.update(datasets=[dataset.id],
+                    metrics=[m.id for m in self.registry.metrics.values() if self.semantic.valid_on(m, dataset)[0]],
                     superset_assets=[{"type": "dataset", "id": engine_id, "action": "created" if found is None else "updated",
                                       "table": dataset.relation, "metrics": [m["metric_name"] for m in metrics]}])
         return {"id": engine_id, "dataset": dataset.id, "created": found is None}
@@ -541,11 +586,16 @@ class Toolbox:
         headline = None
         if component.type == "big_number":
             sql = self.sql.metric_query(dataset, [metric])
-            headline = self._run_sql(ctx, sql, f"headline value of {metric.id}").scalar()
+            headline = self._run_sql(ctx, sql, f"headline value of {metric.id}", metrics=[metric.id]).scalar()
+        parts = None
+        if self.registry.visualizations[component.type].needs.get("additive_metric"):
+            # a share-of-total chart labels every slice when there are few: how many are there?
+            parts = len(self._run_sql(ctx, self.sql.distinct_values(dataset, component.dimension, 50),
+                                      f"how many parts {component.dimension} has, for the labels of {slot}").rows)
         payload = self.charts.payload(
             component, dataset, metric, engine["datasets"][dataset.id], engine["dashboard"]["id"], template,
             spec.theme.color_scheme or template.theme.color_scheme,
-            spec.theme.sequential_scheme or template.theme.sequential_scheme, body["project_id"], headline)
+            spec.theme.sequential_scheme or template.theme.sequential_scheme, body["project_id"], headline, parts)
 
         previous = engine.get("charts", {}).get(slot, {})
         known = previous.get("id")
@@ -563,7 +613,7 @@ class Toolbox:
                                                  "name": payload["slice_name"], "type": component.type,
                                                  "engine_type": payload["viz_type"]}
         self.save_project(body)
-        note.update(datasets=[dataset.id],
+        note.update(datasets=[dataset.id], metrics=[metric.id],
                     superset_assets=[{"type": "chart", "id": chart_id, "slot": slot, "action": action,
                                       "viz_type": payload["viz_type"], "name": payload["slice_name"]}])
         return engine["charts"][slot]
@@ -621,10 +671,12 @@ class Toolbox:
         if "dashboard" not in engine:
             raise ToolError("the dashboard must exist in the BI engine first")
         datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
-        role_ids = {role: self.superset.ensure_role(self.engine_role(role)) for role in self.policy.audience(datasets)}
+        metrics = [self.registry.metric(m) for m in spec.metrics()]
+        role_ids = {role: self.superset.ensure_role(self.engine_role(role))
+                    for role in self.policy.audience(datasets, metrics)}
         self.superset.update_dashboard(engine["dashboard"]["id"], {"roles": sorted(role_ids.values())})
 
-        wanted = {self.rule_name(r["role"], r["dataset"]): r for r in self.policy.row_rules(datasets)}
+        wanted = {self.rule_name(r["role"], r["dataset"]): r for r in self.policy.row_rules(datasets, metrics)}
         assets = [{"type": "dashboard", "id": engine["dashboard"]["id"], "action": "granted",
                    "roles": [self.engine_role(r) for r in role_ids]}]
         for name, rule in wanted.items():
@@ -642,20 +694,21 @@ class Toolbox:
                 assets.append({"type": "row_level_rule", "id": rule["id"], "name": rule["name"], "action": "deleted"})
         engine["access"] = {"roles": sorted(role_ids), "row_rules": sorted(wanted)}
         self.save_project(body)
-        note.update(datasets=[d.id for d in datasets], superset_assets=assets)
+        note.update(datasets=[d.id for d in datasets], metrics=[m.id for m in metrics], superset_assets=assets)
         return engine["access"]
 
     def access_differences(self, body: dict[str, Any]) -> list[str]:
         """How the access set in the BI engine differs from what SharpSight grants. Empty when it does not."""
         spec, engine = DashboardSpec(**body["spec"]), body["engine"]
         datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
-        want_roles = sorted(self.engine_role(r) for r in self.policy.audience(datasets))
+        metrics = [self.registry.metric(m) for m in spec.metrics()]
+        want_roles = sorted(self.engine_role(r) for r in self.policy.audience(datasets, metrics))
         have_roles = self.superset.dashboard_roles(engine["dashboard"]["id"])
         differences = []
         if have_roles != want_roles:
             differences.append(f"the dashboard is granted to {', '.join(have_roles) or 'no role'}; SharpSight "
                                f"grants it to {', '.join(want_roles) or 'no role'}")
-        wanted = {self.rule_name(r["role"], r["dataset"]): r for r in self.policy.row_rules(datasets)}
+        wanted = {self.rule_name(r["role"], r["dataset"]): r for r in self.policy.row_rules(datasets, metrics)}
         mine = {d.id for d in datasets}
         found = {r["name"]: r for r in self.superset.row_rules("sharpsight:") if r["name"].split(":", 2)[-1] in mine}
         for name, rule in wanted.items():
@@ -685,10 +738,12 @@ class Toolbox:
         username, password = f"sharpsight-probe-{role or 'outsider'}", secrets.token_urlsafe(24)
         account = self.superset.ensure_account(username, roles, password, active=True)
         base = self.superset.base_url
-        result: dict[str, Any] = {"account": username, "role": role, "dashboard": None, "data": {}, "rows": {}}
+        result: dict[str, Any] = {"account": username, "role": role, "dashboard": None, "data": {}, "rows": {},
+                                  "direct": {}, "export": {"assets": {}, "data": {}}}
         try:
             session = sign_in(base, username, password)
-            result["dashboard"] = session.get(f"{base}/api/v1/dashboard/{dashboard_id}", timeout=30).status_code
+            ask = lambda path: session.get(f"{base}{path}", timeout=60, allow_redirects=False).status_code  # noqa: E731
+            result["dashboard"] = ask(f"/api/v1/dashboard/{dashboard_id}")
             charts = self.live_charts(engine)
             for dataset_id in spec.datasets():
                 dataset = self.registry.dataset(dataset_id)
@@ -697,14 +752,18 @@ class Toolbox:
                 policy = self.policy.role_row_policy(role, dataset) if role else None
                 column = next((c for c in dataset.columns if policy and c in policy), None) or next(
                     (c for c in dataset.grain if dataset.columns[c].role == "dimension"), dataset.grain[0])
-                answer = session.post(f"{base}/api/v1/chart/data", timeout=60, json={
+                question = lambda kind: session.post(f"{base}/api/v1/chart/data", timeout=60, json={  # noqa: E731
                     "datasource": {"id": engine["datasets"][dataset_id], "type": "table"}, "force": True,
                     # asked in the dashboard's name: a role granted a dashboard is granted its charts' data
                     "form_data": {"dashboardId": dashboard_id, "slice_id": charts[component.slot]["id"]},
                     "queries": [{"columns": [column], "metrics": ["count"], "filters": [], "orderby": [],
                                  "extras": {"where": "", "having": ""}, "row_limit": 1000}],
-                    "result_format": "json", "result_type": "full"})
+                    "result_format": kind, "result_type": "full"})
+                answer = question("json")
                 result["data"][dataset_id] = answer.status_code
+                # the same question, asked for as a FILE: what « download as CSV » would hand over
+                exported = question("csv")
+                result["export"]["data"][dataset_id] = exported.status_code
                 if role and answer.status_code == 200:
                     seen = sorted(str(row[column]) for row in answer.json()["result"][0]["data"])
                     expected = sorted(str(row[0]) for row in self.gateway.run(
@@ -712,10 +771,75 @@ class Toolbox:
                         self.policy.identity_for_role(role, body["tenant"]),
                         purpose=f"what {role} may see of {dataset_id}").rows)
                     result["rows"][dataset_id] = {"by": column, "bi_engine": len(seen), "data_gateway": len(expected),
-                                                  "same": seen == expected, "restricted": policy is not None}
+                                                  "same": seen == expected, "restricted": policy is not None,
+                                                  "exported": (max(0, len(exported.text.strip().splitlines()) - 1)
+                                                               if exported.status_code == 200 else None)}
+            # Each thing the dashboard is made of, asked for by ITSELF — its own address, not the dashboard's.
+            chart_id = next(iter(charts.values()))["id"]
+            dataset_engine_id = next(iter(engine["datasets"].values()))
+            result["direct"] = {
+                "dashboard page": ask(f"/superset/dashboard/{engine['dashboard']['slug']}/"),
+                "chart": ask(f"/api/v1/chart/{chart_id}"),
+                "chart data": ask(f"/api/v1/chart/{chart_id}/data/"),
+                "chart in the editor": ask(f"/api/v1/explore/?slice_id={chart_id}"),
+                "dataset": ask(f"/api/v1/dataset/{dataset_engine_id}"),
+                "SQL Lab": session.post(f"{base}/api/v1/sqllab/execute/", timeout=60, json={
+                    "database_id": engine["database_id"], "sql": "select 1", "schema": "bi"}).status_code,
+            }
+            result["export"]["assets"] = {
+                "dashboard": ask(f"/api/v1/dashboard/export/?q=!({dashboard_id})"),
+                "chart": ask(f"/api/v1/chart/export/?q=!({chart_id})"),
+                "dataset": ask(f"/api/v1/dataset/export/?q=!({dataset_engine_id})"),
+            }
         finally:
             self.superset.set_account_active(account, False)
         return result
+
+    def anonymous_access(self, body: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """The dashboard's addresses, asked for by nobody: no session at all. Each must end at the sign-in
+        page or at a refusal."""
+        engine, base = body["engine"], self.superset.base_url
+        dashboard_id = engine["dashboard"]["id"]
+        chart_id = next(iter(self.live_charts(engine).values()))["id"]
+        asked: dict[str, dict[str, Any]] = {}
+        for what, path in (("dashboard page", f"/superset/dashboard/{engine['dashboard']['slug']}/"),
+                           ("dashboard", f"/api/v1/dashboard/{dashboard_id}"),
+                           ("chart", f"/api/v1/chart/{chart_id}"),
+                           ("chart data", f"/api/v1/chart/{chart_id}/data/"),
+                           ("export", f"/api/v1/dashboard/export/?q=!({dashboard_id})")):
+            answer = requests.get(base + path, timeout=30, allow_redirects=False)
+            to_sign_in = answer.status_code in (301, 302, 303, 307, 308) and "/login" in answer.headers.get("Location", "")
+            asked[what] = {"status": answer.status_code, "to_sign_in": to_sign_in,
+                           "refused": to_sign_in or answer.status_code in (401, 403, 404)}
+        return asked
+
+    def export_problems(self, probe: dict[str, Any]) -> list[str]:
+        """What the account took out of the BI engine that the export policy does not give it."""
+        policy = self.registry.policies.get("security", {}).get("export", {})
+        role, problems = probe["role"], []
+        # the definition leaves through the .ssbi package: served to an account, whatever the policy says
+        # of data, it is a way around the package — unless the policy names the audience for it too
+        if policy.get("assets", "nobody") == "nobody" or role is None:
+            problems += [f"the definition of the {what} was exported" for what, status in
+                         probe["export"]["assets"].items() if status == 200]
+        for dataset_id, status in probe["export"]["data"].items():
+            rows = probe["rows"].get(dataset_id, {})
+            if role is None or policy.get("data", "audience") != "audience":
+                if status == 200:
+                    problems.append(f"the data of {dataset_id} was exported as a file")
+            elif status != 200:
+                problems.append(f"the data of {dataset_id} could not be exported ({status}), which the policy allows")
+            elif rows and rows.get("exported") != rows["data_gateway"]:
+                problems.append(f"the file exported from {dataset_id} has {rows.get('exported')} values of "
+                                f"{rows['by']}; the role's policy gives {rows['data_gateway']}")
+        return problems
+
+    @staticmethod
+    def direct_problems(probe: dict[str, Any]) -> list[str]:
+        """What the account reached by asking for it outright. Someone the dashboard is granted to reaches
+        the dashboard's page — and nothing it is made of on its own: not the chart, not the dataset, not SQL."""
+        return [f"{what} was served ({status})" for what, status in probe["direct"].items()
+                if status == 200 and not (what == "dashboard page" and probe["role"] is not None)]
 
     @staticmethod
     def refused(probe: dict[str, Any]) -> bool:
@@ -734,11 +858,27 @@ class Toolbox:
         body, spec = self._valid_spec(ctx)
         engine = body.get("engine", {})
         data: dict[str, dict[str, Any]] = {}
+        contexts = []
         for component in spec.components:
             dataset = self.registry.dataset(component.dataset)
             metric = self.registry.metric(component.metric)
             context = self.charts.query_context(component, dataset, metric, engine["datasets"][dataset.id])
+            contexts.append(context)
             data[component.slot] = self.superset.chart_data(context)
+
+        # Concurrency: that many people open the dashboard in the same instant. Every query is sent uncached
+        # (the context forces it), so this is the warehouse under load, not the cache.
+        users = int(self.registry.policies.get("performance", {}).get("concurrent_users", 0))
+        concurrency = None
+        if users > 1 and contexts:
+            started = time.monotonic()
+            with ThreadPoolExecutor(max_workers=users) as pool:
+                answers = [answer for batch in pool.map(
+                    lambda _: [self.superset.chart_data(c) for c in contexts], range(users)) for answer in batch]
+            concurrency = {"users": users, "queries": len(answers),
+                           "failed": sum(1 for a in answers if a["http_status"] != 200 or a["error"]),
+                           "slowest_ms": max(a["duration_ms"] for a in answers),
+                           "wall_ms": int((time.monotonic() - started) * 1000)}
 
         probes = []
         for column in spec.filters:
@@ -766,12 +906,12 @@ class Toolbox:
                 probes.append({"filter": column, "dataset": dataset_id, "value": value, "baseline": baseline,
                                "filtered": self.superset.chart_data(context), "expect_change": distinct > 1})
 
-        self.evidence.setdefault(body["project_id"], {}).update(data=data, probes=probes)
-        note.update(datasets=spec.datasets(),
+        self.evidence.setdefault(body["project_id"], {}).update(data=data, probes=probes, concurrency=concurrency)
+        note.update(datasets=spec.datasets(), metrics=spec.metrics(),
                     detail={"components": {slot: {"rows": o["rowcount"], "ms": o["duration_ms"],
                                                   "error": o["error"]} for slot, o in data.items()},
-                            "filter_probes": len(probes)})
-        return {"components": data, "filter_probes": probes}
+                            "filter_probes": len(probes), "concurrency": concurrency})
+        return {"components": data, "filter_probes": probes, "concurrency": concurrency}
 
     @tool("render_dashboard_screenshot", "Open the dashboard in a headless browser at each of the template's "
           "viewports: a screenshot, each chart's geometry, and the requests the dashboard itself made.")
@@ -801,7 +941,13 @@ class Toolbox:
                                        "components": len(r.components), "requests": len(r.calls),
                                        "error": r.error} for r in renders],
                           "filtered_render": bool(mask), "filters_applied": evidence["filters_applied"]}
+        note["visual_qa"] = {"renders": self._renders_for_audit(renders)}
         return renders
+
+    @staticmethod
+    def _renders_for_audit(renders: list[Render]) -> list[dict[str, Any]]:
+        return [{"viewport": r.viewport, "width": r.width, "load_ms": r.load_ms, "components": len(r.components),
+                 "screenshot": Path(r.screenshot).name if r.screenshot else None, "error": r.error} for r in renders]
 
     @tool("validate_dashboard", "The whole validation — data, SQL, BI, security, performance, visual — over the "
           "data last retrieved and the screenshots last rendered. With visual=false, everything that does not "
@@ -822,10 +968,20 @@ class Toolbox:
 
         report = ValidationReport()
         report.extend(self.dashboards.validate(spec, ctx.identity))
-        report.extend(self.validation.data(datasets, metrics_on,
-                                           lambda sql, purpose: self._run_sql(ctx, sql, purpose)))
+        report.extend(self.validation.data(
+            datasets, metrics_on, lambda sql, purpose: self._run_sql(ctx, sql, purpose),
+            readable={d.id: self.policy.readable_columns(ctx.identity, d) for d in datasets}))
         engine_datasets = {ds: self.superset.get_dataset(engine_id) for ds, engine_id in engine.get("datasets", {}).items()}
         report.extend(self.validation.bi(spec, template, engine_datasets, data, probes, renders))
+        dashboard_id = engine["dashboard"]["id"]
+        charts = self.live_charts(engine)
+        report.extend(self.validation.dependencies(spec, engine_datasets, {
+            "on_dashboard": [c["id"] for c in self.superset.dashboard_charts(dashboard_id)],
+            "charts": charts, "connection": self._bi_database[0],
+            "filters": [{"name": f["name"], "column": f["targets"][0]["column"]["name"],
+                         "dataset_id": f["targets"][0]["datasetId"]}
+                        for f in self.dashboards.native_filters(spec, engine["datasets"], charts)
+                        if f["targets"] and f["targets"][0]]}))
         if visual:
             report.extend(self.validation.dashboard_filters(
                 spec, self.live_charts(engine), renders, evidence.get("filtered_render"),
@@ -837,8 +993,12 @@ class Toolbox:
         report.extend(self.validation.security(
             spec, ctx.identity, ctx.query_log, self.superset.find_database(self._bi_database[0]),
             access={"differences": self.access_differences(body), "granted": engine.get("access", {}),
-                    "outsider": outsider, "outsider_refused": self.refused(outsider)}))
-        report.extend(self.validation.performance(data, renders))
+                    "outsider": outsider, "outsider_refused": self.refused(outsider),
+                    "export_policy": self.registry.policies.get("security", {}).get("export", {}),
+                    "export_problems": self.export_problems(outsider),
+                    "direct_problems": self.direct_problems(outsider),
+                    "anonymous": self.anonymous_access(body)}))
+        report.extend(self.validation.performance(data, renders, evidence.get("concurrency")))
         model_verdicts = {}
         if body.get("model_plan"):
             plan = ModelPlan(**body["model_plan"])
@@ -850,11 +1010,26 @@ class Toolbox:
             report.add("visual", "screenshot generated", "fail", "", "the dashboard has not been rendered",
                        code="render_failed")
         for render in renders:
-            report.extend(self.visual.check(render, spec, template, self.live_charts(engine), data))
+            report.extend(self.visual.check(render, spec, template, charts, data))
+        if visual and renders:
+            # the page is styled by the template's stylesheet and no other: a rule added by hand in the BI
+            # engine is a template violation no screenshot measurement would name
+            live = (self.superset.get_dashboard(dashboard_id) or {}).get("css") or ""
+            same = live.strip() == self.dashboards.css(template).strip()
+            report.add("visual", "no template violation", "pass" if same else "fail", "stylesheet",
+                       "the dashboard's stylesheet is the template's own, generated from design tokens" if same
+                       else "the dashboard's stylesheet is not the one the template generates",
+                       code=None if same else "template_violation")
 
         evidence["report"] = report
-        note.update(datasets=spec.datasets(), validation=report.summary(),
+        note.update(datasets=spec.datasets(), metrics=spec.metrics(), validation=report.summary(),
                     detail={"failures": [f"{c.category} · {c.name} · {c.subject}: {c.detail}" for c in report.failures][:20]})
+        if visual:
+            seen = [c for c in report.checks if c.category == "visual"]
+            line = lambda c: f"{c.name} · {c.subject}: {c.detail}"  # noqa: E731
+            note["visual_qa"] = {"renders": self._renders_for_audit(renders), "checks": len(seen),
+                                 "failed": [line(c) for c in seen if c.status == "fail"][:20],
+                                 "warned": [line(c) for c in seen if c.status == "warn"][:20]}
         return report
 
     @tool("commit_project_version", "Commit the project's files to the BI projects repository.", CommitArgs)
@@ -862,4 +1037,19 @@ class Toolbox:
         body = self.project(ctx)
         commit = self.git.commit_project(body["project_id"], message)
         note["detail"] = {"commit": commit, "repository": "bi-projects"}
+        note["git_commit"] = commit
         return {"commit": commit}
+
+    @tool("create_deployment_package", "Build the .ssbi package of the project's latest version: its folder "
+          "exactly as committed, with a manifest giving each file's checksum. Only a version that passed "
+          "validation and is awaiting review has one; it is built once, and every later gate checks that very "
+          "file.")
+    def create_deployment_package(self, ctx: ToolContext, note: dict) -> dict[str, Any]:
+        body = self.project(ctx)
+        if self.packager is None:
+            raise ToolError("this service has no packager")
+        package = self.packager(body["project_id"])
+        note.update(git_commit=package.get("git_commit"),
+                    deployment={"package": {k: package.get(k) for k in ("file", "sha256", "bytes", "files", "version")}},
+                    detail={"exported_to": package.get("exported_to"), "export_error": package.get("export_error")})
+        return package

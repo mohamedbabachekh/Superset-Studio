@@ -145,7 +145,7 @@ class DashboardAgent:
 
     # ── 2 · the specification ───────────────────────────────────────────────────────────────────────────────
     def specify(self, project_id: str, requirement: Requirement, template: TemplateDef,
-                drafts: list[Draft]) -> tuple[DashboardSpec, list[str]]:
+                drafts: list[Draft], version: Optional[str] = None) -> tuple[DashboardSpec, list[str]]:
         notes: list[str] = []
         order = [p.id for row in template.layout for p in row.slots]
         components = [
@@ -172,9 +172,28 @@ class DashboardAgent:
         # « CEM QoE » on the executive template is the project cem-qoe and the dashboard cem-qoe-overview
         suffix = slugify(title.replace(requirement.subject, "", 1))
         dashboard_id = project_id if slugify(title) == project_id else f"{project_id}-{suffix}"
-        header = DashboardHeader(id=dashboard_id, template=template.id, title=title,
+        header = DashboardHeader(id=dashboard_id, template=template.id, title=title, version=version,
                                  description=" ".join(requirement.prompt.split())[:500])
         return DashboardSpec(dashboard=header, filters=filters, components=components), notes
+
+    def resolve(self, spec: DashboardSpec, identity: Identity) -> list[str]:
+        """Give each component that names no dataset the one its metric comes from. A specification may leave
+        the dataset out — section 23's own example does — and it is then the registry that says where the
+        metric, broken down that way, is found: a governed dataset before a generated one, the metric's own
+        before one derived from it. Nothing is found for a breakdown no dataset offers; validation says so."""
+        resolved: list[str] = []
+        for component in spec.components:
+            metric = self.registry.metrics.get(component.metric)
+            if component.dataset or metric is None:
+                continue
+            found = [d for d in self.policy.permitted_datasets(identity)
+                     if self.semantic.valid_on(metric, d)[0]
+                     and (component.dimension is None or component.dimension in d.columns)]
+            found.sort(key=lambda d: (not d.certified, d.id not in metric.lineage.datasets, d.id))
+            if found:
+                component.dataset = found[0].id
+                resolved.append(f"{component.slot}: {found[0].id}")
+        return resolved
 
     def validate(self, spec: DashboardSpec, identity: Identity) -> ValidationReport:
         """Everything that can be known to be wrong before the BI engine is called."""
@@ -218,10 +237,16 @@ class DashboardAgent:
                 continue
             report.add("specification", "metric is certified", "pass" if metric.certified else "warn", subject,
                        f"{metric.id} v{metric.version}" + ("" if metric.certified else " is not certified"))
+            cleared = self.policy.cleared_for(identity, metric)
+            add("requester is cleared for the metric", cleared, subject,
+                f"{metric.id} is classified {metric.classification}", code=None if cleared else "unauthorized_metric")
 
             dataset = self.registry.datasets.get(component.dataset or "")
             if dataset is None:
-                add("dataset is registered", False, subject, f"{component.dataset} is not in the dataset registry")
+                add("dataset is registered", False, subject,
+                    f"{component.dataset} is not in the dataset registry" if component.dataset else
+                    f"no dataset {identity.user} may read gives {metric.id}"
+                    + (f" by {component.dimension}" if component.dimension else ""))
                 continue
             if not self.policy.can_read(identity, dataset):
                 add("requester may read the dataset", False, subject,

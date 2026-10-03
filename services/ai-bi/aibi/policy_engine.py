@@ -19,7 +19,7 @@ from typing import Optional
 import sqlglot
 from sqlglot import exp
 
-from .models import RESTRICTED_CLASSIFICATIONS, DatasetDef
+from .models import RESTRICTED_CLASSIFICATIONS, DatasetDef, MetricDef
 from .registry import Registry
 
 
@@ -119,6 +119,24 @@ class PolicyEngine:
 
     def withheld_columns(self, identity: Identity, dataset: DatasetDef) -> list[str]:
         return [name for name, col in dataset.columns.items() if col.classification not in identity.classifications]
+
+    # ── metrics ─────────────────────────────────────────────────────────────────────────────────────────────
+    def cleared_for(self, identity: Identity, metric: MetricDef) -> bool:
+        """A metric has a security classification of its own; a requester sees it only when cleared for it."""
+        return metric.classification in identity.classifications
+
+    def may_use(self, identity: Identity, metric: MetricDef) -> bool:
+        """Cleared for the metric, and granted at least one dataset it is computed on."""
+        return self.cleared_for(identity, metric) and any(
+            self.can_read(identity, self.registry.datasets[ds]) for ds in metric.lineage.datasets
+            if ds in self.registry.datasets)
+
+    def require_metric(self, identity: Identity, metric_id: str) -> MetricDef:
+        metric = self.registry.metric(metric_id)
+        if not self.may_use(identity, metric):
+            # one answer for « not granted » and « not cleared »: say nothing about which
+            raise PolicyError(f"{identity.user} has no access to metric {metric_id}", "metric_denied")
+        return metric
 
     # ── SQL ─────────────────────────────────────────────────────────────────────────────────────────────────
     def validate_sql(self, sql: str, identity: Identity) -> SqlVerdict:
@@ -259,16 +277,18 @@ class PolicyEngine:
         return self.row_policy(identity, self.registry.dataset(dataset_id))
 
     # ── who a dashboard is for ──────────────────────────────────────────────────────────────────────────────
-    def audience(self, datasets: list[DatasetDef]) -> list[str]:
-        """The roles a dashboard over these datasets may be opened by: those that may read, and are granted
-        EVERY one of its datasets. A role granted three of four would see a dashboard with a hole in it."""
+    def audience(self, datasets: list[DatasetDef], metrics: Optional[list[MetricDef]] = None) -> list[str]:
+        """The roles a dashboard over these datasets may be opened by: those that may read, are granted
+        EVERY one of its datasets, and are cleared for EVERY one of its metrics. A role granted three of
+        four would see a dashboard with a hole in it; a role not cleared for a metric would be shown it."""
         return sorted(name for name, role in self.registry.rbac.roles.items()
-                      if "bi.read" in role.capabilities and datasets and all(self.grants(name, d) for d in datasets))
+                      if "bi.read" in role.capabilities and datasets and all(self.grants(name, d) for d in datasets)
+                      and all(m.classification in role.classifications for m in metrics or []))
 
-    def row_rules(self, datasets: list[DatasetDef]) -> list[dict[str, str]]:
+    def row_rules(self, datasets: list[DatasetDef], metrics: Optional[list[MetricDef]] = None) -> list[dict[str, str]]:
         """Every (role, dataset, predicate) the BI engine must enforce for that audience."""
         return [{"role": role, "dataset": dataset.id, "clause": clause}
-                for role in self.audience(datasets) for dataset in datasets
+                for role in self.audience(datasets, metrics) for dataset in datasets
                 if (clause := self.role_row_policy(role, dataset)) is not None]
 
     # ── generated dbt models ────────────────────────────────────────────────────────────────────────────────

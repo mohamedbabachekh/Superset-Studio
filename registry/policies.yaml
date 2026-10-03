@@ -46,9 +46,25 @@ performance:
   max_queries: 25
   max_result_rows: 5000
   max_result_bytes: 1000000
+  # Concurrency: this many people open the dashboard at the same moment — every chart's query, uncached, at
+  # once — and the slowest answer must still come within the budget.
+  concurrent_users: 4
+  concurrent_query_ms: 8000
 
 data:
   min_rows: 1
+  # Null rate. A column of the grain, a measure or a geography may hold no null at all; any other column
+  # may hold up to this share before the dataset fails.
+  max_null_rate: 0.05
+
+security:
+  export:
+    # The DATA of a dashboard may be taken out as a file by the roles the dashboard is granted to — the same
+    # rows their row-level policy gives them on screen, no others — and by nobody else.
+    data: audience
+    # Its DEFINITION (dashboard, charts, datasets as a bundle) leaves through SharpSight's .ssbi package and
+    # no other way: no account but the engine's own may export it from the BI engine.
+    assets: nobody
 
 visual:
   # a chart body whose pixels are this uniform has drawn nothing
@@ -59,6 +75,13 @@ visual:
   # text drawn smaller than this is not read by anyone
   min_font_px: 9
   max_fix_iterations: 3
+  # Excessive whitespace. Measured on 2026-10-03 on the executive template: cards cover 95 % of the grid and
+  # rows are 16 px apart. Under this cover, or over this gap, there is a hole in the page.
+  min_grid_coverage: 0.85
+  max_row_gap_px: 32
+  # … and inside a card: the share of its body the drawing reaches across. The narrowest measured was the
+  # country map, 0.49. Under this the card is mostly empty — a warning, since the cure is the template's.
+  min_fill_ratio: 0.3
 
 deployment:
   # the person who approves production must not be the person who asked for the dashboard

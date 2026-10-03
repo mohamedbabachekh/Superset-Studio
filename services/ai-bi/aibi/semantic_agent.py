@@ -73,9 +73,13 @@ class SemanticAgent:
         }
 
     def describe(self, metric: MetricDef) -> dict[str, Any]:
+        """Everything section 21 asks a metric to carry: business definition, expression, aggregation,
+        dimensions, formatting, owner, documentation, certification, version, lineage, classification."""
         return {"id": metric.id, "name": metric.name, "certified": metric.certified, "owner": metric.owner,
                 "version": metric.version, "expression": metric.expression, "format": metric.format,
-                "aggregation": metric.aggregation, "dimensions": metric.dimensions,
+                "unit": metric.unit, "aggregation": metric.aggregation, "additive": metric.additive,
+                "dimensions": metric.dimensions, "classification": metric.classification,
+                "documentation": " ".join(metric.documentation.split()),
                 "lineage": metric.lineage.model_dump()}
 
     @staticmethod

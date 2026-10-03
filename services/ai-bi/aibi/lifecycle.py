@@ -31,7 +31,8 @@ from typing import Any, Optional
 
 import yaml
 
-from .models import Approval, DashboardSpec, ModelPlan, ProjectVersion, ValidationReport, utcnow
+from .models import (HELD, Approval, DashboardSpec, ModelPlan, ProjectVersion, StatusChange, ValidationReport,
+                     utcnow)
 from .policy_engine import Identity, PolicyError
 from .store import version_key
 from .tools import ToolContext, Toolbox
@@ -161,6 +162,7 @@ class Lifecycle:
         self.audit = tools.audit
         self.packages_dir = tools.state_dir / "packages"
         self.exports_dir = exports_dir
+        tools.packager = self.package_latest          # what the create_deployment_package tool asks
 
     # ── versions ────────────────────────────────────────────────────────────────────────────────────────────
     def next_version(self, project_id: str) -> str:
@@ -171,13 +173,20 @@ class Lifecycle:
         return f"{major}.{minor + 1}.0"
 
     def store_version(self, ctx: ToolContext, requirement: dict[str, Any], report: ValidationReport,
-                      dbt_results: list[dict[str, Any]], notes: list[str]) -> ProjectVersion:
-        """Write everything this version IS into the project's folder. Nothing is committed yet."""
+                      dbt_results: list[dict[str, Any]], notes: list[str],
+                      history: Optional[list[StatusChange]] = None) -> ProjectVersion:
+        """Write everything this version IS into the project's folder. Nothing is committed yet.
+        `history`: the gates the run went through to get here; the version carries them on."""
         body = self.tools.project(ctx)
         project_id = body["project_id"]
         spec = DashboardSpec(**body["spec"])
         template = self.registry.template(spec.dashboard.template)
         version = self.next_version(project_id)
+        if spec.dashboard.version != version:
+            # a specification that came with its own number (« 1.0 ») is stored under the engine's
+            spec.dashboard.version = version
+            body["spec"] = spec.model_dump()
+            self.tools.save_project(body)
         folder = self.git.project_dir(project_id)
         for entry in folder.iterdir():                       # the folder is this version, not a pile of them
             shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
@@ -228,11 +237,13 @@ class Lifecycle:
         identity = ctx.identity
         policy = self.tools.policy
         used = [self.registry.dataset(ds) for ds in spec.datasets()]
-        audience = policy.audience(used)
+        audience = policy.audience(used, metrics)
         _dump(folder / "security" / "access.yaml", {
             "requested_by": identity.user, "tenant": identity.tenant, "roles": list(identity.roles),
             # who the dashboard is for, and the rows each of them sees — as SharpSight's RBAC says it
             "audience": audience,
+            # each metric's own classification: the audience is the roles cleared for every one of them
+            "metrics": {m.id: m.classification for m in metrics},
             "datasets": {d.id: {"tenant": d.tenant,
                                 "classifications": {name: col.classification for name, col in d.columns.items()},
                                 "row_level_policies": {role: clause for role in audience
@@ -242,7 +253,9 @@ class Lifecycle:
             "bi_engine": {"connection": {"name": self.tools._bi_database[0], "read_only": True},
                           "dashboard_roles": [self.tools.engine_role(r) for r in audience],
                           "row_level_rules": [self.tools.rule_name(r["role"], r["dataset"])
-                                              for r in policy.row_rules(used)]}})
+                                              for r in policy.row_rules(used, metrics)]},
+            # what may leave the BI engine as a file, and for whom (registry/policies.yaml)
+            "export": self.registry.policies.get("security", {}).get("export", {})})
 
         # the BI engine's own export: charts and dashboards where a reviewer expects them, the rest together
         bundle = self.superset.export_dashboard(body["engine"]["dashboard"]["id"])
@@ -278,6 +291,7 @@ class Lifecycle:
 
         record = ProjectVersion(
             project_id=project_id, version=version, created_by=identity.user, request_id=ctx.request_id,
+            status=history[-1].status if history else "DRAFT", history=list(history or []),
             title=spec.dashboard.title, dbt_commit=dbt_info.get("commit") or dbt_document["governed_project_commit"],
             superset_asset_version=asset_version(bundle),
             dataset_versions={d.id: d.version for d in datasets},
@@ -289,9 +303,9 @@ class Lifecycle:
 
     @staticmethod
     def _manifest(record: ProjectVersion, **extra: Any) -> dict[str, Any]:
+        # No status here: a version moves through the gates, and what it IS does not change when it does.
         return {"format": "ssbi/1", "project_id": record.project_id, "version": record.version,
-                "title": record.title, "state": record.state, "review_status": record.review_status,
-                "created_by": record.created_by, "created_at": record.created_at, "request_id": record.request_id,
+                "title": record.title, "created_by": record.created_by, "created_at": record.created_at, "request_id": record.request_id,
                 "dbt_commit": record.dbt_commit, "superset_asset_version": record.superset_asset_version,
                 "dataset_versions": record.dataset_versions, "metric_versions": record.metric_versions,
                 "template_version": record.template_version, "validation": record.validation, **extra}
@@ -340,11 +354,16 @@ class Lifecycle:
     def mark_ready(self, ctx: ToolContext, record: ProjectVersion) -> ProjectVersion:
         if not record.validation.get("passed"):
             raise LifecycleError("a version whose validation failed cannot be offered for review")
-        record.state, record.review_status = "DEV", "READY_FOR_REVIEW"
+        summary = record.validation
+        record.move("READY_FOR_REVIEW", by="sharpsight-ai",
+                    note=f"{summary.get('checks')} checks, none failed, {summary.get('warnings')} warning(s); "
+                         f"requested by {ctx.identity.user}")
         self.store.save_version(record)
         self.audit.record(action="version:ready_for_review", user=ctx.identity.user, request_id=ctx.request_id,
                           actor="ai", ai_model=ctx.ai_model, project_id=record.project_id,
-                          validation=record.validation,
+                          validation=record.validation, git_commit=record.git_commit,
+                          metrics=list(record.metric_versions), datasets=list(record.dataset_versions),
+                          visual_qa=summary.get("by_category", {}).get("visual"),
                           detail={"version": record.version, "git_commit": record.git_commit,
                                   "dbt_commit": record.dbt_commit,
                                   "superset_asset_version": record.superset_asset_version})
@@ -366,7 +385,8 @@ class Lifecycle:
                     files[member.name] = archive.extractfile(member).read()
         checksums = {name: hashlib.sha256(content).hexdigest() for name, content in sorted(files.items())
                      if name != "manifest.yaml"}
-        manifest = self._manifest(record, git_commit=record.git_commit, packaged_at=utcnow(), files=checksums)
+        manifest = self._manifest(record, git_commit=record.git_commit, packaged_at=utcnow(),
+                                  status_when_packaged=record.status, files=checksums)
         files["manifest.yaml"] = yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True).encode()
 
         self.packages_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +395,8 @@ class Lifecycle:
             for name in sorted(files):
                 package.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), files[name])
         info = {"file": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "bytes": path.stat().st_size, "files": len(files)}
+                "bytes": path.stat().st_size, "files": len(files), "version": record.version,
+                "git_commit": record.git_commit, "packaged_at": manifest["packaged_at"]}
         try:                                    # for whoever carries it to another environment
             self.exports_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, self.exports_dir / path.name)
@@ -383,6 +404,41 @@ class Lifecycle:
         except OSError as exc:
             info["export_error"] = str(exc)[:200]
         return info
+
+    def package_for(self, record: ProjectVersion) -> dict[str, Any]:
+        """The version's package, built ONCE. Asked for again, the same file is returned. A package that
+        has gone missing or no longer matches its checksum is NOT quietly rebuilt: the checksum is what the
+        later gates hold it to, and a new one would make any file pass."""
+        if not record.git_commit or not record.validation.get("passed"):
+            raise LifecycleError("a package is cut from a committed version whose validation passed")
+        if record.package:
+            broken = self.package_problem(record)
+            if broken:
+                raise LifecycleError(f"{record.project_id} {record.version} was packaged, and {broken}; "
+                                     "a package is not built twice — generate a new version")
+            return record.package
+        record.package = self.build_package(record)
+        self.store.save_version(record)
+        self.audit.record(action="package", user=record.created_by, request_id=record.request_id, actor="system",
+                          project_id=record.project_id, git_commit=record.git_commit,
+                          deployment={"version": record.version, "package": record.package})
+        return record.package
+
+    def package_latest(self, project_id: str) -> dict[str, Any]:
+        record = self.store.latest_version(project_id)
+        if record is None or record.status not in ("READY_FOR_REVIEW", *HELD):
+            raise LifecycleError(f"BI project {project_id} has no version awaiting review or beyond: there is "
+                                 "nothing to package")
+        return self.package_for(record)
+
+    def package_problem(self, record: ProjectVersion) -> Optional[str]:
+        """None when the package on disk is, byte for byte, the one that was built for this version."""
+        path = self.package_path(record)
+        if path is None:
+            return "its package is missing"
+        if hashlib.sha256(path.read_bytes()).hexdigest() != record.package.get("sha256"):
+            return "its package no longer matches the checksum recorded when it was built"
+        return None
 
     def package_path(self, record: ProjectVersion) -> Optional[Path]:
         path = self.packages_dir / record.package.get("file", "")
@@ -407,10 +463,11 @@ class Lifecycle:
             raise LifecycleError(f"BI project {project_id} has no version to promote")
         try:
             self.tools.policy.require_approver(identity, target, record.created_by)
-            expected = {"UAT": ("DEV", "READY_FOR_REVIEW"), "PROD": ("UAT", "READY_FOR_REVIEW")}[target]
-            if (record.state, record.review_status) != expected:
-                raise LifecycleError(f"{project_id} {record.version} is {record.state}/{record.review_status}; "
-                                     f"a promotion to {target} needs {expected[0]}/{expected[1]}")
+            # the gate before it — or the approval itself, when a promotion was interrupted after it
+            needed = {"UAT": ("READY_FOR_REVIEW", "APPROVED_FOR_UAT"), "PROD": ("UAT", "APPROVED_FOR_PROD")}[target]
+            if record.status not in needed:
+                raise LifecycleError(f"{project_id} {record.version} is {record.status}; a promotion to {target} "
+                                     f"needs {needed[0]}")
             if not record.validation.get("passed"):
                 raise LifecycleError("unvalidated assets are not deployed: this version's validation did not pass")
             changed = self.drift(record)
@@ -428,9 +485,11 @@ class Lifecycle:
                 if not confirm or not comment.strip():
                     raise LifecycleError("production needs an explicit approval: confirm=true and a comment "
                                          "saying what was checked in UAT")
-                package = self.package_path(record)
-                if package is None or hashlib.sha256(package.read_bytes()).hexdigest() != record.package.get("sha256"):
-                    raise LifecycleError("the package approved in UAT is missing or no longer matches its checksum")
+                broken = self.package_problem(record)
+                if broken:
+                    raise LifecycleError(f"what was tested in UAT is not what would ship: {broken}")
+            elif not record.package:
+                self.package_for(record)        # a version stored before packages were cut at generation
         except (LifecycleError, PolicyError) as exc:
             self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id,
                               actor="human", project_id=project_id, outcome="refused",
@@ -438,11 +497,27 @@ class Lifecycle:
                               detail={"reason": str(exc)})
             raise
 
+        # The approval is a fact of its own, recorded before anything is deployed on the strength of it.
         dashboard_id = record.dashboard["id"]
+        record.approvals.append(Approval(target=target, decision="approved", by=identity.user, comment=comment))
+        record.move(f"APPROVED_FOR_{target}", by=identity.user, note=comment)
+        self.store.save_version(record)
+        self.audit.record(action=f"approval:{target}", user=identity.user, request_id=request_id, actor="human",
+                          project_id=project_id, git_commit=record.git_commit,
+                          deployment={"target": target, "version": record.version, "comment": comment})
         marks: dict[str, Any] = {}
         if target == "UAT":
-            # nothing is marked on the dashboard yet: it is under test, and it stays an unpublished draft
-            record.package = self.build_package(record)
+            # What enters UAT is the package built when the version became reviewable — the same file, checked.
+            # Nothing is marked on the dashboard yet: it is under test, and it stays an unpublished draft.
+            broken = self.package_problem(record)
+            if broken:
+                record.move("UAT_FAILED", by="system", note=broken)
+                self.store.save_version(record)
+                self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id,
+                                  actor="system", project_id=project_id, outcome="error",
+                                  deployment={"target": target, "version": record.version}, detail={"reason": broken})
+                raise LifecycleError(f"approved, and it failed on its way into UAT: {broken}")
+            record.move("UAT", by="system", note=f"package {record.package['sha256'][:16]}… verified")
         else:
             marks = {"published": True, "is_managed_externally": True,
                      "certified_by": f"{identity.user} (SharpSight)",
@@ -463,26 +538,29 @@ class Lifecycle:
                     self.superset.update_chart(chart["id"], {"is_managed_externally": False})
                 reason = ("the dashboard was published and withdrawn again: the BI engine does not enforce the "
                           "access SharpSight grants — " + "; ".join(asked["problems"]))
+                record.move("UAT", by="system", note=reason)
+                self.store.save_version(record)
                 self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id,
                                   actor="human", project_id=project_id, outcome="refused",
                                   deployment={"target": target, "version": record.version, "access": asked["probes"]},
                                   detail={"reason": reason})
                 raise LifecycleError(reason)
             marks["access_verified"] = asked["probes"]
+            record.move("PROD", by="system", note="published; every role asked, and answered as SharpSight grants")
 
-        record.approvals.append(Approval(target=target, decision="approved", by=identity.user, comment=comment))
-        record.state = target
-        record.review_status = "READY_FOR_REVIEW" if target == "UAT" else "APPROVED"
         self.store.save_version(record)
 
         folder = self.git.project_dir(project_id)
-        _dump(folder / "deployments.yaml", {"deployments": [a.model_dump() for a in record.approvals],
+        _dump(folder / "deployments.yaml", {"status": record.status,
+                                            "history": [h.model_dump() for h in record.history],
+                                            "approvals": [a.model_dump() for a in record.approvals],
                                             "package": record.package})
         self.git.commit_project(project_id, f"{project_id} {record.version}: approved for {target} by {identity.user}")
         tag = self.git.tag_project(project_id, record.version, target.lower(),
                                    f"{project_id} {record.version} → {target}, approved by {identity.user}")
         self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id, actor="human",
-                          project_id=project_id, validation=record.validation,
+                          project_id=project_id, validation=record.validation, git_commit=record.git_commit,
+                          metrics=list(record.metric_versions), datasets=list(record.dataset_versions),
                           superset_assets=[{"type": "dashboard", "id": dashboard_id, "action": "marked", **marks}],
                           deployment={"target": target, "version": record.version, "git_commit": record.git_commit,
                                       "tag": tag, "package": record.package, "comment": comment})
@@ -491,23 +569,29 @@ class Lifecycle:
     def who_gets_in(self, project: dict[str, Any]) -> dict[str, Any]:
         """Ask the BI engine, role by role: an account with no SharpSight role must be refused; an account
         holding one of the dashboard's roles must be served, with exactly the rows the data gateway gives
-        that role. Only meaningful once the dashboard is published — a draft is its owner's alone."""
+        that role — on screen and in a file it exports — and must reach nothing the dashboard is made of
+        by asking for it outright. Only meaningful once the dashboard is published — a draft is its
+        owner's alone."""
         tools = self.tools
         spec = DashboardSpec(**project["spec"])
         datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
+        metrics = [self.registry.metric(m) for m in spec.metrics()]
         probes, problems = {}, []
         outsider = tools.probe_access(project, None)
         probes["(no role)"] = outsider
         if not tools.refused(outsider):
             problems.append(f"an account with no SharpSight role got dashboard → {outsider['dashboard']}, "
                             f"data → {outsider['data']}")
-        for role in tools.policy.audience(datasets):
+        problems += [f"an account with no SharpSight role: {p}"
+                     for p in (*tools.export_problems(outsider), *tools.direct_problems(outsider))]
+        for role in tools.policy.audience(datasets, metrics):
             probe = tools.probe_access(project, role)
             probes[role] = probe
             if not tools.served(probe):
                 unequal = [ds for ds, rows in probe["rows"].items() if not rows["same"]]
                 problems.append(f"{role}: dashboard → {probe['dashboard']}, data → {probe['data']}"
                                 + (f", rows differ from the data gateway's on {', '.join(unequal)}" if unequal else ""))
+            problems += [f"{role}: {p}" for p in (*tools.export_problems(probe), *tools.direct_problems(probe))]
         return {"probes": probes, "problems": problems}
 
     def reject(self, identity: Identity, project_id: str, comment: str, request_id: str) -> ProjectVersion:
@@ -515,11 +599,15 @@ class Lifecycle:
         if record is None:
             raise LifecycleError(f"BI project {project_id} has no version to reject")
         self.tools.policy.require(identity, "bi.reject")
-        if record.review_status != "READY_FOR_REVIEW":
-            raise LifecycleError(f"{project_id} {record.version} is not awaiting review")
-        target = "UAT" if record.state == "DEV" else "PROD"
+        # Sent back from review, a version is a draft again; refused in UAT, it failed UAT. Either way the
+        # next thing that happens to the project is a new version, not this one moving on.
+        outcome = {"READY_FOR_REVIEW": ("UAT", "DRAFT"), "UAT": ("PROD", "UAT_FAILED")}.get(record.status)
+        if outcome is None:
+            raise LifecycleError(f"{project_id} {record.version} is {record.status}: only a version awaiting "
+                                 "review, or one in UAT, can be rejected")
+        target, status = outcome
         record.approvals.append(Approval(target=target, decision="rejected", by=identity.user, comment=comment))
-        record.review_status = "REJECTED"
+        record.move(status, by=identity.user, note=comment)
         self.store.save_version(record)
         self.audit.record(action=f"promotion:{target}", user=identity.user, request_id=request_id, actor="human",
                           project_id=project_id, outcome="rejected",
@@ -538,9 +626,9 @@ class Lifecycle:
         self.tools.policy.require(identity, "bi.generate")
         project = self.store.get_project(project_id)
         latest = self.store.latest_version(project_id)
-        if latest is not None and latest.state != "DEV" and latest.review_status != "REJECTED":
-            raise LifecycleError(f"{project_id} v{latest.version} is in {latest.state}: only a project still in "
-                                 "DEV, or one whose promotion was rejected, can be discarded")
+        if latest is not None and latest.status in HELD:
+            raise LifecycleError(f"{project_id} v{latest.version} is {latest.status}: only a project still in DEV, "
+                                 "or one that was sent back, can be discarded")
         engine = project.get("engine", {})
         removed: list[dict[str, Any]] = []
         for slot, chart in self.tools.live_charts(engine).items():
@@ -560,14 +648,26 @@ class Lifecycle:
                 self.superset.delete_dataset(engine_id)
                 removed.append({"type": "dataset", "id": engine_id, "table": dataset.relation, "action": "deleted"})
             self.registry.unregister_generated(dataset.id)
+        # its packages: none of them was promoted, and a file left in exports/ is one somebody may carry on
+        packages = []
+        for version in self.store.list_versions(project_id):
+            name = version.package.get("file")
+            for path in ((self.packages_dir / name, self.exports_dir / name) if name else ()):
+                try:
+                    path.unlink()
+                    packages.append(str(path.parent.name + "/" + path.name))
+                except OSError:
+                    pass
         folder = self.git.project_dir(project_id)
         shutil.rmtree(folder)
-        self.git.commit_project(project_id, f"{project_id}: discarded by {identity.user}")
+        commit = self.git.commit_project(project_id, f"{project_id}: discarded by {identity.user}")
         self.store.delete_project(project_id)
         self.tools.evidence.pop(project_id, None)
         self.audit.record(action="discard", user=identity.user, request_id=request_id, actor="human",
                           project_id=project_id, datasets=[d.id for d in generated], superset_assets=removed,
-                          detail={"version": latest.version if latest else None})
+                          git_commit=commit,
+                          detail={"version": latest.version if latest else None,
+                                  "status": latest.status if latest else None, "packages_removed": packages})
         return {"project_id": project_id, "discarded": True, "removed_from_bi_engine": len(removed),
                 "generated_datasets": [d.id for d in generated]}
 

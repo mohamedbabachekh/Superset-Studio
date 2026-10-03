@@ -17,6 +17,7 @@ from __future__ import annotations
 import hmac
 import subprocess
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
@@ -25,7 +26,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from . import __version__
+from . import __version__, compatibility
 from .audit import AuditLog
 from .config import Settings, get_settings
 from .data_gateway import DataGateway
@@ -61,7 +62,8 @@ class Service:
             dbt=DbtRunner(settings.dbt_env(), settings.dbt_prod_state_dir), git=self.git, superset=self.superset,
             store=self.store, audit=self.audit,
             visual=VisualQaAgent(settings.superset_url, settings.superset_user, settings.superset_password,
-                                 self.registry.policies),
+                                 self.registry.policies,
+                                 {kind: v.engine_type for kind, v in self.registry.visualizations.items()}),
             state_dir=state, bi_database_name=settings.superset_database_name,
             bi_database_uri=settings.superset_database_uri, superset_public_url=settings.superset_public_url,
             dbt_dev_schema=settings.dbt_dev_schema)
@@ -71,6 +73,17 @@ class Service:
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
         # one generation at a time: each drives dbt and a browser, and two would also race on one dashboard
         self.busy = threading.Lock()
+        self._compatibility: tuple[float, dict[str, Any]] = (0.0, {})
+
+    def compatibility(self, fresh: bool = False) -> dict[str, Any]:
+        """The matrix beside what is running. Asked of the BI engine and the warehouse at most every five
+        minutes: /health is polled, and a version does not change between two polls."""
+        asked_at, found = self._compatibility
+        if fresh or not found or time.monotonic() - asked_at > 300:
+            found = compatibility.report(self.registry.compatibility, __version__, compatibility.running(
+                self.superset.version(), self.tools.gateway.server_version()))
+            self._compatibility = (time.monotonic(), found)
+        return found
 
     def bootstrap(self) -> None:
         commit = self.git.sync_governed_project(self.settings.dbt_project_dir)
@@ -81,7 +94,9 @@ class Service:
                                                  [m.key for m in self.registry.metrics.values()])
         self.audit.record(action="service:start", user="system", request_id="-", actor="system",
                           ai_model=self.parser.name,
+                          git_commit=commit,
                           detail={"version": __version__, "dbt_project_commit": commit, "dbt_models": len(nodes),
+                                  "untested_components": self.compatibility(fresh=True)["untested"],
                                   "dbt_semantic_layer": self.dbt_semantic_layer,
                                   "datasets": len(self.registry.datasets), "metrics": len(self.registry.metrics),
                                   "templates": len(self.registry.templates)})
@@ -158,7 +173,15 @@ def health() -> dict[str, Any]:
             "ai_model": service.parser.name,
             "registry": {"datasets": len(service.registry.datasets), "metrics": len(service.registry.metrics),
                          "templates": len(service.registry.templates)},
-            "dbt_semantic_layer": service.dbt_semantic_layer}
+            "dbt_semantic_layer": service.dbt_semantic_layer,
+            # running against versions nobody verified is not a failure, and is not hidden either
+            "untested_components": service.compatibility()["untested"]}
+
+
+@app.get("/compatibility")
+def compatibility_matrix(identity: Identity = Depends(reader)) -> Any:
+    """The compatibility matrix, with the version of each component as it is running now."""
+    return service.compatibility(fresh=True)
 
 
 # ── registries ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -202,6 +225,11 @@ def dataset_lineage(dataset_id: str, identity: Identity = Depends(reader)) -> An
 @app.get("/metrics")
 def metrics(certified_only: bool = False, identity: Identity = Depends(reader)) -> Any:
     return service.tools.list_metrics(_context(identity), certified_only=certified_only)
+
+
+@app.get("/dimensions/{name}")
+def dimension(name: str, dataset_id: Optional[str] = None, identity: Identity = Depends(reader)) -> Any:
+    return service.tools.get_dimension(_context(identity), dimension=name, dataset_id=dataset_id)
 
 
 @app.get("/templates")
@@ -270,8 +298,9 @@ def get_run(run_id: str, identity: Identity = Depends(reader)) -> Any:
 
 @app.get("/runs")
 def list_runs(project_id: Optional[str] = None, identity: Identity = Depends(reader)) -> Any:
-    return [{"id": r.id, "project_id": r.project_id, "status": r.status, "user": r.user, "version": r.version,
-             "started_at": r.started_at, "ended_at": r.ended_at, "error": r.error}
+    return [{"id": r.id, "project_id": r.project_id, "status": r.status, "quality_gate": r.quality_gate,
+             "user": r.user, "version": r.version, "started_at": r.started_at, "ended_at": r.ended_at,
+             "error": r.error}
             for r in service.store.list_runs(project_id)]
 
 
@@ -283,10 +312,17 @@ def projects(identity: Identity = Depends(reader)) -> Any:
         if body.get("tenant") != identity.tenant:
             continue
         latest = service.store.latest_version(body["project_id"])
+        attempt = body.get("attempt") or {}
         found.append({"project_id": body["project_id"], "title": body.get("title"), "template": body.get("template"),
                       "created_by": body.get("created_by"),
-                      "version": latest.version if latest else None, "state": latest.state if latest else None,
-                      "review_status": latest.review_status if latest else None,
+                      # where its latest version stands among the quality gates — and, for a project that
+                      # has no version, where its only attempt stopped
+                      "version": latest.version if latest else None,
+                      "status": latest.status if latest else attempt.get("status"),
+                      "environment": latest.state if latest else "DEV",
+                      # the last generation asked of it, whether or not it produced a version
+                      "last_attempt": {k: attempt.get(k) for k in ("run_id", "status", "version", "by", "error")}
+                      if attempt else None,
                       "dashboard": (body.get("engine") or {}).get("dashboard", {}).get("url")})
     return found
 
@@ -295,7 +331,7 @@ def projects(identity: Identity = Depends(reader)) -> Any:
 def project(project_id: str, identity: Identity = Depends(reader)) -> Any:
     body = _project(project_id, identity)
     return {"project": {k: body.get(k) for k in ("project_id", "title", "template", "tenant", "created_by",
-                                                 "created_at", "spec", "spec_valid", "engine", "dbt")},
+                                                 "created_at", "spec", "spec_valid", "engine", "dbt", "attempt")},
             "versions": service.store.list_versions(project_id),
             "git": service.git.projects.log(limit=20, path=project_id)}
 
@@ -344,7 +380,7 @@ def version_package(project_id: str, version: str, identity: Identity = Depends(
     record = service.store.get_version(project_id, version)
     path = service.lifecycle.package_path(record) if record else None
     if path is None:
-        raise HTTPException(status_code=404, detail="no package yet: it is built when the version is approved for UAT")
+        raise HTTPException(status_code=404, detail="this version has no package")
     return FileResponse(path, media_type="application/zip", filename=path.name)
 
 

@@ -362,7 +362,7 @@ is baked into the image or the bundle.
 | `templates/head_custom_extra.html` | the sign-in page's look, through Superset's own extension point |
 | `brand/` | its own copy of the logos, so this folder builds alone |
 | `driver-jars/` | where the customer's JDBC jar goes — never committed, never shipped |
-| [ai-bi.sh](ai-bi.sh) · [docker-compose.ai-bi.yaml](docker-compose.ai-bi.yaml) | the AI BI engine: start, demo, approve, audit, discard, check-adapter, people — an overlay, the kit runs without it ([what it is](docs/ai-bi.md)) |
+| [ai-bi.sh](ai-bi.sh) · [docker-compose.ai-bi.yaml](docker-compose.ai-bi.yaml) | the AI BI engine: start, demo, approve, audit, discard, check-adapter, people, compatibility — an overlay, the kit runs without it ([what it is](docs/ai-bi.md)) |
 | `services/ai-bi/` | the engine's service: API, tool layer, policy, validation, versions |
 | `registry/` | the governed datasets, metrics, dashboard templates, design tokens, RBAC and policies the engine reads |
 | `dbt/` | the dbt project behind the engine's datasets |

@@ -11,6 +11,7 @@
 #   bash ai-bi.sh people                                   Superset accounts given the roles rbac.yaml says
 #   bash ai-bi.sh person <rbac user>                       a Superset account for someone who has none yet
 #   bash ai-bi.sh check-adapter <project>                  every road of the Superset adapter, on a copy
+#   bash ai-bi.sh compatibility                            the compatibility matrix, beside what is running
 #   bash ai-bi.sh test                                     the engine's own tests, inside its container
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
 #   bash ai-bi.sh --erase      stop the engine and delete ITS two volumes (the kit's are untouched)
@@ -50,6 +51,7 @@ case "${1:-}" in
   audit)    if [ -n "${2:-}" ]; then cli audit --user lead.reviewer --project "$2"; else cli audit --user lead.reviewer; fi; exit $? ;;
   discard)  cli discard "${2:?usage: ai-bi.sh discard <project>}"; exit $? ;;
   people)   cli people --user release.manager; exit $? ;;
+  compatibility) cli compatibility; exit $? ;;
   person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
   check-adapter)
     compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.adapter_check "$@"' check "${2:?usage: ai-bi.sh check-adapter <project>}"; exit $? ;;

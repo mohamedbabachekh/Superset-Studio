@@ -20,7 +20,11 @@ from typing import Any, Optional
 
 from .models import utcnow
 
-_SECRET_KEY = re.compile(r"pass(word|wd)?|secret|token|dsn|authorization|api[_-]?key|credential", re.I)
+_SECRET_KEY = re.compile(r"pass(word|wd|phrase)|pwd|secret|token|dsn|authorization|api[_-]?key|credential", re.I)
+# « pass » is a password when it holds text, and a count of checks that passed when it holds a number. Read
+# as a secret either way, it wrote `"pass": "[redacted]"` — and `"passed": "[redacted]"` — into every
+# validation summary of the trail: the one field that says whether the validation passed.
+_PASS_KEY = re.compile(r"^pass$", re.I)
 _ROW_KEYS = {"rows", "data", "sample", "records", "result_rows"}
 _GENESIS = "0" * 64
 
@@ -48,7 +52,7 @@ class AuditLog:
 
     # ── scrubbing ───────────────────────────────────────────────────────────────────────────────────────────
     def _scrub(self, value: Any, key: str = "") -> Any:
-        if key and _SECRET_KEY.search(key):
+        if key and (_SECRET_KEY.search(key) or (_PASS_KEY.match(key) and isinstance(value, str))):
             return "[redacted]"
         if isinstance(value, dict):
             return {k: self._scrub(v, str(k)) for k, v in value.items()}
@@ -70,7 +74,8 @@ class AuditLog:
                superset_assets: Optional[list[dict[str, Any]]] = None,
                validation: Optional[dict[str, Any]] = None, deployment: Optional[dict[str, Any]] = None,
                outcome: str = "ok", detail: Optional[dict[str, Any]] = None,
-               duration_ms: Optional[int] = None) -> dict[str, Any]:
+               duration_ms: Optional[int] = None, metrics: Optional[list[str]] = None,
+               visual_qa: Optional[dict[str, Any]] = None, git_commit: Optional[str] = None) -> dict[str, Any]:
         body = {
             "timestamp": utcnow(),
             "action": action,
@@ -80,10 +85,13 @@ class AuditLog:
             "request_id": request_id,
             "project_id": project_id,
             "datasets": datasets or [],
+            "metrics": metrics or [],       # the governed metrics the action read or used
             "sql": sql,
             "dbt_files": dbt_files or [],
             "superset_assets": superset_assets or [],
             "validation": validation,
+            "visual_qa": visual_qa,         # what the render showed and what the visual checks found
+            "git_commit": git_commit,       # the commit the action made, or acted on
             "deployment": deployment,
             "outcome": outcome,
             "duration_ms": duration_ms,

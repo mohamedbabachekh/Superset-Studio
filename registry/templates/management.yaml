@@ -1,0 +1,79 @@
+# The management review: three numbers, how the first one moves and what it is made of, then who stands where
+# with the figures behind it. Fewer cards than the executive overview and no map — it is read in a meeting,
+# top to bottom, and each row answers one question.
+template:
+  id: management
+  name: Management review
+  version: "1.0"
+  aliases: [management, management review, managers, mgmt, steering]
+  description: Three headline KPIs, the trend beside what makes up the total, then the ranking and its figures.
+  title_pattern: "{subject} Management Review"
+
+grid:
+  columns: 12
+  row_unit_px: 8
+
+layout:
+  - row: kpis
+    # 16 units = 128 px. At 14 the engine draws a KPI's caption at 8 px (measured 2026-10-03).
+    height: 16
+    slots:
+      - {id: kpi_1, width: 4}
+      - {id: kpi_2, width: 4}
+      - {id: kpi_3, width: 4}
+  - row: performance
+    height: 44
+    slots:
+      - {id: trend_1, width: 7}
+      - {id: distribution_1, width: 5}
+  - row: accountability
+    height: 50
+    slots:
+      - {id: ranking_1, width: 5}
+      - {id: detail_1, width: 7}
+
+slots:
+  kpi_1: {purpose: kpi, accepts: [big_number], mandatory: true}
+  kpi_2: {purpose: kpi, accepts: [big_number], mandatory: false}
+  kpi_3: {purpose: kpi, accepts: [big_number], mandatory: false}
+  trend_1: {purpose: trend, accepts: [line, area], mandatory: true}
+  # a share first: management asks « of what is it made »; a histogram where the metric's parts do not add up
+  distribution_1: {purpose: distribution, accepts: [pie, histogram], mandatory: false}
+  ranking_1: {purpose: ranking, accepts: [bar, table], mandatory: false}
+  detail_1: {purpose: detail, accepts: [table], mandatory: false}
+
+filters:
+  max: 3
+  allowed_roles: [time, dimension]
+  orientation: horizontal
+
+theme:
+  color_scheme: inwi
+  sequential_scheme: superset_seq_1
+  variant: light
+
+typography:
+  chart_title: heading_s
+  kpi_value: display
+
+spacing:
+  card_padding: sm
+
+colors:
+  background: surface_muted
+  card: surface
+  accent: primary
+
+components:
+  kpi_card: accent_top
+  chart_card: bordered
+
+kpi_formatting:
+  compact_above: 1000000
+
+responsive:
+  viewports:
+    - {name: desktop, width: 1440}
+    - {name: laptop, width: 1180}
+  collapse_empty_slots: true
+  min_slot_width: {kpi: 2, chart: 4}

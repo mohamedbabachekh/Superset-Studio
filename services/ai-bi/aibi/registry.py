@@ -56,6 +56,7 @@ class Registry:
         self.rbac: Rbac
         self.lexicon: dict[str, Any] = {}
         self.policies: dict[str, Any] = {}
+        self.compatibility: dict[str, Any] = {}
         self.reload()
 
     # ── loading ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -94,6 +95,8 @@ class Registry:
             raise RegistryError(f"registry: {exc}") from exc
         self.lexicon = _load(root / "lexicon.yaml")
         self.policies = _load(root / "policies.yaml")
+        matrix = root / "compatibility.yaml"
+        self.compatibility = _load(matrix) if matrix.exists() else {}
 
         self._resolve_physical()
         self._cross_check()

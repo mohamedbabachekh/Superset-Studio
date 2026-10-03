@@ -113,11 +113,14 @@ class Fix:
 
 
 class VisualQaAgent:
-    def __init__(self, base_url: str, username: str, password: str, policies: dict[str, Any]):
+    def __init__(self, base_url: str, username: str, password: str, policies: dict[str, Any],
+                 engine_types: Optional[dict[str, str]] = None):
         self.base_url = base_url.rstrip("/")
         self._username = username
         self._password = password
         self.policies = policies
+        # approved visualization → what the BI engine calls it, to tell what a card on the page is
+        self.engine_types = engine_types or {}
 
     # ── signing in ──────────────────────────────────────────────────────────────────────────────────────────
     def session_cookie(self) -> dict[str, Any]:
@@ -220,8 +223,9 @@ class VisualQaAgent:
         return call
 
     def _measure_blankness(self, render: Render) -> None:
-        """How much of each chart's body is one single colour. A chart that drew nothing is nearly all of it."""
-        from PIL import Image
+        """How much of each chart's body is one single colour — a chart that drew nothing is nearly all of
+        it — and how far across that body the drawing reaches: a card whose chart sits in one corner."""
+        from PIL import Image, ImageChops
 
         with Image.open(render.screenshot) as image:
             picture = image.convert("RGB")
@@ -230,11 +234,15 @@ class VisualQaAgent:
                 # below the title, inside the card's padding
                 box = (r["x"] + 12, r["y"] + 48, r["x"] + r["w"] - 12, r["y"] + r["h"] - 12)
                 if box[2] - box[0] < 20 or box[3] - box[1] < 20:
-                    component["blank_ratio"] = None
+                    component["blank_ratio"] = component["fill_ratio"] = None
                     continue
                 crop = picture.crop(box)
                 colors = crop.getcolors(maxcolors=crop.width * crop.height)
-                component["blank_ratio"] = round(max(count for count, _ in colors) / (crop.width * crop.height), 4)
+                most, background = max(colors, key=lambda entry: entry[0])
+                component["blank_ratio"] = round(most / (crop.width * crop.height), 4)
+                drawn = ImageChops.difference(crop, Image.new("RGB", crop.size, background)).getbbox()
+                component["fill_ratio"] = (round((drawn[2] - drawn[0]) * (drawn[3] - drawn[1])
+                                                 / (crop.width * crop.height), 4) if drawn else 0.0)
 
     # ── checking ────────────────────────────────────────────────────────────────────────────────────────────
     def check(self, render: Render, spec: DashboardSpec, template: TemplateDef, charts: dict[str, dict[str, Any]],
@@ -289,11 +297,14 @@ class VisualQaAgent:
         # layout consistency: a template row is one line of equal-height cards, in the template's order
         problems = []
         previous_bottom = -1
+        gaps: list[tuple[str, int]] = []
         for row in template.layout:
             rects = [by_chart[charts[p.id]["id"]]["rect"] for p in row.slots
                      if p.id in charts and charts[p.id]["id"] in by_chart]
             if not rects:
                 continue
+            if previous_bottom >= 0:
+                gaps.append((row.row, min(r["y"] for r in rects) - previous_bottom))
             if max(r["y"] for r in rects) - min(r["y"] for r in rects) > 2:
                 problems.append(f"row {row.row}: cards do not start on one line")
             if max(r["h"] for r in rects) - min(r["h"] for r in rects) > 2:
@@ -305,6 +316,60 @@ class VisualQaAgent:
             previous_bottom = max(r["y"] + r["h"] for r in rects)
         report.add("visual", "layout follows the template", "fail" if problems else "pass", view,
                    "; ".join(problems), code="layout" if problems else None)
+
+        visual = self.policies.get("visual", {})
+        if boxes:
+            left, right = min(r["x"] for _, r in boxes), max(r["x"] + r["w"] for _, r in boxes)
+            top, bottom = min(r["y"] for _, r in boxes), max(r["y"] + r["h"] for _, r in boxes)
+
+            # Excessive whitespace, on the page: the cards must cover the grid, and rows must follow each
+            # other. A hole is a slot left empty that did not give its columns away, or a row pushed down.
+            cover = sum(r["w"] * r["h"] for _, r in boxes) / max(1, (right - left) * (bottom - top))
+            min_cover = float(visual.get("min_grid_coverage", 0.85))
+            max_gap = int(visual.get("max_row_gap_px", 32))
+            holes = [f"the cards cover {cover:.0%} of the grid, under {min_cover:.0%}"] if cover < min_cover else []
+            holes += [f"{gap} px of nothing above row {name}" for name, gap in gaps if gap > max_gap]
+            report.add("visual", "no excessive whitespace", "fail" if holes else "pass", view,
+                       "; ".join(holes) or f"the cards cover {cover:.0%} of the grid"
+                       + (f", rows at most {max(g for _, g in gaps)} px apart" if gaps else ""),
+                       code="whitespace" if holes else None, coverage=round(cover, 3))
+
+            # Template violations: what is on the page against what the template says goes where — each
+            # card's width in grid columns, its row's height, and the kind of chart its slot accepts.
+            from .dashboard_agent import DashboardAgent
+
+            violations = []
+            unit, columns = template.grid.row_unit_px, template.grid.columns
+            for row in template.layout:
+                filled = [p for p in row.slots if p.id in charts]
+                if not filled:
+                    continue
+                widths = dict(zip((p.id for p in filled),
+                                  DashboardAgent._widths(row.slots, filled, template.responsive.collapse_empty_slots)))
+                for placement in filled:
+                    card = by_chart.get(charts[placement.id]["id"])
+                    if card is None:
+                        continue
+                    rect, slot = card["rect"], template.slots[placement.id]
+                    drawn = rect["w"] / max(1, right - left) * columns
+                    if abs(drawn - widths[placement.id]) > 0.35:
+                        violations.append(f"{placement.id} is {drawn:.1f} columns wide, the template gives it "
+                                          f"{widths[placement.id]}")
+                    if abs(rect["h"] - row.height * unit) > 2:
+                        violations.append(f"{placement.id} is {rect['h']} px high, row {row.row} is "
+                                          f"{row.height * unit} px in the template")
+                    accepted = {self.engine_types[k] for k in slot.accepts if k in self.engine_types}
+                    if accepted and card.get("viz_type") and card["viz_type"] not in accepted:
+                        violations.append(f"{placement.id} shows a {card['viz_type']}; the slot accepts "
+                                          f"{', '.join(slot.accepts)}")
+            strangers = [str(cid) for cid in by_chart if cid not in slot_of]
+            if strangers:
+                violations.append(f"chart(s) {', '.join(strangers)} are on the page and in no slot of the template")
+            report.add("visual", "no template violation", "fail" if violations else "pass", view,
+                       "; ".join(violations) or f"{len(boxes)} cards, each with its slot's width, its row's "
+                                                "height and a chart its slot accepts",
+                       code="template_violation" if violations else None)
+        min_fill = float(visual.get("min_fill_ratio", 0.3))
 
         for slot, chart in charts.items():
             component = by_chart.get(chart["id"])
@@ -327,6 +392,15 @@ class VisualQaAgent:
                            why, code="empty_component", slot=slot, blank_ratio=blank)
             else:
                 report.add("visual", "component is not empty", "pass", subject, blank_ratio=blank)
+                # … and inside the card. A headline number is small on purpose; anything else that reaches
+                # across less than the policy's share of its card leaves the rest of it empty. A warning:
+                # the cure is the template's slot, which the specification cannot change.
+                fill = component.get("fill_ratio")
+                if fill is not None and spec_component is not None and spec_component.type != "big_number":
+                    report.add("visual", "no excessive whitespace", "warn" if fill < min_fill else "pass", subject,
+                               f"its drawing reaches across {fill:.0%} of the card"
+                               + (f", under {min_fill:.0%}" if fill < min_fill else ""),
+                               code="card_mostly_empty" if fill < min_fill else None, slot=slot, fill_ratio=fill)
 
             clipped = component.get("clipped", [])
             titles = [c for c in clipped if c.get("in_title")]

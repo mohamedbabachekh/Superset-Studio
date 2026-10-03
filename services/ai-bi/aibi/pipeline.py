@@ -3,7 +3,11 @@
 The steps are the brief's (section 9), in its order, and a run records each one: when it started, what it
 found, why it was skipped. A step that fails stops the run there. Nothing after a failure is attempted, and
 a version is only ever written by a run that reached the end with a validation that passed — there is no
-« generated but not quite valid » state for a reviewer to find.
+« generated but not quite valid » VERSION for a reviewer to find.
+
+Beside the steps run the quality gates (section 31): DRAFT → AI_GENERATED → VALIDATING → READY_FOR_REVIEW, or
+VALIDATION_FAILED. They are kept on the project as its last attempt — so a run stopped at a gate leaves its
+record there, with what stopped it, even though it leaves no version.
 
 Everything that touches data, dbt, git or the BI engine goes through the tool layer. The decisions between
 the tools are the agents'.
@@ -18,7 +22,7 @@ from .dashboard_agent import Draft
 from .dataset_agent import Candidate, DatasetAgent, Gap
 from .lifecycle import Lifecycle
 from .llm import RequirementParser
-from .models import ModelPlan, RunRecord, StepRecord, ValidationReport, utcnow
+from .models import HELD, Attempt, ModelPlan, ProjectVersion, RunRecord, StepRecord, ValidationReport, utcnow
 from .planner import slugify
 from .policy_engine import Identity, PolicyError
 from .store import Store
@@ -27,6 +31,63 @@ from .tools import Toolbox, ToolContext
 
 class PipelineError(Exception):
     pass
+
+
+class ValidationFailed(PipelineError):
+    """What was generated did not pass a check. The project is left at VALIDATION_FAILED."""
+
+
+# the steps during which the project is VALIDATING: whatever stops a run there is a failed validation
+VALIDATION_STEPS = ("validate_specification", "create_superset_assets", "retrieve_dashboard_data",
+                    "validate_query_results", "render_screenshot", "visual_qa", "fix_problems", "re_render")
+ENGINE = "sharpsight-ai"
+
+
+class _Gates:
+    """The run's way through the quality gates, written on the project as its last attempt."""
+
+    def __init__(self, run: RunRecord, ctx: ToolContext, tools: Toolbox):
+        self.run, self.ctx, self.tools = run, ctx, tools
+        self.attempt = Attempt(run_id=run.id, request_id=run.request_id, by=ctx.identity.user)
+        self.project_id: Optional[str] = None
+        self.attempt.move("DRAFT", by=ctx.identity.user, note="requested")
+        run.quality_gate = "DRAFT"
+
+    def _save(self) -> None:
+        body = self.tools.store.get_project(self.project_id) if self.project_id else None
+        if body is not None:
+            body["attempt"] = self.attempt.model_dump()
+            self.tools.save_project(body)
+
+    def open(self, project_id: str) -> None:
+        """From here on the attempt is the project's own; it replaces the one before it."""
+        self.project_id = project_id
+        self._save()
+
+    def move(self, status: str, note: str = "") -> None:
+        self.attempt.move(status, by=ENGINE, note=note)
+        self.run.quality_gate = status
+        self._save()
+        self.tools.audit.record(action=f"gate:{status}", user=self.ctx.identity.user, request_id=self.ctx.request_id,
+                                actor="ai", ai_model=self.ctx.ai_model, project_id=self.project_id,
+                                outcome="error" if status == "VALIDATION_FAILED" else "ok",
+                                detail={"note": note, "run_id": self.run.id})
+
+    def fail(self, validating: bool, error: str) -> None:
+        self.attempt.error = error
+        if validating:
+            self.move("VALIDATION_FAILED", error[:400])
+        elif self.attempt.status != "DRAFT":
+            self.move("DRAFT", "validated, and not stored: " + error[:400])
+        else:
+            self._save()
+
+    def follow(self, record: ProjectVersion) -> None:
+        """The version now carries the gates; the attempt says which version it became."""
+        self.attempt.status, self.attempt.history = record.status, list(record.history)
+        self.attempt.version = record.version
+        self.run.quality_gate = record.status
+        self._save()
 
 
 class _Steps:
@@ -58,7 +119,8 @@ class _Steps:
 def _dbt_ok(outcome: dict[str, Any], what: str) -> dict[str, Any]:
     if not outcome["ok"]:
         failed = "; ".join(f"{f['unique_id']}: {f['message']}" for f in outcome["failures"]) or outcome["output"][-600:]
-        raise PipelineError(f"{what} failed — {failed}")
+        # a generated model that does not compile, build or pass its tests is a generated asset that failed
+        raise ValidationFailed(f"{what} failed — {failed}")
     return {k: outcome[k] for k in ("command", "duration_ms", "statuses", "nodes")}
 
 
@@ -77,19 +139,23 @@ class Pipeline:
         self.audit.record(action="request", user=identity.user, request_id=run.request_id, actor="human",
                           ai_model=run.ai_model, detail={"prompt": run.prompt, "run_id": run.id})
         notes: list[str] = []
+        gates = _Gates(run, ctx, self.tools)
         try:
             self.tools.policy.require(identity, "bi.generate")
-            self._run(run, ctx, _Steps(run, self.store), notes)
+            self._run(run, ctx, _Steps(run, self.store), notes, gates)
             run.status = "succeeded"
         except Exception as exc:  # noqa: BLE001 — whatever stopped it, the run must say so
             run.status, run.error = "failed", f"{type(exc).__name__}: {str(exc)[:1500]}"
             aftermath = self._put_back(run, ctx)
             if aftermath:
                 run.error += f" — {aftermath}"
+            stopped_at = next((s.key for s in run.steps if s.status == "failed"), None)
+            gates.fail(isinstance(exc, ValidationFailed) or stopped_at in VALIDATION_STEPS, run.error)
             self.audit.record(action="run:failed", user=identity.user, request_id=run.request_id, actor="ai",
                               ai_model=run.ai_model, project_id=run.project_id,
                               outcome="refused" if isinstance(exc, PolicyError) else "error",
-                              detail={"error": run.error, "run_id": run.id})
+                              detail={"error": run.error, "run_id": run.id, "step": stopped_at,
+                                      "quality_gate": run.quality_gate})
         run.ended_at = utcnow()
         self.store.save_run(run)
         return run
@@ -119,13 +185,14 @@ class Pipeline:
                 ("" if drift is None else f", but {drift}"))
 
     # ── the twenty-two steps ────────────────────────────────────────────────────────────────────────────────
-    def _run(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str]) -> None:
+    def _run(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates) -> None:
         tools, registry = self.tools, self.registry
         identity = ctx.identity
 
         with steps.step("parse_requirement") as step:
             requirement = self.parser.parse(run.prompt)
             notes.extend(requirement.unresolved)
+            notes.extend(requirement.assumptions)
             if requirement.template is None:
                 notes.append("no registered template was named: the executive template is used")
             template = registry.template(requirement.template or "executive")
@@ -137,18 +204,19 @@ class Pipeline:
             if project["tenant"] != identity.tenant:
                 raise PolicyError(f"{identity.user} has no access to BI project {project_id}", "tenant")
             latest = self.store.latest_version(project_id)
-            if latest and latest.state in ("UAT", "PROD") and latest.review_status != "REJECTED":
-                way_out = ("ask under another subject, or have it rejected in review first" if latest.state == "UAT"
+            if latest and latest.status in HELD:
+                way_out = ("ask under another subject, or have it rejected in review first" if latest.status == "UAT"
                            else "ask under another subject")
                 raise PipelineError(
-                    f"BI project {project_id} v{latest.version} is in {latest.state}. This kit has ONE BI engine, "
+                    f"BI project {project_id} v{latest.version} is {latest.status}. This kit has ONE BI engine, "
                     f"so regenerating it would rewrite the promoted dashboard in place; {way_out}.")
             project.update(title=requirement.subject, template=template.id, spec_valid=False)
             tools.save_project(project)
+            gates.open(project_id)
             step.summary = {"project_id": project_id, "subject": requirement.subject, "template": template.id,
                             "metrics": requirement.metrics, "views": [v.model_dump() for v in requirement.views],
                             "filters": requirement.filters, "not_understood": requirement.unresolved,
-                            "read_by": requirement.parser}
+                            "assumed": requirement.assumptions, "read_by": requirement.parser}
             if not requirement.metrics:
                 raise PipelineError("the request names no registered metric, and the engine does not invent one")
 
@@ -260,16 +328,21 @@ class Pipeline:
                                 "tests": node.get("tests", [])}
 
         with steps.step("generate_specification") as step:
-            spec, spec_notes = tools.dashboards.specify(project_id, requirement, template, drafts)
+            spec, spec_notes = tools.dashboards.specify(project_id, requirement, template, drafts,
+                                                        version=self.lifecycle.next_version(project_id))
             notes.extend(spec_notes)
             step.summary = {"specification": spec.model_dump(exclude_none=True), "notes": spec_notes}
+        gates.move("AI_GENERATED", f"specification {spec.dashboard.id} v{spec.dashboard.version}: "
+                                   f"{len(spec.components)} components on template {template.id}"
+                                   + (f", and the dbt model {plan.name}" if plan else ""))
 
+        gates.move("VALIDATING", "the specification, then the dashboard built from it")
         with steps.step("validate_specification") as step:
             verdict = tools.save_dashboard_spec(ctx, spec=spec)
             step.summary = verdict.summary()
             if not verdict.passed:
-                raise PipelineError("the specification is not valid, so the BI engine was not called: "
-                                    + "; ".join(f"{c.name} ({c.subject}) {c.detail}".strip() for c in verdict.failures))
+                raise ValidationFailed("the specification is not valid, so the BI engine was not called: "
+                                       + "; ".join(f"{c.name} ({c.subject}) {c.detail}".strip() for c in verdict.failures))
 
         with steps.step("create_superset_assets") as step:
             applied = tools.apply_specification(ctx)
@@ -314,10 +387,15 @@ class Pipeline:
                         fix.apply(spec)
                         applied_fixes.append({"iteration": iteration, "slot": fix.slot, "problem": fix.code,
                                               "fix": fix.description})
+                        # a correction the engine makes on its own is an action of its own
+                        self.audit.record(action="fix", user=identity.user, request_id=ctx.request_id, actor="ai",
+                                          ai_model=ctx.ai_model, project_id=project_id,
+                                          visual_qa={"iteration": iteration, "slot": fix.slot, "problem": fix.code,
+                                                     "fix": fix.description})
                     verdict = tools.save_dashboard_spec(ctx, spec=spec)
                     if not verdict.passed:
-                        raise PipelineError("a fix produced a specification that is not valid: "
-                                            + "; ".join(c.detail for c in verdict.failures))
+                        raise ValidationFailed("a fix produced a specification that is not valid: "
+                                               + "; ".join(c.detail for c in verdict.failures))
                     tools.apply_specification(ctx)
                     tools.get_dashboard_data(ctx)
                     renders = tools.render_dashboard_screenshot(ctx)
@@ -329,12 +407,13 @@ class Pipeline:
             with steps.step("re_render") as step:
                 step.summary = {"renders": [r.describe() for r in renders], **self._verdict(report)}
                 if not report.passed:
-                    raise PipelineError(
+                    raise ValidationFailed(
                         f"validation still fails after {len(applied_fixes)} automatic fix(es): "
                         + "; ".join(f"{c.category} · {c.name} · {c.subject}: {c.detail}" for c in report.failures[:6]))
 
         with steps.step("store_version") as step:
-            record = self.lifecycle.store_version(ctx, requirement.model_dump(), report, dbt_results, notes)
+            record = self.lifecycle.store_version(ctx, requirement.model_dump(), report, dbt_results, notes,
+                                                  history=gates.attempt.history)
             step.summary = {"version": record.version, "superset_asset_version": record.superset_asset_version,
                             "dataset_versions": record.dataset_versions, "metric_versions": record.metric_versions,
                             "template_version": record.template_version, "notes": notes}
@@ -347,8 +426,12 @@ class Pipeline:
         with steps.step("mark_ready_for_review") as step:
             record = self.lifecycle.mark_ready(ctx, record)
             run.version = record.version
-            step.summary = {"project_id": project_id, "version": record.version, "state": record.state,
-                            "review_status": record.review_status, "dashboard": record.dashboard.get("url")}
+            gates.follow(record)
+            # what a reviewer approves, and what UAT and PROD will each check again: one file, cut now
+            package = tools.create_deployment_package(ctx)
+            step.summary = {"project_id": project_id, "version": record.version, "status": record.status,
+                            "environment": record.state, "dashboard": record.dashboard.get("url"),
+                            "package": package.get("exported_to") or package["file"], "sha256": package["sha256"]}
 
     def _resolve(self, draft: Draft, candidates: list[Candidate], gaps: list[tuple[Draft, Gap]]) -> bool:
         """Give the draft its dataset, or record what is missing. False when the metric is valid nowhere."""

@@ -19,6 +19,9 @@ from .semantic_agent import d3_format
 
 
 class ChartAgent:
+    # up to this many parts, a share-of-total chart names every one of them
+    FEW_PARTS = 8
+
     def __init__(self, registry: Registry):
         self.registry = registry
 
@@ -40,6 +43,10 @@ class ChartAgent:
             return f"{metric.name} distribution"
         if purpose == "geo":
             return f"{metric.name} by region"
+        if purpose == "detail" and label:
+            # beside a ranking of the same metric by the same dimension, a table titled the same way is two
+            # cards with one name (seen on the management template)
+            return f"{metric.name}, detail by {label}"
         if purpose == "ranking":
             top = f"Top {component.options.row_limit} · " if component.options.row_limit else ""
             return f"{top}{metric.name} by {label}"
@@ -47,7 +54,9 @@ class ChartAgent:
 
     # ── the chart, as the engine stores it ──────────────────────────────────────────────────────────────────
     def form_data(self, component: ComponentSpec, dataset: DatasetDef, metric: MetricDef, engine_dataset_id: int,
-                  template: TemplateDef, color_scheme: str, sequential_scheme: str) -> dict[str, Any]:
+                  template: TemplateDef, color_scheme: str, sequential_scheme: str,
+                  parts: Optional[int] = None) -> dict[str, Any]:
+        """`parts`: for a share-of-total chart, how many parts the dimension has — when it is known."""
         visualization = self.registry.visualizations[component.type]
         options = component.options
         compact_above = float(template.kpi_formatting.get("compact_above", 1e12))
@@ -107,11 +116,14 @@ class ChartAgent:
                         x_axis_format=number_format)
         elif kind == "pie":
             # EVERY part is drawn: a pie of the top twelve would show shares of a whole that is not the
-            # whole. Thin slices keep their place and lose their label (under 4 %), and there is no legend —
-            # each slice is already named beside it, and a legend of sixteen regions is a scrollbar.
+            # whole. There is no legend — each slice is named beside it, and a legend of sixteen regions is
+            # a scrollbar — so a slice without its label is a slice nobody can name. With few parts every
+            # one is labelled, however thin (four technologies, one at 3.99 %: it came out anonymous under
+            # a fixed 4 % threshold). With many, the thin ones keep their place and lose their label.
+            few = parts is not None and parts <= self.FEW_PARTS
             form.update(groupby=[component.dimension], metric=metric.key, row_limit=options.row_limit or 100,
                         sort_by_metric=True, color_scheme=color_scheme, show_labels=True, labels_outside=True,
-                        label_line=True, show_labels_threshold=4,
+                        label_line=True, show_labels_threshold=0 if few else 4,
                         # name over share, on two lines: on one, the longest regions lost their percentage
                         label_type="template", label_template="{name}\n{percent}",
                         # no total in the middle: it is wider than the ring and prints across the slices
@@ -140,9 +152,9 @@ class ChartAgent:
 
     def payload(self, component: ComponentSpec, dataset: DatasetDef, metric: MetricDef, engine_dataset_id: int,
                 dashboard_id: int, template: TemplateDef, color_scheme: str, sequential_scheme: str,
-                project_id: str, headline: Optional[float] = None) -> dict[str, Any]:
+                project_id: str, headline: Optional[float] = None, parts: Optional[int] = None) -> dict[str, Any]:
         form = self.form_data(component, dataset, metric, engine_dataset_id, template, color_scheme,
-                              sequential_scheme)
+                              sequential_scheme, parts)
         compact_above = form.pop("_compact_above", None)
         if (compact_above is not None and headline is not None and abs(headline) >= compact_above
                 and component.options.number_format is None):
