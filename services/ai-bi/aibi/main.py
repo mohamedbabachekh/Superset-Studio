@@ -22,7 +22,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -152,12 +152,36 @@ async def _superset(_, exc: SupersetError):
     return JSONResponse(status_code=502, content={"error": f"the BI engine answered: {exc}"})
 
 
-def caller(authorization: str = Header(default=""), x_sharpsight_user: str = Header(default="")) -> Identity:
+# What SUPERSET may ask. The extension's backend runs inside Superset and names the person signed in there: for
+# that it holds a token — its own, not the gateway's. With it the engine answers these four calls and refuses
+# every other, whoever is named. So « nothing in Superset approves » does not rest on the extension's source: a
+# fault in it, another extension, Superset itself — none of them can approve, restore or read the audit trail
+# with the only secret Superset has. The rule that PROD needs a second person is the engine's to hold.
+SUPERSET_MAY = frozenset({("GET", "/projects"), ("GET", "/projects/{project_id}/changes"),
+                          ("POST", "/projects/{project_id}/commit"), ("GET", "/runs/{run_id}")})
+
+
+def superset_may(method: str, route: str) -> bool:
+    return (method.upper(), route) in SUPERSET_MAY
+
+
+def _same(presented: str, expected: str) -> bool:
+    return bool(expected) and hmac.compare_digest(presented.encode(), expected.encode())
+
+
+def caller(request: Request, authorization: str = Header(default=""),
+           x_sharpsight_user: str = Header(default="")) -> Identity:
     token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-    expected = service.settings.api_token
-    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
-        raise HTTPException(status_code=401, detail="this API is called by the SharpSight gateway, with its token")
-    return service.policy.identify(x_sharpsight_user)
+    if _same(token, service.settings.api_token):
+        return service.policy.identify(x_sharpsight_user)
+    if _same(token, service.settings.superset_gateway_token):
+        route = getattr(request.scope.get("route"), "path", "")
+        if not superset_may(request.method, route):
+            raise HTTPException(status_code=403, detail=(
+                "this token is Superset's: with it the engine answers for the projects, a validation, a commit "
+                "and a run, and for nothing else — this is asked from the command line, with the gateway's own token"))
+        return service.policy.identify(x_sharpsight_user)
+    raise HTTPException(status_code=401, detail="this API is called by the SharpSight gateway, with its token")
 
 
 def reader(identity: Identity = Depends(caller)) -> Identity:

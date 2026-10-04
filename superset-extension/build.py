@@ -8,19 +8,29 @@ A .supx is a zip of three things (read from Superset 6.1.0's loader, superset/ex
     backend/src/<package>/…       the Python Superset imports
     frontend/dist/<file>          the built panel (webpack, module federation) — when frontend/dist exists
 
-The backend needs no tool to build: it is copied. The frontend is built first, by `npm run build` in
-frontend/ (in a throwaway Node container: the kit has no Node), and what it left in frontend/dist is taken.
+The backend needs no tool to build: it is copied. The panel is built first, with Node, on a developer's machine
+— `npm ci && npm run build` in frontend/ — and what that left in frontend/dist is taken. The kit has no Node:
+frontend/dist is in the repository, and
+
+    python superset-extension/build.py --check-frontend
+
+builds the panel again, somewhere else, and says whether frontend/dist is what frontend/src builds.
 
 The zip is made the same way every time — sorted names, one fixed date — so the same sources give the same
-bytes on any machine, and the checksum written beside it means something. Superset's loader checks nothing about a bundle:
-the kit's configuration layer verifies that checksum before it lets Superset load the file.
+bytes on any machine, and its checksum means something. Superset's loader checks nothing about a bundle: the
+kit's configuration layer verifies the checksum before it lets Superset load the file — the one written into
+docker-compose.ai-bi.yaml (SHARPSIGHT_EXTENSION_SHA256), not into the bundle's own folder.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -66,7 +76,33 @@ def bundle() -> tuple[str, bytes]:
     return f"sharpsight-bi-{version}.supx", buffer.getvalue()
 
 
+COMPOSE = HERE.parent / "docker-compose.ai-bi.yaml"
+_RECORDED = re.compile(r'(SHARPSIGHT_EXTENSION_SHA256: ")[0-9a-f]{64}(")')
+
+
+def check_frontend() -> int:
+    """frontend/dist against what frontend/src builds, with the versions package-lock.json pins."""
+    npm = shutil.which("npm")
+    if npm is None:
+        print("Node is not on this machine: the panel cannot be rebuilt here", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as scratch:
+        subprocess.run([npm, "ci", "--no-audit", "--no-fund"], cwd=HERE / "frontend", check=True, capture_output=True)
+        subprocess.run([npm, "exec", "--", "webpack", "--mode", "production", "--output-path", scratch],
+                       cwd=HERE / "frontend", check=True, capture_output=True)
+        built = {p.name: p.read_bytes() for p in Path(scratch).iterdir() if p.is_file()}
+    kept = {p.name: p.read_bytes() for p in (HERE / "frontend" / "dist").iterdir() if p.is_file()}
+    if built == kept:
+        print(f"frontend/dist is what frontend/src builds: {', '.join(sorted(kept))}")
+        return 0
+    print("frontend/dist is NOT what frontend/src builds — built now: " + ", ".join(sorted(built))
+          + " | in the repository: " + ", ".join(sorted(kept)), file=sys.stderr)
+    return 1
+
+
 def main() -> int:
+    if "--check-frontend" in sys.argv[1:]:
+        return check_frontend()
     name, content = bundle()
     out = HERE / "bundle"
     out.mkdir(exist_ok=True)
@@ -75,6 +111,10 @@ def main() -> int:
     (out / name).write_bytes(content)
     digest = hashlib.sha256(content).hexdigest()
     (out / (name + ".sha256")).write_text(f"{digest}  {name}\n", encoding="utf-8", newline="\n")
+    # …and where Superset's configuration reads it from: the compose file, which is not in the bundle's folder
+    compose = COMPOSE.read_bytes().decode("utf-8")
+    assert len(_RECORDED.findall(compose)) == 1, "docker-compose.ai-bi.yaml no longer names SHARPSIGHT_EXTENSION_SHA256"
+    COMPOSE.write_bytes(_RECORDED.sub(lambda m: m.group(1) + digest + m.group(2), compose).encode("utf-8"))
     print(f"{name}: {len(content)} bytes, sha256 {digest}")
     print("  " + "\n  ".join(sorted(files())))
     return 0

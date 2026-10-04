@@ -34,6 +34,7 @@ class Settings:
     superset_database_name: str
 
     api_token: str
+    superset_gateway_token: str
     llm_provider: str
 
     @property
@@ -79,7 +80,7 @@ class Settings:
     def secrets(self) -> list[str]:
         """Every value that must never appear in a log, an audit record or an API answer."""
         return [s for s in (self.reader_password, self.records_reader_password, self.dbt_dev_password,
-                            self.superset_password, self.api_token)
+                            self.superset_password, self.api_token, self.superset_gateway_token)
                 if s]
 
 
@@ -114,5 +115,6 @@ def get_settings() -> Settings:
         superset_password=_env("AIBI_SUPERSET_PASSWORD", ""),
         superset_database_name=_env("AIBI_SUPERSET_DATABASE", "SharpSight BI (read-only)"),
         api_token=_env("AIBI_API_TOKEN", ""),
+        superset_gateway_token=_env("AIBI_SUPERSET_GATEWAY_TOKEN", ""),
         llm_provider=_env("AIBI_LLM_PROVIDER", "none"),
     )

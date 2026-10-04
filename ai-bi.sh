@@ -98,7 +98,7 @@ command -v docker >/dev/null || { echo "Docker is not installed or not on PATH."
 rand() { openssl rand -hex 24; }
 added=0
 for name in AIBI_API_TOKEN AIBI_BUILDER_PASSWORD AIBI_DBT_DEV_PASSWORD AIBI_READER_PASSWORD \
-            AIBI_RECORDS_READER_PASSWORD AIBI_SUPERSET_PASSWORD; do
+            AIBI_RECORDS_READER_PASSWORD AIBI_SUPERSET_PASSWORD AIBI_SUPERSET_GATEWAY_TOKEN; do
   grep -qE "^${name}=.+" .env && continue
   if grep -qE "^${name}=" .env; then
     # the line is there, empty (a .env made from today's .env.example): fill it where it stands

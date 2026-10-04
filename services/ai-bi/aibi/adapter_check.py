@@ -15,6 +15,8 @@ from __future__ import annotations
 import io
 import sys
 import zipfile
+
+import requests
 from typing import Any, Callable
 
 from .config import get_settings
@@ -111,8 +113,15 @@ def check(adapter: SupersetAdapter, dashboard_id: int) -> list[dict[str, Any]]:
             raise SupersetError("Superset does not list sharpsight.bi among its extensions: "
                                 + (", ".join(str(k) for k in listed) or "it lists none"))
         answer = adapter._request("GET", "/extensions/sharpsight/bi/projects")
-        return (f"sharpsight.bi {listed['sharpsight.bi']} is loaded, and its API answers through the engine "
-                f"({len(answer.get('result') or [])} projects)")
+        # a POST with the session's cookie and no CSRF token is what another page of this host could send
+        session = adapter._session_or_login()
+        forged = requests.post(f"{adapter.base_url}/extensions/sharpsight/bi/projects/none/commit", json={},
+                               cookies=session.cookies, timeout=30)
+        if forged.status_code != 400:
+            raise SupersetError(f"a commit sent without Superset's CSRF token was answered {forged.status_code}, "
+                                "not refused (400)")
+        return (f"sharpsight.bi {listed['sharpsight.bi']} is loaded, its API answers through the engine "
+                f"({len(answer.get('result') or [])} projects), and a POST without the CSRF token is refused")
 
     step("extension (.supx)", extension)
     return results

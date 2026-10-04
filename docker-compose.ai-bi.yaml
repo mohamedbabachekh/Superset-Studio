@@ -124,6 +124,7 @@ services:
       AIBI_SUPERSET_USER: "${AIBI_SUPERSET_USER:-sharpsight-ai}"
       AIBI_SUPERSET_PASSWORD: "${AIBI_SUPERSET_PASSWORD}"
       AIBI_API_TOKEN: "${AIBI_API_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
+      AIBI_SUPERSET_GATEWAY_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # Which model drives the planner is an open decision. `none` is the deterministic planner (aibi/llm.py).
       AIBI_LLM_PROVIDER: "${AIBI_LLM_PROVIDER:-none}"
     ports:
@@ -139,6 +140,7 @@ services:
       - ./superset-addon:/app/superset-addon:ro
       # …and that the bundle Superset loads is the one these sources build
       - ./superset-extension:/app/superset-extension:ro
+      - ./docker-compose.ai-bi.yaml:/app/docker-compose.ai-bi.yaml:ro
       # its own state: the two git repositories, the AI's dbt workspaces, the audit log, the packages
       - aibi-state:/var/lib/ai-bi
       # a .ssbi package lands beside the dashboards you export by hand
@@ -173,10 +175,14 @@ services:
       SHARPSIGHT_DBT_DOCS_DIR: /app/sharpsight/dbt-docs
       SHARPSIGHT_RBAC_FILE: /app/sharpsight/rbac.yaml
       # The extension's backend runs inside Superset and asks the engine, for the person signed in to Superset.
-      # That makes Superset a gateway: it holds the engine's token (accepted on 2026-10-04, for validate and
-      # commit only — the extension has no endpoint that approves; superset-extension/backend/…/api.py).
+      # That makes Superset a gateway (accepted on 2026-10-04, for validate and commit only). It holds a token of
+      # its OWN, not the one the command line uses: the engine accepts it for four calls — the projects, a
+      # validation, a commit, a run — and refuses it everywhere else, approvals first (aibi/main.py, SUPERSET_MAY).
       SHARPSIGHT_ENGINE_URL: "http://sharpsight-ai-bi:8080"
-      SHARPSIGHT_ENGINE_TOKEN: "${AIBI_API_TOKEN}"
+      SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
+      # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
+      # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
+      SHARPSIGHT_EXTENSION_SHA256: "4342c5fa3ff51777552a6dbbbf74aa1ef0e50b2f92d871ffcada3949cf394472"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
     volumes:
       # Superset's own extension system: the built bundle and its recorded checksum, read-only

@@ -35,6 +35,10 @@ class SharpSightBiApi(RestApi):
     class_permission_name = VIEW
     method_permission_name = {"projects": "read", "changes": "read", "run": "read", "commit": "write"}
     allow_browser_login = True
+    # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
+    # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
+    # Left as it was, a POST carrying a developer's session cookie and no token started a commit — measured.
+    csrf_exempt = False
 
     def _engine(self, method: str, path: str, **sent: Any) -> Response:
         base = os.environ.get("SHARPSIGHT_ENGINE_URL", "").rstrip("/")

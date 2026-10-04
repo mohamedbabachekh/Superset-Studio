@@ -39,6 +39,12 @@ def test_the_recorded_bundle_is_the_one_its_sources_build():
     digest, said = (folder / "bundle" / (name + ".sha256")).read_text(encoding="utf-8").split()
     assert (digest, said) == (hashlib.sha256(content).hexdigest(), name)
     assert sorted(p.name for p in (folder / "bundle").iterdir()) == [name, name + ".sha256"]      # one bundle
+    # what Superset's configuration verifies is the checksum the compose file names — not one lying in the
+    # bundle's own folder, which whoever replaced the bundle could replace with it
+    compose = next((c for c in (Path("/app/docker-compose.ai-bi.yaml"), folder.parent / "docker-compose.ai-bi.yaml")
+                    if c.is_file()), None)
+    if compose is not None:
+        assert f'SHARPSIGHT_EXTENSION_SHA256: "{digest}"' in compose.read_text(encoding="utf-8"), "run build.py"
 
 
 def test_the_bundle_is_laid_out_as_superset_reads_one():
@@ -62,5 +68,30 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
     assert exposed == [("/projects", "GET"), ("/projects/<project_id>/changes", "GET"),
                        ("/projects/<project_id>/commit", "POST"), ("/runs/<run_id>", "GET")]
     assert not re.search(r"approve|reject|restore|discard|/audit|/people", api.split('"""', 2)[2])
+    # a POST is refused without Superset's CSRF token: Flask-AppBuilder exempts an API unless told otherwise
+    assert "    csrf_exempt = False\n" in api
     # who is asking comes from Superset's session, on the server
     assert '"X-SharpSight-User": g.user.username' in api and "request.headers" not in api
+
+
+def test_the_engine_answers_superset_s_token_for_four_calls_and_no_other():
+    """Superset holds a token of its own. « The extension approves nothing » must not rest on the extension's
+    source: with that token the engine itself refuses everything but the projects, a validation, a commit and
+    a run — so nothing inside Superset can approve, restore or read the audit trail."""
+    from aibi.main import SUPERSET_MAY, app, superset_may
+
+    routes = {(method, route.path) for route in app.routes for method in getattr(route, "methods", None) or ()
+              if method not in ("HEAD", "OPTIONS")}
+    assert SUPERSET_MAY <= routes, "a call Superset may make is not a route of the engine"
+    allowed = sorted(pair for pair in routes if superset_may(*pair))
+    assert allowed == [("GET", "/projects"), ("GET", "/projects/{project_id}/changes"), ("GET", "/runs/{run_id}"),
+                       ("POST", "/projects/{project_id}/commit")]
+    for refused in (("POST", "/projects/{project_id}/approve"), ("POST", "/projects/{project_id}/reject"),
+                    ("POST", "/projects/{project_id}/restore"), ("POST", "/projects/{project_id}/discard"),
+                    ("POST", "/projects/generate"), ("GET", "/audit"), ("POST", "/people/sync"),
+                    ("POST", "/tools/{name}")):
+        assert refused in routes and not superset_may(*refused), refused
+    # and what the extension's backend asks is exactly what the engine answers it for
+    api = (_folder() / "backend" / "src" / "sharpsight" / "bi" / "api.py").read_text(encoding="utf-8")
+    asked = set(re.findall(r'self\._engine\("(GET|POST)", f?"([^"]+)"', api))
+    assert asked == set(SUPERSET_MAY)

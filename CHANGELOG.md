@@ -67,8 +67,8 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   « in inwi's colours » — an accent and a series, nothing of Superset's own page. Templates go to 1.2.
 - **`sharpsight-bi.supx`: a Superset extension.** Loaded by Superset's own extension system — a SharpSight
   panel in SQL Lab (project, environment, gate, *Validate*, *Commit*), two commands, and the backend API they
-  call, which asks the engine for the person signed in to Superset. It approves nothing: UAT and PROD stay on
-  the command line. The bundle is built reproducibly, its checksum recorded and verified before Superset is
+  call, which asks the engine for the person signed in to Superset. It approves nothing, and cannot: Superset
+  holds a token of its own that the engine accepts for those calls only — UAT and PROD stay on the command line. The bundle is built reproducibly, its checksum recorded and verified before Superset is
   allowed to load it; the engine reports whether it was loaded. Developers' accounts are given Superset's
   `sql_lab` role, so the panel is somewhere they can go.
 - **Where the brief's fourteen proof-of-concept items stand** is a table in `docs/ai-bi.md`: six done, five

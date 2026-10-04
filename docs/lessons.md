@@ -521,3 +521,15 @@ Superset; to ask the engine anything it must hold the engine's token and name th
 Superset account can then be anyone the engine knows. → asked of the owner before it was built, with what it
 costs; accepted for validate and commit; and nothing that approves is behind it — which a test reads the
 extension's source to hold.
+
+**A property of the source is not a property of the system.** « The extension approves nothing » was true: it
+has no such endpoint, and a test reads its source to say so. But Superset held the engine's one token, which
+the engine accepts for anything — so the rule that PROD needs a second person rested on the absence of forty
+lines in a file inside Superset. Another extension, a fault, Superset itself, could have asked. → Superset
+has a token of its own, and the engine answers it for four calls and refuses the rest; the test now asks the
+engine's own routes which ones that token opens. Found by a second reader, the same hour it was committed.
+
+**Flask-AppBuilder exempts an API from CSRF protection unless told otherwise.** Superset's own APIs are told
+otherwise by a mixin; the `@api` it gives an extension is not. The panel sent the token and nothing checked it:
+a POST with a developer's session cookie and no token started a commit — measured. → `csrf_exempt = False`, a
+test that the source says so, and the forged request sent by `check-adapter` every time.
