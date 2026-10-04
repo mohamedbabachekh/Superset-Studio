@@ -5,7 +5,7 @@ built and verified on a running kit before it was written down.
 
 ## Not in a bundle yet — the AI BI engine (2026-10-03)
 
-An optional overlay; the kit itself is unchanged and starts without it. See [docs/ai-bi.md](docs/ai-bi.md).
+An optional overlay: the kit starts without it, and its `docker-compose.yaml` is not edited. The engine is 0.2.0. One thing of the kit's own did change with it, on 2026-10-04: its theme and sign-in page are SharpSight blue, in the same image tag. See [docs/ai-bi.md](docs/ai-bi.md).
 
 - **A request becomes a dashboard awaiting review.** `bash ai-bi.sh demo` takes the POC's own sentence through
   twenty-two steps: certified datasets and metrics found, the one missing column (the map's region code)
@@ -65,6 +65,16 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
   dashboard is drawn in a `sharpsight` series (measured for colour-vision deficiency; the numbers are beside
   it in `superset_config.py`). A client's colours are a **brand** a dashboard wears when the request says so —
   « in inwi's colours » — an accent and a series, nothing of Superset's own page. Templates go to 1.2.
+- **`sharpsight-bi.supx`: a Superset extension.** Loaded by Superset's own extension system — a SharpSight
+  panel in SQL Lab (project, environment, gate, *Validate*, *Commit*), two commands, and the backend API they
+  call, which asks the engine for the person signed in to Superset. It approves nothing: UAT and PROD stay on
+  the command line. The bundle is built reproducibly, its checksum recorded and verified before Superset is
+  allowed to load it; the engine reports whether it was loaded. Developers' accounts are given Superset's
+  `sql_lab` role, so the panel is somewhere they can go.
+- **Where the brief's fourteen proof-of-concept items stand** is a table in `docs/ai-bi.md`: six done, five
+  delivered as Superset dashboards, lists or in the SQL Lab panel rather than as the panels the brief draws,
+  three not built (AI chat, a custom
+  visualization, an MCP tool) — each with the reason.
 - **Sections stay.** A template groups its rows into sections, each announced by a header on the Superset
   dashboard, with filters of its own; a section can be hidden.
 - **What Superset 6.1.0's extension system can carry was read from the image** before anything was built on

@@ -22,7 +22,10 @@ def _package(name: str) -> Optional[str]:
 def running(superset: Optional[str], postgresql: Optional[str]) -> dict[str, Optional[str]]:
     return {"superset": superset, "dbt_core": _package("dbt-core"), "dbt_postgres": _package("dbt-postgres"),
             "python": platform.python_version(), "postgresql": postgresql, "playwright": _package("playwright"),
-            "sqlglot": _package("sqlglot")}
+            "sqlglot": _package("sqlglot"),
+            # Superset's extension system has no version of its own to ask for: it is the one that came inside
+            # that Superset (apache-superset-core 0.1.0rc3 in 6.1.0), so it stands or falls with it
+            "superset_extensions": superset}
 
 
 def covers(tested: str, version: str) -> bool:

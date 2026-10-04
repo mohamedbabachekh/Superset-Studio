@@ -32,6 +32,12 @@ BASE_ROLE = "Gamma"
 # those who work in the factory, and those who may read the audit trail. Capabilities, as everywhere else.
 WORKS_IN_THE_FACTORY = ("bi.generate", "bi.approve_uat", "bi.approve_prod")
 READS_THE_TRAIL = ("audit.read",)
+# Those who generate and commit do it from the SharpSight panel, which Superset 6.1 can only put in SQL Lab
+# (superset-extension/): their account is given Superset's own `sql_lab` role, so that the panel is somewhere
+# they can go. It opens SQL Lab's page and nothing in it: no database is granted with it. Given, and never
+# taken back by a sync — it is Superset's role, and an administrator may have handed it out for other reasons.
+SQL_LAB_ROLE = "sql_lab"
+WORKS_IN_SQL_LAB = ("bi.generate",)
 
 
 class People:
@@ -57,6 +63,12 @@ class People:
                     or any(c in role.capabilities for c in WORKS_IN_THE_FACTORY + READS_THE_TRAIL))
         return sorted(ROLE_PREFIX + name for name in user.roles if an_audience(name))
 
+    def works_in_sql_lab(self, username: str) -> bool:
+        user = self.registry.rbac.users.get(username)
+        return user is not None and user.type == "human" and any(
+            capability in self.registry.rbac.roles[name].capabilities
+            for name in user.roles for capability in WORKS_IN_SQL_LAB)
+
     def _is_engines_own(self, username: str) -> bool:
         return username == self.service_account or username.startswith("sharpsight-probe-")
 
@@ -69,15 +81,18 @@ class People:
                 continue
             held = sorted(r["name"] for r in account["roles"] if r["name"].startswith(ROLE_PREFIX))
             wanted = self.engine_roles(username)
-            if held == wanted:
+            lab = self.works_in_sql_lab(username) and SQL_LAB_ROLE not in {r["name"] for r in account["roles"]}
+            if held == wanted and not lab:
                 if wanted:
                     unchanged.append({"account": username, "roles": wanted})
                 continue
             others = [r["id"] for r in account["roles"] if not r["name"].startswith(ROLE_PREFIX)]
             if wanted and not others:                       # a role opens a dashboard; the base role opens the door
                 others = [self.superset.find_role(BASE_ROLE)]
+            if lab:
+                others.append(self.superset.find_role(SQL_LAB_ROLE))
             self.superset.set_account_roles(account["id"], others + [self.superset.ensure_role(r) for r in wanted])
-            changed.append({"account": username, "granted": sorted(set(wanted) - set(held)),
+            changed.append({"account": username, "granted": sorted(set(wanted) - set(held)) + ([SQL_LAB_ROLE] if lab else []),
                             "withdrawn": sorted(set(held) - set(wanted)),
                             "why": "as rbac.yaml says" if username in self.registry.rbac.users
                             else "not a user of rbac.yaml"})
@@ -98,14 +113,15 @@ class People:
             raise PolicyError(f"{username} already has an account in the BI engine; `people` brings its roles "
                               "up to date", "exists")
         roles = self.engine_roles(username)
+        base = [BASE_ROLE] + ([SQL_LAB_ROLE] if self.works_in_sql_lab(username) else [])
         password = secrets.token_urlsafe(12)
         first, _, last = username.partition(".")
         self.superset.create_account(
             username, first.capitalize() or username, last.capitalize() or "-", f"{username}@sharpsight.local",
-            [self.superset.find_role(BASE_ROLE)] + [self.superset.ensure_role(r) for r in roles], password)
+            [self.superset.find_role(name) for name in base] + [self.superset.ensure_role(r) for r in roles], password)
         # the password goes to the caller and nowhere else: it is not in this record
         self.audit.record(action="people:create", user=identity.user, request_id=request_id, actor="human",
                           superset_assets=[{"type": "account", "action": "created", "account": username,
-                                            "roles": [BASE_ROLE, *roles]}])
-        return {"account": username, "roles": [BASE_ROLE, *roles], "password": password,
+                                            "roles": [*base, *roles]}])
+        return {"account": username, "roles": [*base, *roles], "password": password,
                 "note": "shown once; change it in the BI engine after signing in"}

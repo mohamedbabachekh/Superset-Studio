@@ -53,6 +53,8 @@ LINKS = (
 )
 # dbt's site is one file that reads these two from beside it; nothing else in the volume is served
 _DOCS_FILES = ("index.html", "manifest.json", "catalog.json")
+# Superset's own extensions API, and the one sharpsight-bi.supx contributes (superset-extension/)
+EXTENSION_APIS = ("ExtensionsRestApi", "SharpSightBiApi")
 
 
 def audiences(rbac_file: Path) -> dict[str, set[str]]:
@@ -120,6 +122,23 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         if ours is not None and entries[-1] is not ours:
             entries.remove(ours)
             entries.append(ours)
+        # Superset's extension system. Its own API (the list of extensions a browser asks for) and the API our
+        # bundle contributes are registered only when ENABLE_EXTENSIONS is on — which it is here and was not when
+        # the kit ran `superset init`: their permissions exist nowhere, and even an administrator is answered
+        # 403. Written now, the way `init` would have: every permission of the view, to the administrator role
+        # (add_permissions_view), and to Superset's standard roles — a browser must be able to ask which
+        # extensions there are, and what our API answers is the engine's decision, not a permission's.
+        security = appbuilder.sm
+        for view in appbuilder.baseviews:
+            if type(view).__name__ not in EXTENSION_APIS:
+                continue
+            security.add_permissions_view(view.base_permissions, view.class_permission_name)
+            for permission in view.base_permissions:
+                granted = security.find_permission_view_menu(permission, view.class_permission_name)
+                for role_name in ("Alpha", "Gamma"):
+                    role = security.find_role(role_name)
+                    if role is not None and granted is not None:
+                        security.add_permission_role(role, granted)
         state["ordered"] = True
 
     docs_dir = Path(os.environ.get("SHARPSIGHT_DBT_DOCS_DIR", "/app/sharpsight/dbt-docs"))

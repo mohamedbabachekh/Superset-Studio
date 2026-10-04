@@ -1,0 +1,10 @@
+{
+  "publisher": "sharpsight",
+  "name": "bi",
+  "displayName": "SharpSight BI",
+  "version": "0.1.0",
+  "license": "Proprietary",
+  "description": "SharpSight's project context, validate and commit, inside Superset's SQL Lab.",
+  "permissions": ["can_read", "can_write"],
+  "backend": {"files": ["backend/src/sharpsight/bi/*.py"]}
+}

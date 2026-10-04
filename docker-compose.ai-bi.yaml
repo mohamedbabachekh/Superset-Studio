@@ -61,7 +61,7 @@ services:
   dbt-runner:
     build:
       context: ./services/ai-bi
-    image: sharpsight-ai-bi:0.1.0
+    image: sharpsight-ai-bi:0.2.0
     command: ["python", "-m", "aibi.dbt_build"]
     environment:
       <<: *warehouse
@@ -108,7 +108,7 @@ services:
   sharpsight-ai-bi:
     build:
       context: ./services/ai-bi
-    image: sharpsight-ai-bi:0.1.0
+    image: sharpsight-ai-bi:0.2.0
     environment:
       AIBI_WAREHOUSE_HOST: devkit-db
       AIBI_WAREHOUSE_DB: devkit
@@ -137,6 +137,8 @@ services:
       - aibi-dbt-prod:/var/lib/dbt-prod:ro
       # read by the engine's own tests only: the rule of who sees what in Superset is stated there too
       - ./superset-addon:/app/superset-addon:ro
+      # …and that the bundle Superset loads is the one these sources build
+      - ./superset-extension:/app/superset-extension:ro
       # its own state: the two git repositories, the AI's dbt workspaces, the audit log, the packages
       - aibi-state:/var/lib/ai-bi
       # a .ssbi package lands beside the dashboards you export by hand
@@ -170,7 +172,15 @@ services:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config_ai_bi.py
       SHARPSIGHT_DBT_DOCS_DIR: /app/sharpsight/dbt-docs
       SHARPSIGHT_RBAC_FILE: /app/sharpsight/rbac.yaml
+      # The extension's backend runs inside Superset and asks the engine, for the person signed in to Superset.
+      # That makes Superset a gateway: it holds the engine's token (accepted on 2026-10-04, for validate and
+      # commit only — the extension has no endpoint that approves; superset-extension/backend/…/api.py).
+      SHARPSIGHT_ENGINE_URL: "http://sharpsight-ai-bi:8080"
+      SHARPSIGHT_ENGINE_TOKEN: "${AIBI_API_TOKEN}"
+      SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
     volumes:
+      # Superset's own extension system: the built bundle and its recorded checksum, read-only
+      - ./superset-extension/bundle:/app/sharpsight/extensions:ro
       - ./superset-addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
       - ./superset-addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
       - aibi-dbt-docs:/app/sharpsight/dbt-docs:ro

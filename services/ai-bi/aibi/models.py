@@ -588,6 +588,8 @@ class ProjectVersion(Strict):
     dashboard: dict[str, Any] = Field(default_factory=dict)
     validation: dict[str, Any] = Field(default_factory=dict)
     package: dict[str, Any] = Field(default_factory=dict)
+    # the versions it was built and validated with: this service, and the BI engine it was made in
+    built_with: dict[str, Any] = Field(default_factory=dict)
     approvals: list[Approval] = Field(default_factory=list)
 
     @model_validator(mode="before")

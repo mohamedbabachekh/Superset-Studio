@@ -1,0 +1,18 @@
+{
+  "name": "@sharpsight/bi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The SharpSight panel of Superset's SQL Lab. Plain JavaScript: webpack is the only tool it is built with.",
+  "scripts": {
+    "build": "webpack --mode production"
+  },
+  "peerDependencies": {
+    "antd": "^5.0.0",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "webpack": "5.101.3",
+    "webpack-cli": "6.0.1"
+  }
+}

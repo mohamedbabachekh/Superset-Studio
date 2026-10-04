@@ -487,3 +487,37 @@ Measured — each colour passed through Machado's deuteranopia and protanopia ma
 its neighbours are well apart and two colours three places from each other are 3 apart: the same to that eye.
 The first candidate for SharpSight's own series had a violet 5 from its blue. → the series was chosen by the
 measure, the numbers are written beside it, and the word « validated » is gone from the description.
+
+## A Superset extension (2026-10-04)
+
+**Superset's extensions API is itself behind the flag — and so are its permissions.** `ExtensionsRestApi` is
+registered only when `ENABLE_EXTENSIONS` is on. The kit's `superset init` runs without it, so the permissions
+of that API were never written: the bundle loaded, and `GET /api/v1/extensions/` answered 403 to an
+administrator — which is the call every browser makes to find out there is an extension. → written by the
+configuration layer that turns the flag on, at the first request, for the views it adds.
+
+**Superset's loader checks nothing, and fails quietly.** No checksum and no signature on a bundle; a backend
+that does not import is printed and skipped, and Superset starts without it. → the checksum is recorded when
+the bundle is built and verified before Superset is told where bundles are; and the engine asks Superset what
+it loaded, every refresh, and says so in /health.
+
+**A zip is not the same zip on two machines.** Built on Windows and rebuilt on Linux from the same files, the
+bundle differed twice: the two zlib builds do not deflate alike, and each entry's header records the system
+it was made on. A checksum over it meant nothing until both were pinned. → stored, not deflated; one date;
+« made on Unix » said everywhere. Found by the test that rebuilds the bundle in the engine's container.
+
+**`dist/` was already ignored.** The kit's `.gitignore` leaves out every folder named `dist` — bundles are
+built there. The extension's built panel is in a folder of that name: it would have stayed out of the
+repository, and the bundle with its recorded checksum could not have been rebuilt by anyone. Seen in
+`git status`, which did not list it. → one exception, said beside the rule; and the files marked as bytes.
+
+**A panel is only as reachable as the page it is on.** The one place 6.1.0 takes a panel is SQL Lab, and this
+kit gives SQL Lab to administrators only — who are not people of rbac.yaml, so the engine refuses them. The
+panel worked and nobody it was for could open it. → those who generate are given Superset's `sql_lab` role:
+the page, no database.
+
+**Acting through Superset means trusting who Superset says is signed in.** An extension's backend runs inside
+Superset; to ask the engine anything it must hold the engine's token and name the person. Whoever can create a
+Superset account can then be anyone the engine knows. → asked of the owner before it was built, with what it
+costs; accepted for validate and commit; and nothing that approves is behind it — which a test reads the
+extension's source to hold.

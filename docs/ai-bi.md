@@ -61,6 +61,7 @@ bash ai-bi.sh compatibility              # the compatibility matrix, beside the 
 bash ai-bi.sh validate cem-qoe            # what was edited in Superset since: taken, refused, set back
 bash ai-bi.sh commit cem-qoe "weekly"    # take it: a new version, validated, awaiting review
 bash ai-bi.sh where                      # where to look in Superset: the menu's six entries, and who sees which
+# the same two, for a developer signed in to Superset: SQL ▸ SQL Lab, the SharpSight panel on the right
 ```
 
 | | |
@@ -264,6 +265,71 @@ These five dashboards are plain Superset charts over a table — a count, a tabl
 form data, without a template or a specification. They show records; they are not BI projects, and nothing of a
 project's own is made this way.
 
+### The extension — `superset-extension/`, `sharpsight-bi-0.1.0.supx`
+
+A Superset extension of the kind Superset's own extension system loads: one bundle, a `.supx`. It is what the
+revised brief asks for, in the one place Superset 6.1.0 has for it.
+
+| It contributes | |
+|---|---|
+| **a panel** | « SharpSight », in SQL Lab's right sidebar: the project, the environment and gate it stands in, a link to its dashboard — and what the two buttons below answer |
+| **two commands** | `sharpsight.bi.validate` and `sharpsight.bi.commit` — the *Validate* and *Commit* of the panel, registered with Superset so that anything else in it may run them |
+| **a backend API** | `/extensions/sharpsight/bi/…`, inside Superset: `projects`, `projects/<id>/changes`, `projects/<id>/commit`, `runs/<id>` |
+
+**It is a gateway, and nothing else.** The backend holds no state and decides nothing: each call goes to the
+engine with the engine's token and the name of the person signed in to Superset, and the engine applies
+`rbac.yaml` to that person. The name is read from Superset's session, on the server — never from the request.
+An account that is nobody in `rbac.yaml` is told so; an analyst may validate and is refused a commit; a
+developer's commit is the one of chapter 3's command line, run for them.
+
+**The trust that was accepted** (2026-10-04). For this, Superset holds the engine's token and says who is
+signed in: someone able to create a Superset account named like a developer can validate and commit as them.
+That was accepted for these two actions and no other. The extension has **no endpoint that approves, rejects,
+promotes or restores** — a test reads its source for one — so the rule that PROD needs a second person cannot
+be gone round from Superset. Approvals stay on the command line.
+
+**Who reaches it.** The panel is in SQL Lab, so the accounts of those who generate (`bi.generate`) are given
+Superset's own `sql_lab` role by `ai-bi.sh person` and `ai-bi.sh people`. It opens SQL Lab's page; no database
+is granted with it.
+
+**How it is built, recorded and loaded.**
+
+- `superset-extension/build.py` makes the bundle: `manifest.json`, the backend's Python, the built panel. The
+  zip is made so that the same sources give the same bytes on any machine — sorted names, one date, stored not
+  deflated, one « made on » — and its `sha256` is written beside it. A test rebuilds it and compares.
+- The panel is plain JavaScript built by webpack alone (module federation), with Node, on a developer's
+  machine: `npm install && npm run build` in `frontend/`. The kit has no Node, so what was built
+  (`frontend/dist/`, 12 KB) is in the repository. React and Ant Design are not in it: they are the page's own,
+  so the panel wears Superset's theme.
+- **Superset's loader checks nothing about a bundle** — no checksum, no signature. The kit's configuration
+  layer does, before telling Superset where bundles are: a `.supx` that is not the recorded one, and Superset
+  starts without extensions and says which. `ENABLE_EXTENSIONS` is on only when there is a recorded bundle.
+- **The loader also fails quietly**: a backend that does not import is printed and skipped. So the engine asks
+  Superset, at every refresh, whether `sharpsight.bi` is among what it loaded — `GET /health`,
+  `shown_in_superset.extension` — `ai-bi.sh` says so at start when it is not, and `ai-bi.sh check-adapter`
+  proves the API still answers.
+
+### Where the brief's proof-of-concept list stands
+
+Its section 38 lists fourteen things for one `sharpsight-bi.supx`. On Superset 6.1.0, with no fork:
+
+| | The brief's item | Here |
+|---|---|---|
+| 1 | Project / environment context bar | in the SQL Lab panel: project, environment, gate. On a dashboard: its tags. No bar on dashboards or in Explore — no place for one |
+| 2 | SharpSight menu entries | **done** — Superset's top bar, shown by `rbac.yaml` |
+| 3 | Governance drawer | not as a drawer. Certified badges and tags in Superset's lists; *Data Quality* |
+| 4 | Asset Library panel | not as a panel. Superset's own dataset and chart lists, tagged by project and domain, certified |
+| 5 | AI chat panel | **not built**: 6.1.0 has no chat contribution, and no language model was chosen |
+| 6 | Validate command | **done** — panel, command, command line |
+| 7 | Commit command | **done** — panel, command, command line |
+| 8 | dbt status panel | as a dashboard: *Data Quality* (models, every test); dbt's own documentation under the menu |
+| 9 | Impact Analysis view | **done**, as a Superset dashboard |
+| 10 | Release / deployment panel | as a dashboard: *Releases*. Approving is on the command line, on purpose |
+| 11 | One custom telecom visualization | **not built**: compiled into Superset's frontend — a rebuild of it |
+| 12 | SharpSight theme | **done** — SharpSight's colours lead; a client's are a brand |
+| 13 | One backend extension API | **done** — `/extensions/sharpsight/bi/` |
+| 14 | One SharpSight MCP tool | **not built**: Superset's MCP service lacks its dependency in this image |
+
 ### Sections
 
 A template groups its rows into **sections** (`sections:` in the template); a specification may give each a
@@ -304,9 +370,10 @@ request that adds dashboards and Explore to the extension API was still open on 
 places to put a panel. `registry/compatibility.yaml` records this beside the versions.
 
 So, following the brief's own order (extension API, else a supported API, else do not build — a fork only when
-essential), the decision taken on 2026-10-04 is **native first, then the extension**: Superset's own features
-everywhere (this chapter), then a real `.supx` with a backend API, commands and panels in SQL Lab. A thin fork
-was not chosen, so nothing is drawn on a dashboard or in Explore beyond what Superset itself draws.
+essential), the decision taken on 2026-10-04 was **native first, then the extension** — and both are here:
+Superset's own features everywhere, and a real `.supx` with a backend API, two commands and a panel in SQL
+Lab. A thin fork was not chosen, so nothing is drawn on a dashboard or in Explore beyond what Superset itself
+draws.
 
 ### What is used that is not the extension API
 
@@ -323,6 +390,11 @@ are what would notice.
 | the route for dbt's documentation | a Flask blueprint, `/sharpsight/dbt-docs/` | Flask, and `flask_login.current_user` |
 | tags on a dashboard | `POST`/`DELETE /api/v1/tag/3/<id>/` | object type 3 being a dashboard (`superset.tags.models.ObjectType`); the `TAGGING_SYSTEM` flag, which the kit sets |
 | a dashboard's audience | `roles` on `PUT /api/v1/dashboard/<id>` | the `DASHBOARD_RBAC` flag, which the kit sets |
+| Superset's own extension system | `ENABLE_EXTENSIONS`, `EXTENSIONS_PATH`, the layout of a `.supx` (`manifest.json`, `backend/src/…`, `frontend/dist/…`) | `apache-superset-core 0.1.0rc3`, a release candidate: the first thing to look at when Superset is upgraded |
+| the permissions of the extension APIs | `sm.add_permissions_view`, at the first request (the add-on) | Superset registering its extensions API only when the flag is on — so the kit's `superset init`, which runs without it, never wrote them, and even an administrator was answered 403 |
+| what the page gives an extension | `window.superset.views`, `.commands`, `.authentication`; the location `sqllab.rightSidebar` | read from the 6.1.0 frontend bundle, not from a package |
+| React and Ant Design, shared | module federation's share scope: react 17.0.2, antd 5.27.6 | Superset's page offering them as singletons to an extension |
+| the extension's API path | `/extensions/sharpsight/bi/…` — not under `/api/v1` | where `@api` puts an extension's endpoints in 6.1.0 |
 | the kit's own, older than the engine | `templates/head_custom_extra.html`, the brand CSS, the header that keeps images local | Superset's page template and class names |
 
 ---
@@ -558,8 +630,8 @@ and `GET /audit/verify` says where. Secrets are scrubbed; rows of data never ent
 | `bi_records_reader` | the AI service, which hands it to Superset's second connection — closed to SQL Lab | read `bi_factory`; nothing governed; write nothing |
 | the Superset account `sharpsight-ai` | the AI service | Admin **in this DEV Superset** — it creates the BI connection, the roles and the row-level rules |
 | the Superset accounts `sharpsight-probe-*` | nobody: a random password is set for the seconds a probe lasts, then the account is switched off | Superset's base role, and at most one `sharpsight_<role>` |
-| a person's Superset account (`ai-bi.sh person`) | that person: the password is shown once to whoever created it, and is neither stored nor logged | Superset's base role and the roles `rbac.yaml` gives them |
-| `AIBI_API_TOKEN` | whoever calls the API (the portal; here, the CLI) | present a user's identity |
+| a person's Superset account (`ai-bi.sh person`) | that person: the password is shown once to whoever created it, and is neither stored nor logged | Superset's base role and the roles `rbac.yaml` gives them; for those who generate, Superset's `sql_lab` role too — SQL Lab's page, where the SharpSight panel is, and no database |
+| `AIBI_API_TOKEN` | whoever calls the API: the command line — and, since the extension, **Superset**, whose extension backend asks the engine for the person signed in (chapter 3: validate and commit, nothing that approves) | present a user's identity |
 
 No credential reaches a model: a model's whole interface is the tool layer. The service that would talk to one
 holds nothing that can change a governed table.
@@ -630,15 +702,18 @@ platform that was not touched:
 | **In Superset**, in a real browser | As an administrator: the SharpSight menu in Superset's top bar, with its six entries; the five dashboards over the records draw every chart — ten, eight, four, seven and six — with none in error, and the counts *BI Factory* shows are the engine's own answer; Superset's own dashboard list shows a project's environment and gate as tags, and « certified » on the PROD dashboard only; its seven charts carry their project and domain, and are certified with it; dbt's documentation opens when signed in (« dbt Docs », with the project's tree), and an anonymous request is sent to the sign-in. Then as five kinds of people, with an account made for the question and switched off after it: with no SharpSight role, or with a role granted no dataset, no SharpSight menu, every dashboard refused, and the documentation refused (403); an analyst sees the documentation's entry and nothing else; a developer sees the four dashboards of the factory and the documentation, and is refused the audit trail; an auditor sees the trail and the documentation, and is refused the factory's. The records' connection is closed to SQL Lab. Asked directly, the database refuses `bi_reader` the schema, and lets `bi_records_reader` read it, read nothing governed, and write nothing. The engine's own address answers 404 for `/studio/`, `/builder/…` and `/dbt-docs/`. No request left the machine: Superset's telemetry pixel is attempted and blocked by the kit's own header |
 | **Edited in Superset**, validated, committed | A second dashboard is generated (operational template, five charts) and nobody touches it: `validate` finds every chart as specified and nothing to commit. Three charts are then edited the way Explore saves them — through Superset's own API: the trend by week; the ranking cut to five, renamed, with a legend; a KPI given an ad-hoc metric — and, as the dashboard editor saves it, one chart made narrower. A commit is refused, naming the KPI; the reviewer is refused too, the fingerprint having changed. `validate` says the rest in the specification's words: `time_grain: P1D → P1W`, `row_limit: None → 5`, the new title, the legend as something a specification has no place for, and the layout as no longer the template's — which a commit undoes. The KPI's governed metric is put back in Superset; a commit by an analyst is refused (`bi.generate`); the developer's says what it takes, sets back and undoes, goes through steps 11 to 22 — 162 checks, none failed — and leaves version 1.1.0 at `READY_FOR_REVIEW`, by way of `DRAFT → VALIDATING`: its specification says week and top five, Superset's ranking has five rows and no legend, the layout is the template's again, and `validate` finds all five charts as specified. The reviewer reads, on Releases, what the commit took, set back and undone, and approves 1.1.0 for UAT; a further commit is refused, the project being in UAT; its dashboard is tagged `env:UAT`, `gate:UAT` |
 | **Whose colours** | A dashboard asked for « in inwi's colours », on the Management template, is specified with that brand: its charts are drawn in the `inwi` series and its stylesheet carries the magenta accent. The one beside it, asked for without a word about colours, is drawn in the `sharpsight` series, and its stylesheet carries no magenta. Measured in the browser: the accent above a KPI card is the brand's magenta on the first and SharpSight blue on the second, and Superset's own page — its buttons, its links, the sign-in button — is SharpSight blue for both |
+| **The extension**, its API | Superset lists `sharpsight.bi 0.1.0` among its extensions, loaded from the `.supx` whose checksum was recorded. Not signed in: 401. An account that is nobody in `rbac.yaml`: refused by the engine, by name. As an analyst: the projects, a validation, and a commit refused (`bi.generate`). As a developer: the same, and a commit that reaches the engine (refused there, nothing having been edited). A project name that is a path: not routed. `approve`, `restore`, `audit`: no such endpoint. The accounts are made for the question and taken away after it. `check-adapter` finds the extension loaded and its API answering |
+| **The SharpSight panel**, in a browser | In SQL Lab, on the right. An account SharpSight does not know reads « … is not a known SharpSight user ». As a developer: the projects are offered; one is chosen and shows its environment and gate; a chart of it having been edited in Superset — the trend, by month — *Validate* says so in the specification's words and that a commit would take it; *Commit*, with a sentence, runs to « Version 1.1.0 — READY_FOR_REVIEW », which the engine's own record confirms: created by that developer, 203 checks, none failed. The panel has three buttons — Refresh, Validate, Commit — and none that approves. No error on the page |
 | What reading the output, the pictures and a second reader caught | a tag changed the fingerprint a dashboard is validated under — every tagged dashboard would have been refused at its next gate as « changed after validation »; menu entries added by the hook had no permission, so nobody saw them; with four tags on a dashboard, Superset's list showed two and hid the gate. And, found by an audit of the branch from another session rather than by the tests: the copy of the records could be read through the connection every chart uses, SQL Lab included, while the auditors `rbac.yaml` names could not open the trail's dashboard; the two system dashboards wore the badge that means « approved for PROD »; the menu led to dashboards that were not made yet for some minutes after a start; and dbt's documentation was open to every signed-in account, one with no dataset included. All fixed |
-| The engine's rules | 166 tests, no database needed: `bash ai-bi.sh test` |
+| The engine's rules | 169 tests, no database needed: `bash ai-bi.sh test` |
 
 ## 9 · What is not here yet
 
 | | State |
 |---|---|
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
-| **The Superset extension package** (`sharpsight-bi.supx`) | not built yet: it is the second step of the decision in chapter 3. What it can carry on 6.1.0 is a backend API, commands, and panels in SQL Lab |
+| **The extension, what it does not do** | it approves nothing, on purpose. It has no « ask for a dashboard » box: no language model was chosen, and a request is made on the command line. Its panel is in SQL Lab because Superset 6.1.0 takes a panel nowhere else. Its words are English under a French interface. The bundle is checked against a recorded checksum — not signed. The panel is built with Node on a developer's machine and its build is committed: the kit cannot rebuild it, and nothing in the kit proves `frontend/dist/` is what `frontend/src/` builds. No MCP tool, no chat, no semantic-layer extension, no custom visualization (chapter 3's list) |
+| **Exact versions under one tag** | the kit's image is still `sharpsight-superset-devkit:1.0.0` though its theme changed on 2026-10-04; the engine's went from 0.1.0 to 0.2.0 only at the end of that day's work. A version's package now says what it was built with (`built_with` in its manifest: this service's version, Superset's) |
 | **A context bar, an outline, a governance drawer, an AI chat on dashboards and in Explore** | Superset 6.1.0 has no extension point there, and a fork was not chosen (chapter 3). What stands in their place is Superset's own: tags, badges, the SharpSight menu, five dashboards |
 | **What a commit does not take from Superset** | only what a specification carries, of the charts it has a place for: kind, metric, dimension, dataset, top N, order, time grain, bins, title. The rest of what Explore offers — number formats, colours, a legend, a chart's own filters, ECharts options — is named per chart and set back. On the dashboard itself, a chart added by hand, a row moved in Superset's dashboard editor, a filter changed there are named, and undone: the layout is the template's and is applied again at every build. So Superset's dashboard editor is open, and what is done in it does not last. And a dashboard built from nothing in Superset is not adopted as a project: a project starts with a request |
 | **Two decisions that are the owner's**, put to them, not taken here | whether a layout made by hand in Superset's dashboard editor should be kept (versioned from the export, the template no longer re-applied once a person changed it) or the editor closed on a project's dashboard and said so; and how a project that stands in UAT or PROD gets a next version in a kit that has one Superset — today neither a request nor a commit is accepted on it |

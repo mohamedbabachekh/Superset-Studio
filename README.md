@@ -364,6 +364,7 @@ is baked into the image or the bundle.
 | `driver-jars/` | where the customer's JDBC jar goes — never committed, never shipped |
 | [ai-bi.sh](ai-bi.sh) · [docker-compose.ai-bi.yaml](docker-compose.ai-bi.yaml) | the AI BI engine: start, demo, request, approve, audit, discard, check-adapter, people, compatibility, where — an overlay, the kit runs without it. It has no page of its own: what it makes and knows is shown in Superset ([what it is](docs/ai-bi.md)) |
 | [superset-addon/](superset-addon/) | what the engine's overlay adds to Superset itself: a SharpSight menu in the top bar and dbt's documentation behind the sign-in — a configuration layer over the kit's, mounted, not built into the image |
+| [superset-extension/](superset-extension/) | `sharpsight-bi.supx`, a Superset extension: the SharpSight panel of SQL Lab (project, gate, Validate, Commit) and the backend API it calls. Sources, the build script, and the recorded bundle with its checksum |
 | `services/ai-bi/` | the engine's service: API, tool layer, policy, validation, versions |
 | `registry/` | the governed datasets, metrics, dashboard templates, design tokens, RBAC and policies the engine reads |
 | `dbt/` | the dbt project behind the engine's datasets |

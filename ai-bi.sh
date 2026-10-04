@@ -77,6 +77,8 @@ case "${1:-}" in
     echo "  SharpSight ▸ Audit trail       every action, by whom, how it ended                 $bi/superset/dashboard/sharpsight-audit-trail/"
     echo "  SharpSight ▸ Data models       dbt's own documentation and lineage                 $bi/sharpsight/dbt-docs/"
     echo "A person sees the entries they may open (registry/security/rbac.yaml); an administrator sees all six."
+    echo "  SQL ▸ SQL Lab                  the SharpSight panel, on the right: project, gate, Validate, Commit   $bi/sqllab/"
+    echo "                                 (for an account named like a user of rbac.yaml:  bash ai-bi.sh person dev.user)"
     echo "Asking and approving are here:  bash ai-bi.sh request \"…\"   ·   bash ai-bi.sh approve <project> UAT|PROD"
     echo "A chart is edited in Superset's own Explore; then:  bash ai-bi.sh validate <project>   ·   bash ai-bi.sh commit <project>"
     exit 0 ;;
@@ -124,6 +126,12 @@ for _ in $(seq 1 90); do
   # there as soon as Superset starts; its two dashboards are made by the engine a little later.
   if curl -fsS "http://127.0.0.1:$port/health" 2>/dev/null | grep -q '"dashboards_made"'; then
     echo; echo "  ready — the engine answers (http://127.0.0.1:$port/health). It has no page: look in Superset."
+    # Superset's extension loader fails quietly: it starts without a bundle it could not load, or one whose
+    # checksum is not the recorded one. The engine asks Superset what it loaded; said here if it is not there.
+    if curl -fsS "http://127.0.0.1:$port/health" 2>/dev/null | grep -q '"extension": *null'; then
+      echo "  BUT Superset did not load sharpsight-bi.supx: SQL Lab has no SharpSight panel. Its log says why:" >&2
+      echo "    docker logs sharpsight-superset-devkit-superset-devkit-1 2>&1 | grep -i 'extension\\|sharpsight'" >&2
+    fi
     echo "    next:  bash ai-bi.sh demo        then:  bash ai-bi.sh where"
     exit 0
   fi

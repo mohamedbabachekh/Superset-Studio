@@ -9,6 +9,9 @@ krb5/*
 
 # What the kit produces: bundles, dashboard exports, mart archives.
 dist/
+# …except the built panel of the Superset extension: it is what the bundle is made of, and the kit has no Node
+!superset-extension/frontend/dist/
+superset-extension/frontend/node_modules/
 exports/*
 !exports/.keep
 *.tgz

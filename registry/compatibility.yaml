@@ -5,7 +5,7 @@
 # outside its tested versions is reported as untested — the service still starts, and says so in /health.
 #
 # A version is matched by prefix: "6.1" covers 6.1.0 and 6.1.3, "16" covers every PostgreSQL 16.
-sharpsight_ai_bi: "0.1"
+sharpsight_ai_bi: "0.2"
 
 components:
   superset:
@@ -31,14 +31,15 @@ components:
   airflow:
     status: not_used
     note: this kit has no scheduler; the governed dbt project is built by the dbt-runner one-shot
-  # Superset's own extension system (.supx). Read from the pinned image on 2026-10-04, as the brief's section 45
-  # asks before anything is built on it — the full reading is in docs/ai-bi.md, chapter 3.
+  # Superset's own extension system, which sharpsight-bi.supx is loaded by. It has no version of its own to ask
+  # for over the API: it is the one that came inside that Superset — apache-superset-core 0.1.0rc3 in 6.1.0, a
+  # release candidate, behind ENABLE_EXTENSIONS — so « tested » is said of the Superset version. What it offers in
+  # 6.1.0 was read from the image on 2026-10-04 (docs/ai-bi.md, chapter 3): panels in SQL Lab only, commands, a
+  # backend API; nothing on dashboards, Explore or datasets; no chat; no semantic-layer module; no fastmcp.
   superset_extensions:
-    status: not_used
-    note: >-
-      Superset 6.1.0 ships apache-superset-core 0.1.0rc3 behind ENABLE_EXTENSIONS (off). Frontend contribution
-      points exist in SQL Lab only; none on dashboards, Explore or datasets; no chat; no semantic-layer module;
-      its MCP service lacks fastmcp. What SharpSight adds to Superset goes through Flask-AppBuilder and the REST API
+    tested: ["6.1"]
+    through: sharpsight-bi.supx — a backend API, two commands, one panel in SQL Lab (superset-extension/)
+    verified_by: bash ai-bi.sh check-adapter <project>
 
 # Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
 connectors:

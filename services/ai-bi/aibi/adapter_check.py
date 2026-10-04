@@ -103,6 +103,18 @@ def check(adapter: SupersetAdapter, dashboard_id: int) -> list[dict[str, Any]]:
     if deleted and "bundle" in state:
         step("import", bring_back)
     step("clean up", sweep)
+    def extension() -> str:
+        """Superset's own extension system — a release candidate in 6.1.0 — still loads the bundle, and the
+        API the bundle contributes still answers, for the engine's own account, by asking the engine."""
+        listed = {found.get("id"): found.get("version") for found in adapter.extensions()}
+        if "sharpsight.bi" not in listed:
+            raise SupersetError("Superset does not list sharpsight.bi among its extensions: "
+                                + (", ".join(str(k) for k in listed) or "it lists none"))
+        answer = adapter._request("GET", "/extensions/sharpsight/bi/projects")
+        return (f"sharpsight.bi {listed['sharpsight.bi']} is loaded, and its API answers through the engine "
+                f"({len(answer.get('result') or [])} projects)")
+
+    step("extension (.supx)", extension)
     return results
 
 

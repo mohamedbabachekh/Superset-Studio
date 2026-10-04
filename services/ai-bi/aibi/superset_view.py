@@ -55,6 +55,7 @@ log = logging.getLogger("aibi.superset_view")
 
 SCHEMA = "bi_factory"
 GATE_TAG = "gate:"
+EXTENSION = "sharpsight.bi"                 # superset-extension/: the panel of SQL Lab and its backend
 MANAGED_TAGS = (GATE_TAG, "project:", "env:", "domain:")      # on a project's dashboard: kept exact
 SYSTEM_TAG = "sharpsight:system"
 VIEW_VERSION = 4                 # raise it when a dashboard below changes: it is then made again
@@ -585,7 +586,11 @@ class SupersetView:
                                   superset_assets=[{"type": "dashboard", "id": change["dashboard"],
                                                     "action": "tagged", "tag": change["tag"]}],
                                   detail={"note": ", ".join(change["tags"]) + " in Superset's dashboard list", "was": change["was"]})
-            self.last = {"at": utcnow(), "rows": published, "dashboards_made": made, "gates_tagged": len(tagged)}
+            loaded = {found.get("id"): found.get("version") for found in self.superset.extensions()}
+            self.last = {"at": utcnow(), "rows": published, "dashboards_made": made, "gates_tagged": len(tagged),
+                         # Superset's loader fails quietly — it prints, and starts without the extension:
+                         # so it is asked, each time, whether sharpsight-bi.supx is among what it loaded
+                         "extension": f"sharpsight.bi {loaded[EXTENSION]}" if EXTENSION in loaded else None}
             self.error = None
             return self.last
 

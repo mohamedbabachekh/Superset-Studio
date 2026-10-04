@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 import yaml
 
+from . import __version__
 from .models import (HELD, Approval, DashboardSpec, ModelPlan, ProjectVersion, StatusChange, ValidationReport,
                      utcnow)
 from .policy_engine import Identity, PolicyError
@@ -300,7 +301,8 @@ class Lifecycle:
             dataset_versions={d.id: d.version for d in datasets},
             metric_versions={m.id: m.version for m in metrics},
             template_version=f"{template.id}@{template.version}",
-            dashboard=body["engine"]["dashboard"], validation=report.summary())
+            dashboard=body["engine"]["dashboard"], validation=report.summary(),
+            built_with={"sharpsight_ai_bi": __version__, "superset": self.superset.version()})
         _dump(folder / "manifest.yaml", self._manifest(record))
         return record
 
@@ -311,7 +313,8 @@ class Lifecycle:
                 "title": record.title, "created_by": record.created_by, "created_at": record.created_at, "request_id": record.request_id,
                 "dbt_commit": record.dbt_commit, "superset_asset_version": record.superset_asset_version,
                 "dataset_versions": record.dataset_versions, "metric_versions": record.metric_versions,
-                "template_version": record.template_version, "validation": record.validation, **extra}
+                "template_version": record.template_version, "built_with": record.built_with,
+                "validation": record.validation, **extra}
 
     def _readme(self, spec, template, metrics, datasets, plan, report, notes, version, shots) -> str:
         summary = report.summary()

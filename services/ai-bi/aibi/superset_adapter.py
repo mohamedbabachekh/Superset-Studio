@@ -244,6 +244,17 @@ class SupersetAdapter:
         self._request("POST", "/api/v1/dashboard/import/", data=data,
                       files={"formData": ("dashboard.zip", bundle, "application/zip")})
 
+    # ── Superset's own extension system ─────────────────────────────────────────────────────────────────────
+    def extensions(self) -> list[dict[str, Any]]:
+        """The extensions Superset loaded. An empty list when its extension system is off: the API is then
+        not there at all (404), which is an answer, not a failure."""
+        try:
+            return self._request("GET", "/api/v1/extensions/").get("result") or []
+        except SupersetError as exc:
+            if exc.status == 404:
+                return []
+            raise
+
     # ── tags: what Superset's own dashboard list shows beside a name, and filters on ────────────────────────
     _DASHBOARD = 3      # superset.tags.models.ObjectType
 

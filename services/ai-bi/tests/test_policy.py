@@ -346,3 +346,20 @@ def test_an_account_is_made_only_for_a_person_of_rbac_and_its_password_is_not_ke
             people.create(manager, nobody, "r2")
     with pytest.raises(PolicyError, match="access.manage"):
         people.sync(policy.identify("dev.user"), "r3")
+
+
+def test_a_developer_s_account_reaches_sql_lab_where_the_sharpsight_panel_is(registry, policy, tmp_path):
+    """Superset 6.1 lets an extension put a panel in SQL Lab only. Those who generate and commit are given
+    Superset's own sql_lab role, so the panel is somewhere they can go; nobody else is, and it is not withdrawn."""
+    people, engine = _people(registry, policy, tmp_path, {
+        "dev.user": ["Gamma", "sharpsight_bi_developer"],
+        "lead.reviewer": ["Gamma", "sharpsight_auditor", "sharpsight_bi_reviewer"],
+        "cem.analyst": ["Gamma", "sharpsight_cem_analyst", "sql_lab"]})        # handed out by an administrator
+    manager = policy.identify("release.manager")
+    done = people.sync(manager, "r1")
+    assert engine.held("dev.user") == ["Gamma", "sharpsight_bi_developer", "sql_lab"]
+    assert engine.held("lead.reviewer") == ["Gamma", "sharpsight_auditor", "sharpsight_bi_reviewer"]
+    assert engine.held("cem.analyst") == ["Gamma", "sharpsight_cem_analyst", "sql_lab"]      # Superset's role: left
+    assert [(c["account"], c["granted"]) for c in done["changed"]] == [("dev.user", ["sql_lab"])]
+    assert people.sync(manager, "r2")["changed"] == []                     # given once
+    assert "sql_lab" not in people.create(manager, "east.analyst", "r3")["roles"]
