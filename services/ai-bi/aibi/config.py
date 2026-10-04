@@ -21,6 +21,8 @@ class Settings:
     warehouse_db: str
     reader_user: str
     reader_password: str
+    records_reader_user: str
+    records_reader_password: str
     dbt_dev_user: str
     dbt_dev_password: str
     dbt_dev_schema: str
@@ -38,6 +40,22 @@ class Settings:
     def reader_dsn(self) -> str:
         return (f"host={self.warehouse_host} port={self.warehouse_port} dbname={self.warehouse_db} "
                 f"user={self.reader_user} password={self.reader_password}")
+
+    @property
+    def records_dsn(self) -> str:
+        """Where the engine copies its OWN records for Superset to draw: the schema `bi_factory`, which the
+        draft-building role owns (sql/bootstrap.sql). The same role, and no new secret: it can write to two
+        schemas — drafts and this copy — and to nothing governed."""
+        return (f"host={self.warehouse_host} port={self.warehouse_port} dbname={self.warehouse_db} "
+                f"user={self.dbt_dev_user} password={self.dbt_dev_password}")
+
+    @property
+    def records_database_uri(self) -> str:
+        """The connection Superset draws the engine's own records through: a role that reads the schema
+        `bi_factory` and nothing else. A connection of its own, closed to SQL Lab — the audit trail is in it,
+        and the connection every BI chart uses must not be a way to it."""
+        return (f"postgresql+psycopg2://{quote(self.records_reader_user)}:{quote(self.records_reader_password, safe='')}"
+                f"@{self.warehouse_host}:{self.warehouse_port}/{self.warehouse_db}")
 
     @property
     def superset_database_uri(self) -> str:
@@ -60,7 +78,8 @@ class Settings:
 
     def secrets(self) -> list[str]:
         """Every value that must never appear in a log, an audit record or an API answer."""
-        return [s for s in (self.reader_password, self.dbt_dev_password, self.superset_password, self.api_token)
+        return [s for s in (self.reader_password, self.records_reader_password, self.dbt_dev_password,
+                            self.superset_password, self.api_token)
                 if s]
 
 
@@ -84,6 +103,8 @@ def get_settings() -> Settings:
         warehouse_db=_env("AIBI_WAREHOUSE_DB", "devkit"),
         reader_user=_env("AIBI_READER_USER", "bi_reader"),
         reader_password=_env("AIBI_READER_PASSWORD", ""),
+        records_reader_user=_env("AIBI_RECORDS_READER_USER", "bi_records_reader"),
+        records_reader_password=_env("AIBI_RECORDS_READER_PASSWORD", ""),
         dbt_dev_user=_env("AIBI_DBT_DEV_USER", "aibi_dbt_dev"),
         dbt_dev_password=_env("AIBI_DBT_DEV_PASSWORD", ""),
         dbt_dev_schema=_env("AIBI_DBT_DEV_SCHEMA", "bi_dev"),

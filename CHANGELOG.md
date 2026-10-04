@@ -38,20 +38,19 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
   `ai-bi.sh compatibility` puts the compatibility matrix beside what is running. Found on the way, by reading
   the output and looking at the picture: the audit trail had been writing `"passed": "[redacted]"` (the word
   was taken for a password), and a pie of four parts left one unnamed.
-- **BI Studio** (the updated brief's sections 1 to 15), served by the engine at `/studio/`. An asset library
-  filed under logical domains, with favourites and search; charts and sections **shared** — defined once,
-  referenced by the dashboards that use them, not changed without their impact having been seen; dashboards as
-  compositions of **sections**, each with a title on the Superset dashboard, an owner, filters of its own, and
-  the option to hide it; an outline; chart templates; a contextual inspector; Dashboard, Data and Governance
-  modes; and the navigation's other screens over what the engine already knew. A person composes a
-  specification on a template's slots and builds it through the same steps and gates as a generated one.
-  `ai-bi.sh studio` says where it is.
-- **The Studio wraps Superset and dbt instead of standing beside them.** The middle of the builder is Superset
-  itself, framed: the live dashboard, and Superset's Explore to edit a chart. A change is applied to Superset
-  as soon as it is valid; what a person saves in Explore is read back into the specification — or refused,
-  saying why (an ad-hoc metric, an unapproved visualization) — and a build validates what Superset shows.
-  dbt's own documentation site is published by the production build and framed under SharpSight's table of
-  models and tests; Superset's SQL Lab is framed in the Data Lab.
+- **Superset is the interface** (the brief's « Superset-native » revision). A BI Studio of our own was built —
+  first with its own screens, then as a frame around Superset — and taken out again: the engine has no page.
+  What it knows is shown by Superset itself: a **SharpSight menu** in Superset's top bar; each project's **gate
+  as a tag** in Superset's own dashboard list, beside the certified badge a PROD approval sets; **BI Factory**
+  and **Audit trail**, two ordinary Superset dashboards over a copy of the engine's records, each granted to the
+  roles `rbac.yaml` gives the matching capability; and **dbt's own documentation**, behind Superset's sign-in.
+  `ai-bi.sh where` says where to look; `ai-bi.sh request` is `generate` under the word the menu uses. The kit's
+  Superset image and configuration are not edited: a configuration layer and two mounts, in the overlay.
+- **Sections stay.** A template groups its rows into sections, each announced by a header on the Superset
+  dashboard, with filters of its own; a section can be hidden.
+- **What Superset 6.1.0's extension system can carry was read from the image** before anything was built on
+  it: panels in SQL Lab only, no place on a dashboard or in Explore, no chat. It is recorded in the
+  compatibility matrix and in `docs/ai-bi.md`; the extension package comes after the native step.
 - **Which language model drives it is left open.** The planner is deterministic today; `aibi/llm.py` is the seam.
 - Verified on a running kit, from an erased engine: the request (four times), fifteen review cases, a forced
   failure that wrote no version and put the reviewed dashboard back, the fix loop once under a stricter policy.

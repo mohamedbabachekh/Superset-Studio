@@ -19,6 +19,7 @@ import json
 import re
 import time
 from typing import Any, Optional
+from urllib.parse import quote
 
 import prison
 import requests
@@ -135,10 +136,11 @@ class SupersetAdapter:
         found = self._list("database", [{"col": "database_name", "opr": "eq", "value": name}])
         return found[0] if found else None
 
-    def ensure_database(self, name: str, sqlalchemy_uri: str) -> int:
+    def ensure_database(self, name: str, sqlalchemy_uri: str, sql_lab: bool = True) -> int:
         """The read-only connection the engine's datasets hang from. Created once, and its URI kept current —
-        a password rotated in .env reaches Superset on the next start."""
-        payload = {"database_name": name, "sqlalchemy_uri": sqlalchemy_uri, "expose_in_sqllab": True,
+        a password rotated in .env reaches Superset on the next start. `sql_lab=False` for a connection that
+        exists to draw dashboards and must not be a place to write queries (the engine's own records)."""
+        payload = {"database_name": name, "sqlalchemy_uri": sqlalchemy_uri, "expose_in_sqllab": sql_lab,
                    "allow_dml": False, "allow_ctas": False, "allow_cvas": False, "allow_file_upload": False}
         existing = self.find_database(name)
         if existing is None:
@@ -241,6 +243,21 @@ class SupersetAdapter:
             data["passwords"] = json.dumps(passwords)
         self._request("POST", "/api/v1/dashboard/import/", data=data,
                       files={"formData": ("dashboard.zip", bundle, "application/zip")})
+
+    # ── tags: what Superset's own dashboard list shows beside a name, and filters on ────────────────────────
+    _DASHBOARD = 3      # superset.tags.models.ObjectType
+
+    def dashboard_tags(self, dashboard_id: int) -> list[str]:
+        """The tags a person or the engine put on a dashboard — not the ones Superset derives (owner:…, type:…)."""
+        found = self.get_dashboard(dashboard_id) or {}
+        return [tag["name"] for tag in found.get("tags") or [] if tag.get("type") == 1]
+
+    def tag_dashboard(self, dashboard_id: int, names: list[str]) -> None:
+        self._request("POST", f"/api/v1/tag/{self._DASHBOARD}/{dashboard_id}/", json={"properties": {"tags": names}})
+
+    def untag_dashboard(self, dashboard_id: int, name: str) -> None:
+        self._request("DELETE", f"/api/v1/tag/{self._DASHBOARD}/{dashboard_id}/{quote(name, safe='')}/",
+                      expect=(200, 204, 404))
 
     # ── access: roles, row-level rules, accounts ────────────────────────────────────────────────────────────
     def find_role(self, name: str) -> Optional[int]:

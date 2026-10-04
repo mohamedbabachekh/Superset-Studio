@@ -31,6 +31,14 @@ components:
   airflow:
     status: not_used
     note: this kit has no scheduler; the governed dbt project is built by the dbt-runner one-shot
+  # Superset's own extension system (.supx). Read from the pinned image on 2026-10-04, as the brief's section 45
+  # asks before anything is built on it — the full reading is in docs/ai-bi.md, chapter 3.
+  superset_extensions:
+    status: not_used
+    note: >-
+      Superset 6.1.0 ships apache-superset-core 0.1.0rc3 behind ENABLE_EXTENSIONS (off). Frontend contribution
+      points exist in SQL Lab only; none on dashboards, Explore or datasets; no chat; no semantic-layer module;
+      its MCP service lacks fastmcp. What SharpSight adds to Superset goes through Flask-AppBuilder and the REST API
 
 # Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
 connectors:

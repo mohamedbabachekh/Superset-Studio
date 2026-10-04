@@ -313,6 +313,15 @@ class ComponentOptions(Strict):
     sort: Optional[Literal["desc", "asc"]] = None
 
 
+def _without_empty_asset(data: Any) -> Any:
+    """A specification stored while the engine had an asset library of its own says `asset: null` on every
+    component and section — « not a shared one ». That is read as what it meant. One that NAMES a shared
+    asset is still refused: what it referred to is no longer there to be read."""
+    if isinstance(data, dict) and "asset" in data and data["asset"] is None:
+        return {key: value for key, value in data.items() if key != "asset"}
+    return data
+
+
 class ComponentSpec(Strict):
     slot: str
     type: str
@@ -324,9 +333,13 @@ class ComponentSpec(Strict):
     # what the chart is for, in a sentence; without one it is described by its metric's documentation
     description: Optional[str] = Field(default=None, max_length=300)
 
+    _older = model_validator(mode="before")(_without_empty_asset)
+
 
 class SectionSpec(Strict):
     """What a dashboard says of one of its template's sections."""
+    _older = model_validator(mode="before")(_without_empty_asset)
+
     id: str
     title: Optional[str] = Field(default=None, max_length=80)
     description: Optional[str] = Field(default=None, max_length=300)

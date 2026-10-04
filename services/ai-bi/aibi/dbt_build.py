@@ -17,9 +17,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-# index.html is dbt's OWN documentation site (models, columns, tests, the lineage graph): one file, which reads
-# manifest.json and catalog.json from beside it.
-ARTIFACTS = ("manifest.json", "catalog.json", "semantic_manifest.json", "index.html")
+ARTIFACTS = ("manifest.json", "catalog.json", "semantic_manifest.json")
+# dbt's OWN documentation site (models, columns, tests, the lineage graph) is one file, index.html, which reads
+# manifest.json and catalog.json from beside it. The three go into a volume of their own, which SUPERSET mounts
+# read-only and serves behind its sign-in (superset-addon/sharpsight_bi.py): the engine has no page of its own.
+DOCS = ("index.html", "manifest.json", "catalog.json")
 
 
 def main() -> int:
@@ -53,6 +55,13 @@ def main() -> int:
     shutil.copy2(work / "run_results.build.json", published / "run_results.json.tmp")
     os.replace(published / "run_results.json.tmp", published / "run_results.json")
     print("published: " + ", ".join(sorted(p.name for p in published.iterdir())), flush=True)
+
+    docs = Path(os.environ.get("AIBI_DBT_DOCS_DIR", "/var/lib/dbt-docs"))
+    if docs.is_dir():
+        for name in DOCS:
+            shutil.copy2(work / "target" / name, docs / (name + ".tmp"))
+            os.replace(docs / (name + ".tmp"), docs / name)
+        print("documentation, for Superset to serve: " + ", ".join(DOCS), flush=True)
     return 0
 
 

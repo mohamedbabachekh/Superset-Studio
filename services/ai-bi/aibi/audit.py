@@ -16,7 +16,7 @@ import json
 import re
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .models import utcnow
 
@@ -36,6 +36,7 @@ class AuditLog:
         self._secrets = sorted((s for s in (secrets or []) if s and len(s) >= 4), key=len, reverse=True)
         self._lock = threading.Lock()
         self._seq, self._last = self._tail()
+        self.on_record: Optional[Callable[[], None]] = None
 
     def _tail(self) -> tuple[int, str]:
         if not self.path.exists():
@@ -106,6 +107,8 @@ class AuditLog:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(body, ensure_ascii=False) + "\n")
             self._last = digest
+        if self.on_record is not None:
+            self.on_record()               # « something happened »: what shows the records elsewhere is told
         return body
 
     # ── reading ─────────────────────────────────────────────────────────────────────────────────────────────

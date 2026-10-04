@@ -37,8 +37,11 @@ from .policy_engine import Identity, PolicyError
 from .store import version_key
 from .tools import ToolContext, Toolbox
 
-# Set by a promotion, on purpose, after validation: they are governance marks, not content.
-_GOVERNANCE_KEYS = ("certified_by", "certification_details", "published", "is_managed_externally", "external_url")
+# Set by a promotion, on purpose, after validation: they are governance marks, not content. `tags` is how the
+# gate a project stands at is shown in Superset's own lists (superset_view.py) — and a tag a person adds there
+# changes what a dashboard is filed under, not what it shows. An export carries them (measured on 6.1).
+_GOVERNANCE_KEYS = ("certified_by", "certification_details", "published", "is_managed_externally", "external_url",
+                    "tags")
 
 
 class LifecycleError(Exception):

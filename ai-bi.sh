@@ -3,7 +3,7 @@
 #
 #   bash ai-bi.sh              start the kit and the engine (first use: writes the engine's secrets into .env)
 #   bash ai-bi.sh demo         the brief's request, end to end, as dev.user
-#   bash ai-bi.sh generate "Create a … dashboard using the … template. …"
+#   bash ai-bi.sh request "Create a … dashboard using the … template. …"      (generate is the same command)
 #   bash ai-bi.sh approve <project> UAT                    as lead.reviewer
 #   bash ai-bi.sh approve <project> PROD "what was checked"   as release.manager — a second person, on purpose
 #   bash ai-bi.sh audit [project]                          the audit trail, and whether its chain is intact
@@ -12,10 +12,14 @@
 #   bash ai-bi.sh person <rbac user>                       a Superset account for someone who has none yet
 #   bash ai-bi.sh check-adapter <project>                  every road of the Superset adapter, on a copy
 #   bash ai-bi.sh compatibility                            the compatibility matrix, beside what is running
-#   bash ai-bi.sh studio                                   where BI Studio is, and how to sign in to it
+#   bash ai-bi.sh where                                    where to look: everything is shown in Superset
 #   bash ai-bi.sh test                                     the engine's own tests, inside its container
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
 #   bash ai-bi.sh --erase      stop the engine and delete ITS two volumes (the kit's are untouched)
+#
+# SUPERSET IS THE INTERFACE. The engine has no page of its own: what it produces and what it knows are in
+# Superset — its dashboards, a SharpSight menu in the top bar, the gate of each project as a tag in the
+# dashboard list. This script is where a dashboard is asked for and approved.
 #
 # It adds containers to the kit's compose project and nothing anywhere else. Like the kit, it cannot see or
 # reach a SharpSight platform running on the same machine.
@@ -38,10 +42,13 @@ case "${1:-}" in
     compose stop "${ENGINE[@]}" >/dev/null 2>&1 || true
     compose rm -f "${ENGINE[@]}" >/dev/null 2>&1 || true
     docker volume rm "${PROJECT}_aibi-state" "${PROJECT}_aibi-dbt-prod" >/dev/null 2>&1 || true
-    echo "erased — the engine's two volumes only. Dashboards it created in Superset, and the schemas bi / bi_dev,"
-    echo "are in the kit's own database and are still there."; exit 0 ;;
+    echo "erased — the engine's two volumes only (its records and dbt's production artifacts)."
+    echo "Still there, in the kit's own Superset and database: the dashboards it created with their gate tags,"
+    echo "the two SharpSight dashboards, the schemas bi / bi_dev / bi_factory, and the volume holding dbt's"
+    echo "documentation (Superset has it mounted; the next build rewrites it). The next start empties bi_factory:"
+    echo "the two dashboards then show an engine that knows no project."; exit 0 ;;
   demo)     shift; cli demo "$@"; exit $? ;;
-  generate) shift; cli generate "$@"; exit $? ;;
+  request|generate) shift; cli generate "$@"; exit $? ;;
   approve)
     project="${2:?usage: ai-bi.sh approve <project> UAT|PROD [comment]}"; target="${3:?UAT or PROD}"
     if [ "$target" = "PROD" ]; then
@@ -53,11 +60,16 @@ case "${1:-}" in
   discard)  cli discard "${2:?usage: ai-bi.sh discard <project>}"; exit $? ;;
   people)   cli people --user release.manager; exit $? ;;
   compatibility) cli compatibility; exit $? ;;
-  studio)
-    studio_port="$(grep -E '^AIBI_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
-    echo "BI Studio:  http://127.0.0.1:${studio_port:-3003}/studio/"
-    echo "  sign in with a user of registry/security/rbac.yaml (dev.user builds, lead.reviewer reviews,"
-    echo "  release.manager releases) and the API token: the value of AIBI_API_TOKEN in .env"
+  where)
+    bind="$(grep -E '^DEVKIT_BIND=' .env 2>/dev/null | cut -d= -f2 || true)"
+    bi_port="$(grep -E '^DEVKIT_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
+    bi="http://${bind:-127.0.0.1}:${bi_port:-3002}"
+    echo "Everything is in Superset:  $bi   (sign in as the kit's administrator)"
+    echo "  Dashboards            the list shows each project's gate as a tag (gate:UAT …), and « certified » at PROD"
+    echo "  SharpSight ▸ BI Factory      projects, gates, the checks of each validation   $bi/superset/dashboard/sharpsight-bi-factory/"
+    echo "  SharpSight ▸ Audit trail     every action, by whom, how it ended              $bi/superset/dashboard/sharpsight-audit-trail/"
+    echo "  SharpSight ▸ Data models     dbt's own documentation and lineage              $bi/sharpsight/dbt-docs/"
+    echo "Asking and approving are here:  bash ai-bi.sh request \"…\"   ·   bash ai-bi.sh approve <project> UAT|PROD"
     exit 0 ;;
   person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
   check-adapter)
@@ -74,7 +86,8 @@ command -v docker >/dev/null || { echo "Docker is not installed or not on PATH."
 # compose, and a `$` in a value arrives cut (docs/lessons.md). Nothing is printed.
 rand() { openssl rand -hex 24; }
 added=0
-for name in AIBI_API_TOKEN AIBI_BUILDER_PASSWORD AIBI_DBT_DEV_PASSWORD AIBI_READER_PASSWORD AIBI_SUPERSET_PASSWORD; do
+for name in AIBI_API_TOKEN AIBI_BUILDER_PASSWORD AIBI_DBT_DEV_PASSWORD AIBI_READER_PASSWORD \
+            AIBI_RECORDS_READER_PASSWORD AIBI_SUPERSET_PASSWORD; do
   grep -qE "^${name}=.+" .env && continue
   if grep -qE "^${name}=" .env; then
     # the line is there, empty (a .env made from today's .env.example): fill it where it stands
@@ -98,9 +111,11 @@ port="$(grep -E '^AIBI_PORT=' .env | cut -d= -f2 || true)"; port="${port:-3003}"
 
 echo -n "waiting for the engine to answer"
 for _ in $(seq 1 90); do
-  if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
-    echo; echo "  ready — http://127.0.0.1:$port/health"
-    echo "    next:  bash ai-bi.sh demo"
+  # ready means: the engine answers AND what Superset's SharpSight menu leads to has been made. The menu is
+  # there as soon as Superset starts; its two dashboards are made by the engine a little later.
+  if curl -fsS "http://127.0.0.1:$port/health" 2>/dev/null | grep -q '"dashboards_made"'; then
+    echo; echo "  ready — the engine answers (http://127.0.0.1:$port/health). It has no page: look in Superset."
+    echo "    next:  bash ai-bi.sh demo        then:  bash ai-bi.sh where"
     exit 0
   fi
   echo -n "."; sleep 5

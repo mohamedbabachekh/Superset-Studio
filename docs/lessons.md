@@ -401,3 +401,52 @@ that are dbt's, not the kit's.
 specification's component; a chart edited in Explore is read back into one. Where the two do not meet — a
 title compared as a field rather than as what people read — an untouched chart reads as changed. The test
 that holds it: every kind of chart, built and read back, is itself.
+
+## Superset as the interface (2026-10-04)
+
+BI Studio, which the lessons about framing Superset were learned on, was taken out: Superset is the interface,
+and SharpSight adds to it. What that taught:
+
+**« On top of Superset » meant inside it.** Twice a request to build on Superset was read as building something
+of ours around it — first screens of our own, then a frame with Superset in the middle. Both were built, shown,
+and refused. → before building a screen, show where it will appear, in text, and count the new screens: the
+answer wanted was zero.
+
+**An export carries a dashboard's tags.** In Superset 6.1 the dashboard's file in an export has a `tags` key.
+A gate shown as a tag therefore changed the fingerprint the dashboard was validated under, and the next
+approval would have refused it as « changed after validation ». → `tags` is a governance mark, left out of the
+fingerprint like certification. Found by tagging one dashboard and comparing before and after, before any
+gate was tagged.
+
+**A menu entry added by a hook has no permission.** Superset builds its AppBuilder with `update_perms=False`:
+permissions are written by `superset init`, which runs with the kit's configuration and has never heard of an
+entry a later layer adds. The entry was registered and nobody saw it — the menu API simply left it out. →
+create the permission where the entry is added. And Superset's role sync then treats an entry it does not know
+as everyone's: grant it the same way from the first start, and guard what the entry leads to.
+
+**`FLASK_APP_MUTATOR` runs before Superset adds its own views.** Entries added there come first in the top bar.
+→ moved to the end at the first request.
+
+**`SUPERSET_CONFIG_PATH` layers a configuration without editing one.** The file it names is executed in place
+of `superset_config`, which stays importable: the layer does `from superset_config import *` and extends one
+hook. The kit's image and file are untouched, and without the overlay nothing is different.
+
+**A copy made to be shown can go round the policy that guards the original.** The audit trail asks for
+`audit.read` at the API. Its copy, put where Superset can chart it, was readable by the role every chart uses —
+through SQL Lab — while the auditors themselves could not open the dashboard. → a role and a connection of its
+own, closed to SQL Lab, and the dashboard granted to the roles that hold the capability. Asked of Superset as
+each kind of person, and of the database as each role.
+
+**A badge means one thing.** Superset's « certified » was used to mark the two system dashboards as the
+engine's. In the same list it means « a person approved this for PROD ». → a tag for the first, the badge for
+the second only.
+
+**A volume another container mounts cannot be removed.** Once Superset mounted the volume dbt's artifacts are
+published in, `--erase` could no longer delete it, and said nothing. → the documentation has a volume of its
+own, rewritten at every build; the artifacts keep theirs, which nothing else mounts.
+
+**What an extension system offers is read from the pinned image, not from the newest documentation.** The
+brief listed panels on dashboards, a chat, a semantic layer. The image (`apache-superset-core 0.1.0rc3`) has
+contribution points in SQL Lab only; the chat is in the unreleased documentation; the semantic-layer module
+the 6.1.0 documentation lists is not in the package. → listed side by side in docs/ai-bi.md before a line of an
+extension is written.

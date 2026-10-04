@@ -28,6 +28,10 @@ from .superset_adapter import SupersetAdapter
 
 ROLE_PREFIX = "sharpsight_"
 BASE_ROLE = "Gamma"
+# The two dashboards Superset draws over the engine's own records (superset_view.py) have an audience too:
+# those who work in the factory, and those who may read the audit trail. Capabilities, as everywhere else.
+WORKS_IN_THE_FACTORY = ("bi.generate", "bi.approve_uat", "bi.approve_prod")
+READS_THE_TRAIL = ("audit.read",)
 
 
 class People:
@@ -41,13 +45,17 @@ class People:
 
     def engine_roles(self, username: str) -> list[str]:
         """The BI-engine roles a user of rbac.yaml should hold: one per SharpSight role of theirs that can be
-        a dashboard's audience — it may read, and is granted at least one dataset."""
+        a dashboard's audience — it may read, and is granted at least one dataset; or it is the audience of
+        one of the two dashboards over the engine's own records."""
         user = self.registry.rbac.users.get(username)
         if user is None or user.type != "human":
             return []
-        return sorted(ROLE_PREFIX + name for name in user.roles
-                      if "bi.read" in self.registry.rbac.roles[name].capabilities
-                      and self.registry.rbac.roles[name].datasets)
+
+        def an_audience(name: str) -> bool:
+            role = self.registry.rbac.roles[name]
+            return ("bi.read" in role.capabilities and bool(role.datasets)
+                    or any(c in role.capabilities for c in WORKS_IN_THE_FACTORY + READS_THE_TRAIL))
+        return sorted(ROLE_PREFIX + name for name in user.roles if an_audience(name))
 
     def _is_engines_own(self, username: str) -> bool:
         return username == self.service_account or username.startswith("sharpsight-probe-")

@@ -325,7 +325,8 @@ def test_accounts_are_given_exactly_the_roles_rbac_gives_their_user(registry, po
     done = people.sync(policy.identify("release.manager"), "r1")
     assert engine.held("admin") == ["Admin"]
     assert engine.held("east.analyst") == ["Gamma", "sharpsight_cem_regional_analyst"]
-    assert engine.held("lead.reviewer") == ["Gamma", "sharpsight_bi_reviewer"]          # auditor grants no dataset
+    # auditor grants no dataset, and is still a BI-engine role: it is the audience of the audit trail's dashboard
+    assert engine.held("lead.reviewer") == ["Gamma", "sharpsight_auditor", "sharpsight_bi_reviewer"]
     assert engine.held("sharpsight-probe-cem_analyst") == ["Gamma", "sharpsight_cem_analyst"]   # the engine's own
     assert {c["account"] for c in done["changed"]} == {"admin", "east.analyst", "lead.reviewer"}
     assert [u["account"] for u in done["unchanged"]] == ["cem.analyst"]

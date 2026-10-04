@@ -42,6 +42,7 @@ from .policy_engine import Identity, PolicyEngine, PolicyError
 from .registry import Registry, RegistryError
 from .store import Store
 from .superset_adapter import SupersetAdapter, SupersetError
+from .superset_view import SupersetView
 from .tools import Toolbox, ToolContext, ToolError
 from .visual_qa_agent import VisualQaAgent
 
@@ -71,6 +72,15 @@ class Service:
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
+        # Superset is the interface: the engine's own records are shown there — tables, two dashboards, the
+        # gate of each project as a tag (superset_view.py). A Superset session of its own: it runs beside a
+        # generation, and a requests session is not shared between threads.
+        self.view = SupersetView(
+            self.registry, self.store, self.audit,
+            SupersetAdapter(settings.superset_url, settings.superset_user, settings.superset_password),
+            self.git.projects.path, settings.records_dsn,
+            (settings.superset_database_name.replace("(read-only)", "records (read-only)"),
+             settings.records_database_uri))
         # one generation at a time: each drives dbt and a browser, and two would also race on one dashboard
         self.busy = threading.Lock()
         self._compatibility: tuple[float, dict[str, Any]] = (0.0, {})
@@ -110,6 +120,7 @@ async def lifespan(app: FastAPI):
     global service
     service = Service(get_settings())
     service.bootstrap()
+    service.view.watch()
     yield
 
 
@@ -174,6 +185,9 @@ def health() -> dict[str, Any]:
             "registry": {"datasets": len(service.registry.datasets), "metrics": len(service.registry.metrics),
                          "templates": len(service.registry.templates)},
             "dbt_semantic_layer": service.dbt_semantic_layer,
+            # when the engine's records were last copied to where Superset draws them, and how many — and
+            # why not, if the last attempt failed (it is tried again within a minute)
+            "shown_in_superset": {**service.view.last, "error": service.view.error},
             # running against versions nobody verified is not a failure, and is not hidden either
             "untested_components": service.compatibility()["untested"]}
 

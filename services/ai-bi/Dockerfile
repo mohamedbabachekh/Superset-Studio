@@ -30,9 +30,9 @@ RUN playwright install --with-deps --only-shell chromium && rm -rf /var/lib/apt/
 # uid 1000, like the kit's Superset. The two state directories exist in the image WITH that owner, so the named
 # volumes mounted over them are created owned by it rather than by root.
 RUN useradd --uid 1000 --create-home aibi && \
-    mkdir -p /app /var/lib/ai-bi /var/lib/dbt-prod /app/exports && \
+    mkdir -p /app /var/lib/ai-bi /var/lib/dbt-prod /var/lib/dbt-docs /app/exports && \
     mv /app-requirements.lock /app/requirements.lock && \
-    chown -R aibi:aibi /app /var/lib/ai-bi /var/lib/dbt-prod
+    chown -R aibi:aibi /app /var/lib/ai-bi /var/lib/dbt-prod /var/lib/dbt-docs
 
 WORKDIR /app
 COPY --chown=aibi:aibi aibi/ /app/aibi/
