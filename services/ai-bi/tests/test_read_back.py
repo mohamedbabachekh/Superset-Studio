@@ -25,7 +25,7 @@ def _as_superset_holds(registry, component, **edited):
     agent, template = ChartAgent(registry), registry.template("executive")
     spec = ComponentSpec(**component)
     payload = agent.payload(spec, registry.dataset(spec.dataset), registry.metric(spec.metric), 5, 9, template,
-                            "inwi", "superset_seq_1", "p")
+                            template.theme.color_scheme, template.theme.sequential_scheme, "p")
     name = edited.pop("slice_name", payload["slice_name"])
     return agent, spec, {"params": json.dumps({**json.loads(payload["params"]), **edited}), "slice_name": name}
 
@@ -99,6 +99,51 @@ def test_superset_is_compared_with_the_specification_chart_by_chart(registry, po
     assert ranking["adopted"]["options"]["row_limit"] == 7 and not ranking["in_step"]
     # what is taken is a component the specification accepts as its own
     assert ComponentSpec(**ranking["adopted"]).options.row_limit == 7
+
+
+def test_what_was_changed_on_the_dashboard_itself_is_named_before_it_is_undone(registry, policy, tmp_path):
+    """A commit applies the specification again. A row moved in Superset's dashboard editor, a chart added by
+    hand, a filter changed there: a specification has no place for them, so the commit undoes them — and the
+    person is told which, before, instead of finding out."""
+    from aibi.dashboard_agent import DashboardAgent
+    from aibi.semantic_agent import SemanticAgent
+
+    spec = DashboardSpec(dashboard={"id": "t", "template": "executive", "title": "T"}, filters=["region"],
+                         components=[KPI, TREND, BAR])
+    engine = {"dashboard": {"id": 9}, "datasets": {"cem.qoe_daily": 5},
+              "charts": {"kpi_1": {"id": 1, "name": "QoE Score"}, "trend_1": {"id": 2, "name": "Trend"},
+                         "ranking_1": {"id": 3, "name": "Ranking"}}}
+    template = registry.template("executive")
+    agent = DashboardAgent(registry, policy, SemanticAgent(registry))
+    position = agent.layout(spec, template, engine["charts"])
+    filters = agent.native_filters(spec, engine["datasets"], engine["charts"], template)
+    live = {"id": 9, "position_json": json.dumps(position), "json_metadata": json.dumps({"native_filter_configuration": filters})}
+    on_it = [{"id": 1, "slice_name": "QoE Score"}, {"id": 2, "slice_name": "Trend"}, {"id": 3, "slice_name": "Ranking"}]
+
+    class _Engine:
+        def get_dashboard(self, key):
+            return live
+
+        def dashboard_charts(self, key):
+            return on_it
+
+    tools = Toolbox(registry=registry, policy=policy, gateway=None, dbt=None, git=None, superset=_Engine(),
+                    store=Store(tmp_path / "s.sqlite"), audit=AuditLog(tmp_path / "t"), visual=None, state_dir=tmp_path,
+                    bi_database_name="BI", bi_database_uri="", superset_public_url="", dbt_dev_schema="bi_dev")
+    body = {"spec": spec.model_dump(), "engine": engine}
+    assert tools.dashboard_differences(body) == []                    # as the engine left it: nothing to name
+
+    on_it.append({"id": 44, "slice_name": "Throughput by site"})      # a chart dragged in from Superset's own list
+    row = next(key for key, node in position.items() if isinstance(node, dict) and node.get("type") == "ROW")
+    chart = position[position[row]["children"][0]]
+    chart["meta"]["width"] = chart["meta"]["width"] + 1               # a chart made wider in the dashboard editor
+    live["position_json"] = json.dumps(position)
+    live["json_metadata"] = json.dumps({"native_filter_configuration": [*filters, {"name": "Site"}]})
+    found = tools.dashboard_differences(body)
+    assert found[0] == "added by hand, and in no slot of the template: « Throughput by site »"
+    assert found[1].startswith("the layout is no longer the template's")
+    assert found[2].startswith("its filters are ") and "Site" in found[2] and found[2].endswith(
+        "the specification's are " + ", ".join(sorted(f["name"] for f in filters)))
 
 
 def _addon():

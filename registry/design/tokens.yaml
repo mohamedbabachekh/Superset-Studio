@@ -3,7 +3,7 @@
 # The AI never writes CSS. It names a token (`accent: primary`), the generator turns the token into a rule
 # scoped to that one dashboard, and a name that is not here is refused before Superset is called.
 colors:
-  primary: "#E6007E"        # inwi magenta — the same value superset_config.py gives the interface
+  primary: "#0972BC"        # SharpSight blue — the same value superset_config.py gives the interface
   info: "#26ABA8"
   success: "#37A15E"
   warning: "#F2B72D"
@@ -16,7 +16,16 @@ colors:
 
 # Categorical schemes. Each must also be registered in superset_config.py (EXTRA_CATEGORICAL_COLOR_SCHEMES)
 # or ship with Superset — a scheme Superset does not know falls back to its default without a word.
-color_schemes: [inwi, supersetColors]
+color_schemes: [sharpsight, inwi, supersetColors]
+
+# Whose colours a dashboard wears. SharpSight's own lead (decided 2026-10-04); a client's are a variant, named
+# in the request (« … in inwi's colours ») or in a specification (`theme.brand`). A brand is an accent — where a
+# template says `accent: primary` — and the series its charts are drawn in. Nothing else changes: the page
+# around the dashboard is Superset's, and stays SharpSight's.
+brands:
+  sharpsight: {accent: "#0972BC", color_scheme: sharpsight}
+  inwi: {accent: "#E6007E", color_scheme: inwi}
+default_brand: sharpsight
 
 # Sequential schemes, for maps and heat. All four are in the 6.1 frontend bundle (read from the image).
 sequential_schemes: [superset_seq_1, superset_seq_2, blue_white_yellow, schemeBlues]

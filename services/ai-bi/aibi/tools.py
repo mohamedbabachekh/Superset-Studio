@@ -594,7 +594,7 @@ class Toolbox:
                                       f"how many parts {component.dimension} has, for the labels of {slot}").rows)
         payload = self.charts.payload(
             component, dataset, metric, engine["datasets"][dataset.id], engine["dashboard"]["id"], template,
-            spec.theme.color_scheme or template.theme.color_scheme,
+            self.dashboards.scheme(spec, template),
             spec.theme.sequential_scheme or template.theme.sequential_scheme, body["project_id"], headline, parts)
 
         previous = engine.get("charts", {}).get(slot, {})
@@ -644,7 +644,7 @@ class Toolbox:
             "slug": spec.dashboard.id,
             "position_json": json.dumps(self.dashboards.layout(spec, template, charts)),
             "json_metadata": json.dumps(self.dashboards.json_metadata(spec, template, filters)),
-            "css": self.dashboards.css(template),
+            "css": self.dashboards.css(template, spec.theme.brand),
         })
         self.save_project(body)
         note["superset_assets"] = [{"type": "dashboard", "id": engine["dashboard"]["id"], "action": "updated",
@@ -725,7 +725,7 @@ class Toolbox:
                     dataset, metric = self.registry.dataset(adopted.dataset), self.registry.metric(adopted.metric)
                     expected = self.charts.form_data(
                         adopted, dataset, metric, engine["datasets"][dataset.id], template,
-                        spec.theme.color_scheme or template.theme.color_scheme,
+                        self.dashboards.scheme(spec, template),
                         spec.theme.sequential_scheme or template.theme.sequential_scheme)
                     actual = json.loads(live.get("params") or "{}")
                     entry["not_carried"] = sorted(k for k, v in expected.items() if not k.startswith("_")
@@ -733,6 +733,46 @@ class Toolbox:
                     entry["adopted"] = adopted.model_dump()
             entry["in_step"] = not (entry["changed"] or entry["refused"] or entry["not_carried"])
             found.append(entry)
+        return found
+
+    def dashboard_differences(self, body: dict[str, Any]) -> list[str]:
+        """What a person changed on the dashboard ITSELF, in Superset's dashboard editor, that a specification
+        does not carry: a chart added by hand, a layout that is no longer the template's, filters that are not
+        the specification's. A commit applies the specification again, so each of these is undone by it —
+        which is why they are named, to the person and in the audit record, before anything is committed:
+        nobody loses work without having been told what."""
+        spec, engine = DashboardSpec(**body["spec"]), body["engine"]
+        template = self.registry.template(spec.dashboard.template)
+        live = self.superset.get_dashboard(engine["dashboard"]["id"])
+        if live is None:
+            return ["the dashboard no longer exists in Superset"]
+        charts = self.live_charts(engine)
+        found: list[str] = []
+        ours = {chart["id"] for chart in charts.values()}
+        added = sorted(str(c.get("slice_name") or c.get("id")) for c in self.superset.dashboard_charts(live["id"])
+                       if c.get("id") not in ours)
+        if added:
+            found.append("added by hand, and in no slot of the template: " + ", ".join(f"« {name} »" for name in added))
+
+        def shape(position: dict[str, Any]) -> list[Any]:
+            rows = []
+            for key in (position.get("GRID_ID") or {}).get("children", []):
+                node = position.get(key) or {}
+                if node.get("type") == "HEADER":
+                    rows.append(("header", (node.get("meta") or {}).get("text")))
+                else:
+                    rows.append((node.get("type"), [((position.get(child) or {}).get("meta") or {}).get(field)
+                                                    for child in node.get("children", [])
+                                                    for field in ("chartId", "width", "height")]))
+            return rows
+
+        if shape(json.loads(live.get("position_json") or "{}")) != shape(self.dashboards.layout(spec, template, charts)):
+            found.append("the layout is no longer the template's: rows, sizes or section headers were changed")
+        named = lambda filters: sorted(str(f.get("name")) for f in filters)  # noqa: E731
+        have = named(json.loads(live.get("json_metadata") or "{}").get("native_filter_configuration") or [])
+        want = named(self.dashboards.native_filters(spec, engine.get("datasets", {}), charts, template))
+        if have != want:
+            found.append(f"its filters are {', '.join(have) or 'none'}; the specification's are {', '.join(want) or 'none'}")
         return found
 
     def access_differences(self, body: dict[str, Any]) -> list[str]:
@@ -1055,7 +1095,7 @@ class Toolbox:
             # the page is styled by the template's stylesheet and no other: a rule added by hand in the BI
             # engine is a template violation no screenshot measurement would name
             live = (self.superset.get_dashboard(dashboard_id) or {}).get("css") or ""
-            same = live.strip() == self.dashboards.css(template).strip()
+            same = live.strip() == self.dashboards.css(template, spec.theme.brand).strip()
             report.add("visual", "no template violation", "pass" if same else "fail", "stylesheet",
                        "the dashboard's stylesheet is the template's own, generated from design tokens" if same
                        else "the dashboard's stylesheet is not the one the template generates",

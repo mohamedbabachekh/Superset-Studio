@@ -2,7 +2,7 @@
 template:
   id: customer-experience
   name: Customer experience
-  version: "1.1"
+  version: "1.2"
   aliases: [customer-experience, customer experience, cx, cem]
   description: Four KPIs, the distribution beside the trend, then ranking and geography.
   title_pattern: "{subject} Customer Experience"
@@ -46,7 +46,7 @@ filters:
   orientation: horizontal
 
 theme:
-  color_scheme: inwi
+  color_scheme: sharpsight
   sequential_scheme: superset_seq_2
   variant: light
 

@@ -2,7 +2,7 @@
 template:
   id: operational
   name: Operational monitoring
-  version: "1.1"
+  version: "1.2"
   aliases: [operational, operations, ops]
   description: Four KPIs, one wide trend, then a ranking beside the detail rows.
   title_pattern: "{subject} Operations"
@@ -45,7 +45,7 @@ filters:
   orientation: horizontal
 
 theme:
-  color_scheme: inwi
+  color_scheme: sharpsight
   sequential_scheme: superset_seq_1
   variant: light
 

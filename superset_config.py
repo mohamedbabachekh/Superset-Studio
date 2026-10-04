@@ -145,6 +145,12 @@ FAVICONS = [{"href": "/static/assets/images/sharpsight/sharpsight-mark.svg"}]
 
 SHARPSIGHT_BLUE, SHARPSIGHT_CORAL, SHARPSIGHT_TEAL, SHARPSIGHT_YELLOW, SHARPSIGHT_GREEN = (
     "#0972BC", "#F8644E", "#26ABA8", "#F2B72D", "#37A15E")
+# The series a chart is drawn in by default: SharpSight's five, and a dark slate as the sixth. Measured
+# (CIE76 after Machado 2009, severity 1): two neighbours stay 35 or more apart for normal vision, deuteranopia
+# and protanopia; coral and green — which are never neighbours — come within 8 under protanopia. A violet
+# sixth, tried first, fell within 5 of the blue for both. A measure, not a certificate.
+SHARPSIGHT_SERIES = [SHARPSIGHT_BLUE, SHARPSIGHT_CORAL, SHARPSIGHT_TEAL, SHARPSIGHT_YELLOW, SHARPSIGHT_GREEN, "#2F3B52"]
+# A client's colours: a variant a dashboard may wear (registry/design/tokens.yaml, `brands`), never the default.
 INWI_MAGENTA = "#E6007E"
 INWI_SERIES = ["#E6007E", "#0E7FA8", "#B8730B", "#00926F", "#8360C3", "#C1443B"]
 
@@ -157,8 +163,8 @@ _TOKENS = {
     "brandLogoMargin": "14px 0",
     "brandSpinnerUrl": "/static/assets/images/sharpsight/sharpsight-loader.svg",
     "brandSpinnerSvg": None,
-    "colorPrimary": INWI_MAGENTA,
-    "colorLink": INWI_MAGENTA,
+    "colorPrimary": SHARPSIGHT_BLUE,      # SharpSight's own colours lead (decided 2026-10-04): 5.07 on white
+    "colorLink": SHARPSIGHT_BLUE,
     "colorInfo": SHARPSIGHT_TEAL,
     "colorSuccess": SHARPSIGHT_GREEN,
     "colorWarning": SHARPSIGHT_YELLOW,
@@ -188,8 +194,13 @@ THEME_DARK = ({"token": {**_TOKENS,
               if os.environ.get("DEVKIT_DARK", "0") == "1" else None)
 
 EXTRA_CATEGORICAL_COLOR_SCHEMES = [{
+    "id": "sharpsight",
+    "description": "SharpSight's own series — the default for a dashboard",
+    "label": "SharpSight",
+    "colors": SHARPSIGHT_SERIES,
+}, {
     "id": "inwi",
-    "description": "inwi magenta leading a validated, colour-vision-safe series",
+    "description": "inwi magenta leading — a client's series, for a dashboard made in its colours",
     "label": "inwi",
     "colors": INWI_SERIES,
 }]

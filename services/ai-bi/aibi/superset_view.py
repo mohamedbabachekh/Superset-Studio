@@ -57,7 +57,7 @@ SCHEMA = "bi_factory"
 GATE_TAG = "gate:"
 MANAGED_TAGS = (GATE_TAG, "project:", "env:", "domain:")      # on a project's dashboard: kept exact
 SYSTEM_TAG = "sharpsight:system"
-VIEW_VERSION = 3                 # raise it when a dashboard below changes: it is then made again
+VIEW_VERSION = 4                 # raise it when a dashboard below changes: it is then made again
 VERSION_TAG = f"sharpsight:view-v{VIEW_VERSION}"
 AUDIT_ROWS = 5000                # the newest records; the whole trail stays in the engine's volume
 
@@ -93,6 +93,9 @@ TABLES: dict[str, list[tuple[str, str]]] = {
     "deployments": [("tenant", "text"), ("project_id", "text"), ("version", "text"), ("target", "text"),
                     ("decision", "text"), ("decided_by", "text"), ("decided_at", "timestamptz"), ("comment", "text"),
                     ("package", "text"), ("package_sha256", "text"), ("git_commit", "text")],
+    "version_changes": [("tenant", "text"), ("project_id", "text"), ("version", "text"), ("from_version", "text"),
+                        ("slot", "text"), ("what", "text"), ("was", "text"), ("now", "text"),
+                        ("committed_by", "text"), ("committed_at", "timestamptz"), ("comment", "text")],
     "published": [("at", "timestamptz"), ("audit_chain", "text"), ("audit_records", "integer"),
                   ("projects", "integer")],
 }
@@ -219,6 +222,10 @@ DASHBOARDS: dict[str, dict[str, Any]] = {
             [("decisions", "deployments", "Every decision, newest first", 12, 44,
               _rows(["decided_at", "project_id", "version", "target", "decision", "decided_by", "comment", "package",
                      "package_sha256", "git_commit"], newest="decided_at"))],
+            "What a reviewer is asked to approve: what each commit took from Superset",
+            [("changes", "version_changes", "Chart by chart: what was specified, and what it is now", 12, 40,
+              _rows(["committed_at", "project_id", "from_version", "version", "slot", "what", "was", "now",
+                     "committed_by", "comment"], newest="committed_at"))],
             "The package of each version, and where it stands",
             [("packages", "projects", "Versions and their packages", 6, 44,
               _rows(["project_id", "version", "gate", "environment", "package", "git_commit", "gate_since"],
@@ -381,6 +388,21 @@ class SupersetView:
                                        *tests_of(node), feeds.get(node["name"])))
             rows["dbt_tests"] += [(node["name"], node.get("environment"), test.get("name"), test.get("status") or "not run")
                                   for test in node.get("tests", [])]
+        # what each commit took from Superset — the trail has it, and the run says which version it became
+        became = {run.request_id: run.version for run in self.store.list_runs(limit=500)}
+        for record in self.audit.read(action="commit:edited_in_superset", limit=AUDIT_ROWS):
+            detail, project_id = record.get("detail") or {}, record.get("project_id")
+            base = (tenant_of_project.get(project_id or ""), project_id, became.get(record.get("request_id")),
+                    detail.get("from_version"))
+            tail = (record.get("user"), record.get("timestamp"), detail.get("comment") or None)
+            for slot, changes in (detail.get("taken") or {}).items():
+                rows["version_changes"] += [(*base, slot, field, str(change.get("specification")),
+                                             str(change.get("superset")), *tail) for field, change in changes.items()]
+            for slot, settings in (detail.get("set_back") or {}).items():
+                rows["version_changes"].append((*base, slot, "set back (no place in a specification)",
+                                                ", ".join(settings), None, *tail))
+            for undone in detail.get("undone_on_the_dashboard") or []:
+                rows["version_changes"].append((*base, "the dashboard itself", "undone by the commit", undone, None, *tail))
         chain = self.audit.verify()
         rows["published"].append((utcnow(), "intact" if chain.get("ok") else f"BROKEN at record {chain.get('broken_at_seq')}",
                                   chain.get("records"), len(rows["projects"])))

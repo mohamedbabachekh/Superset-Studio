@@ -237,9 +237,17 @@ class TemplateDef(Strict):
         return [s for s in ordered if self.slots[s].purpose == purpose]
 
 
+class BrandDef(Strict):
+    """Whose colours a dashboard wears: an accent, and the series its charts are drawn in."""
+    accent: str
+    color_scheme: str
+
+
 class DesignTokens(Strict):
     colors: dict[str, str]
     color_schemes: list[str]
+    brands: dict[str, BrandDef] = Field(default_factory=dict)
+    default_brand: Optional[str] = None
     sequential_schemes: list[str]
     typography: dict[str, dict[str, int]]
     spacing: dict[str, int]
@@ -300,6 +308,8 @@ class Requirement(Strict):
     unresolved: list[str] = Field(default_factory=list)
     # what was understood, but not word for word: « the CEM Executive template » read as `executive`
     assumptions: list[str] = Field(default_factory=list)
+    # whose colours were asked for (« in inwi's colours »); none: SharpSight's own
+    brand: Optional[str] = None
     parser: str = "deterministic"
 
 
@@ -370,6 +380,8 @@ class DashboardHeader(Strict):
 
 
 class ThemeChoice(Strict):
+    # whose colours the dashboard wears, when not SharpSight's own: a brand of the design tokens
+    brand: Optional[str] = None
     color_scheme: Optional[str] = None
     sequential_scheme: Optional[str] = None
     variant: Optional[str] = None

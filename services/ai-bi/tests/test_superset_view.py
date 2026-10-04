@@ -75,6 +75,29 @@ def test_the_copy_says_where_a_project_stands_and_whose_it_is(registry, tmp_path
     assert all(len(row) == len(TABLES[table]) for table, found in rows.items() for row in found)
 
 
+def test_a_reviewer_reads_what_a_commit_took_from_superset(registry, tmp_path):
+    """Asked for by a second reader: after a commit, Superset and the specification agree — so what changed
+    between two versions was written nowhere a reviewer looks."""
+    from aibi.models import RunRecord
+    view = _view(registry, tmp_path, _Superset())
+    view.store.save_run(RunRecord(id="r9", request_id="req-9", user="dev.user", prompt="Commit …", ai_model="none",
+                                  project_id="cem-radio", version="1.1.0", status="succeeded"))
+    view.audit.record(action="commit:edited_in_superset", user="dev.user", request_id="req-9", actor="human",
+                      project_id="cem-radio", detail={
+                          "from_version": "1.0.0", "comment": "weekly trend",
+                          "taken": {"trend_1": {"time_grain": {"specification": None, "superset": "P1W"}}},
+                          "set_back": {"ranking_1": ["show_legend"]},
+                          "undone_on_the_dashboard": ["the layout is no longer the template's: rows were changed"]})
+    columns = [name for name, _ in TABLES["version_changes"]]
+    found = [dict(zip(columns, row)) for row in view.records()["version_changes"]]
+    assert [(r["version"], r["from_version"], r["slot"], r["what"], r["was"], r["now"]) for r in found] == [
+        ("1.1.0", "1.0.0", "trend_1", "time_grain", "None", "P1W"),
+        ("1.1.0", "1.0.0", "ranking_1", "set back (no place in a specification)", "show_legend", None),
+        ("1.1.0", "1.0.0", "the dashboard itself", "undone by the commit",
+         "the layout is no longer the template's: rows were changed", None)]
+    assert {(r["committed_by"], r["comment"], r["tenant"]) for r in found} == {("dev.user", "weekly trend", "default")}
+
+
 def test_each_dashboard_over_the_records_has_the_audience_its_capability_names(registry, tmp_path):
     view = _view(registry, tmp_path, _Superset())
     assert view.audience("sharpsight-bi-factory") == ["sharpsight_bi_developer", "sharpsight_bi_release_manager",

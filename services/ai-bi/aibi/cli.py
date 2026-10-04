@@ -109,6 +109,11 @@ def validate(project_id: str, user: str) -> dict[str, Any]:
             print(f"      ✗ cannot be taken — {reason}")
         if chart["not_carried"]:
             print(f"      · a specification has no place for: {', '.join(chart['not_carried'])}  (a commit sets it back)")
+    for difference in found["on_the_dashboard"]:
+        print(f"  on the dashboard itself: {difference}")
+    if found["on_the_dashboard"]:
+        print("      · a specification has no place for these: A COMMIT UNDOES THEM (the template's layout and the "
+              "specification's filters are applied again)")
     untouched = sum(1 for chart in found["charts"] if chart["in_step"])
     print(f"  {untouched} of {len(found['charts'])} charts are as specified")
     print("  a commit would take: " + (", ".join(found["would_take"]) or "nothing")
@@ -123,6 +128,8 @@ def commit(project_id: str, comment: str, user: str) -> int:
     started = call("POST", f"/projects/{project_id}/commit", user, json={"comment": comment})
     print(f"\ncommit, as {user}: taking {', '.join(started['taken'])}"
           + (f"; setting back {', '.join(started['set_back'])}" if started["set_back"] else "")
+          + (f"; undoing, on the dashboard: {'; '.join(started['undone_on_the_dashboard'])}"
+             if started["undone_on_the_dashboard"] else "")
           + f"\nrun {started['run_id']} · request {started['request_id']}\n")
     return report(follow(started["run_id"], user), user)
 

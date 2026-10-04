@@ -175,7 +175,11 @@ class DashboardAgent:
         header = DashboardHeader(id=dashboard_id, template=template.id, title=title, version=version,
                                  description=" ".join(requirement.prompt.split())[:500])
         sections = [SectionSpec(id=section.id) for section in template.section_list()]
-        return DashboardSpec(dashboard=header, filters=filters, components=components, sections=sections), notes
+        spec = DashboardSpec(dashboard=header, filters=filters, components=components, sections=sections)
+        if requirement.brand:
+            spec.theme.brand = requirement.brand
+            notes.append(f"in the colours of {requirement.brand}, as asked: its accent and its series")
+        return spec, notes
 
     # ── sections ────────────────────────────────────────────────────────────────────────────────────────────
     def sections(self, spec: DashboardSpec, template: TemplateDef) -> list[dict[str, Any]]:
@@ -369,10 +373,11 @@ class DashboardAgent:
         tokens = self.registry.tokens
         theme = spec.theme
         add("theme uses approved tokens",
-            (theme.color_scheme is None or theme.color_scheme in tokens.color_schemes)
+            (theme.brand is None or theme.brand in tokens.brands)
+            and (theme.color_scheme is None or theme.color_scheme in tokens.color_schemes)
             and (theme.sequential_scheme is None or theme.sequential_scheme in tokens.sequential_schemes)
             and (theme.variant is None or theme.variant in tokens.theme_variants),
-            detail=f"{theme.color_scheme or template.theme.color_scheme} / "
+            detail=(f"brand {theme.brand} · " if theme.brand else "") + f"{self.scheme(spec, template)} / "
                    f"{theme.sequential_scheme or template.theme.sequential_scheme}")
         return report
 
@@ -504,11 +509,23 @@ class DashboardAgent:
             })
         return filters
 
-    def css(self, template: TemplateDef) -> str:
+    def scheme(self, spec: DashboardSpec, template: TemplateDef) -> str:
+        """The series a dashboard's charts are drawn in: the one its specification names; else its brand's;
+        else its template's — which is SharpSight's own."""
+        brand = self.registry.tokens.brands.get(spec.theme.brand or "")
+        return spec.theme.color_scheme or (brand.color_scheme if brand else template.theme.color_scheme)
+
+    def css(self, template: TemplateDef, brand: Optional[str] = None) -> str:
         """The dashboard's stylesheet, from tokens. It applies to this dashboard only — the engine stores it
         on the dashboard — and every value in it is looked up, none is written by the requester or a model."""
         tokens = self.registry.tokens
-        color = lambda use, default: tokens.colors[template.colors.get(use, default)]  # noqa: E731
+        worn = tokens.brands.get(brand or "")
+
+        def color(use: str, default: str) -> str:
+            # a brand changes one thing: where the template says « primary », its accent stands instead
+            name = template.colors.get(use, default)
+            return worn.accent if worn is not None and name == "primary" else tokens.colors[name]
+
         font = lambda use, default: tokens.typography[template.typography.get(use, default)]  # noqa: E731
         space = lambda use, default: tokens.spacing[template.spacing.get(use, default)]  # noqa: E731
         radius = tokens.radius.get("card", 8)

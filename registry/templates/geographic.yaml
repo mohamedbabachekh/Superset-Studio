@@ -2,7 +2,7 @@
 template:
   id: geographic
   name: Geographic view
-  version: "1.1"
+  version: "1.2"
   aliases: [geographic, geo, map, territorial]
   description: A large map beside its ranking, three KPIs above, the trend underneath.
   title_pattern: "{subject} by Region"
@@ -43,7 +43,7 @@ filters:
   orientation: horizontal
 
 theme:
-  color_scheme: inwi
+  color_scheme: sharpsight
   sequential_scheme: superset_seq_1
   variant: light
 

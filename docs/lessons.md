@@ -474,3 +474,16 @@ is said in Superset's process (the add-on) and who is granted the dashboard is s
 files, two containers. Nothing failed — and nothing would have, the day one was edited alone: an entry that
 opens nothing, or a dashboard nobody is shown. → the engine's tests load the add-on's rule from its file and
 compare, dashboard by dashboard. Asked for by a second reader.
+
+**A commit that sets things back must say which, before.** The first `commit` named what it would undo chart
+by chart, and only said « a layout, a filter… » when it had nothing to take. With one chart change to take, a
+row moved in the dashboard editor and a chart added by hand were undone in silence: the template's layout is
+applied again at every build. Found by reading the code path a second reader pointed at, not by the scenario,
+which had edited charts only. → what differs on the dashboard itself is listed in `validate`, in the commit's
+answer and in its audit record; and the scenario now moves something on the dashboard.
+
+**« Colour-vision-safe » is a number or it is nothing.** The kit described its client series as validated.
+Measured — each colour passed through Machado's deuteranopia and protanopia matrices, distances in L*a*b* —
+its neighbours are well apart and two colours three places from each other are 3 apart: the same to that eye.
+The first candidate for SharpSight's own series had a violet 5 from its blue. → the series was chosen by the
+measure, the numbers are written beside it, and the word « validated » is gone from the description.

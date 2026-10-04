@@ -165,5 +165,13 @@ class DeterministicParser:
                     prefer=self.registry.lexicon.get("intents", {}).get(intent, {}).get("prefers"),
                 ))
 
+        # whose colours: only when the request says so, in words the lexicon lists
+        lowered = " ".join(text.lower().replace("’", "'").split())
+        brand = next((name for name, phrases in self.registry.lexicon.get("brands", {}).items()
+                      if any(str(phrase).lower() in lowered for phrase in phrases)), None)
+        if brand is not None and brand not in self.registry.tokens.brands:
+            unresolved.append(f"brand « {brand} » is not a brand of the design tokens")
+            brand = None
         return Requirement(prompt=prompt, subject=subject, template=template, metrics=metrics, views=views,
-                           filters=filters, unresolved=unresolved, assumptions=assumptions, parser=self.name)
+                           filters=filters, unresolved=unresolved, assumptions=assumptions, brand=brand,
+                           parser=self.name)

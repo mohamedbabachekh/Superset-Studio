@@ -57,6 +57,14 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
   an unapproved visualization), and what a specification has no place for. `ai-bi.sh commit <project>` takes it:
   the same validation, visual QA, version, git commit, package and review as a generated dashboard. Until then
   a reviewer is refused, as before.
+- **What a commit undoes is named first, and a reviewer reads what a version changed.** `validate` and `commit`
+  now also say what was changed on the dashboard itself in Superset's editor — a chart added by hand, a layout
+  that is no longer the template's, filters that are not the specification's — because a commit applies the
+  specification again and undoes them. *Releases* has a table of what each commit took, set back and undid.
+- **SharpSight's own colours lead.** The interface is SharpSight blue, the sign-in page with it, and a
+  dashboard is drawn in a `sharpsight` series (measured for colour-vision deficiency; the numbers are beside
+  it in `superset_config.py`). A client's colours are a **brand** a dashboard wears when the request says so —
+  « in inwi's colours » — an accent and a series, nothing of Superset's own page. Templates go to 1.2.
 - **Sections stay.** A template groups its rows into sections, each announced by a header on the Superset
   dashboard, with filters of its own; a section can be hidden.
 - **What Superset 6.1.0's extension system can carry was read from the image** before anything was built on

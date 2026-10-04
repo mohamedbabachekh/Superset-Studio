@@ -159,6 +159,11 @@ class Registry:
                 for kind in slot.accepts:
                     if kind not in self.visualizations:
                         problems.append(f"template {tid}: slot {slot_id} accepts {kind}, which is not approved")
+            for name, brand in tokens.brands.items():
+                if brand.color_scheme not in tokens.color_schemes:
+                    problems.append(f"brand {name}: colour scheme {brand.color_scheme} is not approved")
+            if tokens.default_brand is not None and tokens.default_brand not in tokens.brands:
+                problems.append(f"default brand {tokens.default_brand} is not a brand")
             if template.theme.color_scheme not in tokens.color_schemes:
                 problems.append(f"template {tid}: colour scheme {template.theme.color_scheme} is not approved")
             if template.theme.sequential_scheme not in tokens.sequential_schemes:

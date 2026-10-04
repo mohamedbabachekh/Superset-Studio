@@ -4,7 +4,7 @@
 template:
   id: executive
   name: Executive overview
-  version: "1.1"
+  version: "1.2"
   aliases: [executive, exec, executive-telecom-v1]
   description: Headline KPIs on top, the trend and its distribution, then ranking and geography.
   title_pattern: "{subject} Overview"
@@ -49,7 +49,7 @@ filters:
   orientation: horizontal
 
 theme:
-  color_scheme: inwi
+  color_scheme: sharpsight
   sequential_scheme: superset_seq_1
   variant: light
 

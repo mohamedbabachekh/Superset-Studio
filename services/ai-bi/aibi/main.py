@@ -332,6 +332,7 @@ def _edited(project: dict[str, Any]) -> dict[str, Any]:
     takeable = [c for c in charts if c["changed"] and not c["refused"]]
     refused = [c for c in charts if c["refused"]]
     set_back = [c for c in charts if c["not_carried"]]
+    on_dashboard = service.tools.dashboard_differences(project)
     drift = service.lifecycle.drift(latest) if latest else None
     why_not = None
     if latest and latest.status in HELD:
@@ -342,8 +343,10 @@ def _edited(project: dict[str, Any]) -> dict[str, Any]:
             f"{c['title']} ({c['slot']}): {', '.join(c['refused'])}" for c in refused)
     elif not takeable:
         why_not = ("no chart was changed in Superset in a way a specification carries" + (
-            f"; the dashboard still differs from version {latest.version} ({drift}) — a layout, a filter or a setting "
-            "a specification has no place for: restore the version to put it back" if drift else
+            "; what was changed is on the dashboard itself — " + "; ".join(on_dashboard) + " — and a specification "
+            "has no place for it: restore the version to put it back" if on_dashboard else
+            f"; the dashboard still differs from version {latest.version} ({drift}) by a setting a specification "
+            "has no place for: restore the version to put it back" if drift else
             f": Superset shows version {latest.version} as validated" if latest else ""))
     return {"project_id": project_id, "version": latest.version if latest else None,
             "gate": latest.status if latest else (project.get("attempt") or {}).get("status"),
@@ -351,6 +354,8 @@ def _edited(project: dict[str, Any]) -> dict[str, Any]:
             "same_as_validated": drift is None if latest else None, "difference": drift,
             "charts": [{k: c[k] for k in ("slot", "chart_id", "title", "changed", "refused", "not_carried", "in_step")}
                        for c in charts],
+            # the dashboard itself, as its editor left it: a commit applies the specification again, and undoes these
+            "on_the_dashboard": on_dashboard,
             "would_take": [c["slot"] for c in takeable], "would_set_back": [c["slot"] for c in set_back],
             "can_commit": why_not is None, "why_not": why_not, "_adopted": {c["slot"]: c["adopted"] for c in takeable}}
 
@@ -387,7 +392,8 @@ def project_commit(project_id: str, body: Commit, response: Response, identity: 
     service.audit.record(action="commit:edited_in_superset", user=identity.user, request_id=run.request_id,
                          actor="human", project_id=project_id, metrics=spec.metrics(),
                          detail={"taken": taken, "comment": body.comment, "from_version": found["version"],
-                                 "set_back": {c["slot"]: c["not_carried"] for c in found["charts"] if c["not_carried"]}})
+                                 "set_back": {c["slot"]: c["not_carried"] for c in found["charts"] if c["not_carried"]},
+                                 "undone_on_the_dashboard": found["on_the_dashboard"]})
 
     def work() -> None:
         try:
@@ -398,7 +404,7 @@ def project_commit(project_id: str, body: Commit, response: Response, identity: 
     threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
     response.status_code = 202
     return {"run_id": run.id, "request_id": run.request_id, "status": "running", "taken": sorted(taken),
-            "set_back": found["would_set_back"]}
+            "set_back": found["would_set_back"], "undone_on_the_dashboard": found["on_the_dashboard"]}
 
 
 # ── projects and versions ───────────────────────────────────────────────────────────────────────────────────

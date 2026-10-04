@@ -2,7 +2,7 @@
 template:
   id: telecom-kpi
   name: Telecom KPI board
-  version: "1.1"
+  version: "1.2"
   aliases: [telecom-kpi, telecom kpi, kpi board]
   description: Six headline KPIs, two trends compared, a ranking and a detail table.
   title_pattern: "{subject} KPIs"
@@ -51,7 +51,7 @@ filters:
   orientation: horizontal
 
 theme:
-  color_scheme: inwi
+  color_scheme: sharpsight
   sequential_scheme: superset_seq_1
   variant: light
 

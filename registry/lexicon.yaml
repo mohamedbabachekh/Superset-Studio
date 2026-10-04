@@ -32,6 +32,11 @@ intents:
     purpose: detail
     phrases: [detail table, details, detail, table of]
 
+# whose colours the dashboard should wear, when the request says so (registry/design/tokens.yaml, `brands`).
+# Without one of these, a dashboard wears SharpSight's.
+brands:
+  inwi: ["inwi's colours", "inwi's colors", inwi colours, inwi colors, inwi brand, inwi branding, inwi theme]
+
 # words that name a column. Checked as whole words, longest first.
 dimensions:
   date: [date, daily, day, days]
