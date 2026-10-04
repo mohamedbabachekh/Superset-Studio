@@ -58,6 +58,8 @@ bash ai-bi.sh check-adapter <project>    # every road of the Superset adapter, d
 bash ai-bi.sh person east.analyst        # a Superset account for a person of rbac.yaml; its password is shown once
 bash ai-bi.sh people                     # every Superset account given the SharpSight roles rbac.yaml says, no others
 bash ai-bi.sh compatibility              # the compatibility matrix, beside the versions actually running
+bash ai-bi.sh validate cem-qoe            # what was edited in Superset since: taken, refused, set back
+bash ai-bi.sh commit cem-qoe "weekly"    # take it: a new version, validated, awaiting review
 bash ai-bi.sh where                      # where to look in Superset: the menu's six entries, and who sees which
 ```
 
@@ -159,6 +161,41 @@ shown there, by Superset's own means.
 **Asking and approving are on the command line** — `ai-bi.sh request "…"`, `ai-bi.sh approve <project> UAT|PROD`
 (chapter 1). That is a choice, made on 2026-10-04: no screen of ours, not even one under Superset's address.
 
+### Editing in Superset, then validate and commit
+
+A chart is edited where charts are edited: Superset's own Explore. Nothing of ours stands in the way, and
+nothing of ours is needed to do it. What SharpSight adds comes after — the edit is read back, in the
+specification's words, and becomes a version only through the same road as a generated one.
+
+```bash
+bash ai-bi.sh validate cem-network-pulse
+#   QoE Score  (kpi_1)
+#       ✗ cannot be taken — an ad-hoc metric (« Best score ») — a chart shows a governed metric
+#   QoE Score, daily trend  (trend_1)
+#       time_grain: P1D → P1W
+#   Top 5 regions by QoE  (ranking_1)
+#       title: QoE Score by region → Top 5 regions by QoE
+#       row_limit: None → 5
+#       · a specification has no place for: show_legend  (a commit sets it back)
+#   cannot be committed: Superset holds what cannot be a governed chart — …
+bash ai-bi.sh commit cem-network-pulse "weekly trend, top five regions"
+```
+
+| For each chart of the project, `validate` says | |
+|---|---|
+| **what changed, in governed terms** | metric, dimension, kind of chart, top N, time grain, order, bins, title — as the specification would say it. A commit takes these |
+| **what cannot be taken**, and why | an ad-hoc metric in place of a governed one, a visualization nobody approved, a dataset that is not the project's, several metrics on one chart, a time grain or a number of rows outside what is allowed. Nothing is approximated: while one chart is refused, nothing is committed |
+| **what a specification has no place for** | a setting of Superset's the specification does not carry (a colour, a legend). It is named; a commit sets it back |
+
+`commit` takes what can be taken into the project's specification and sends it down the road of chapter 2 from
+step 11 on — validation, the BI engine, the data, a screenshot, visual QA, a version, a git commit, a package,
+`READY_FOR_REVIEW`. The specification is applied again on the way, so what Superset holds afterwards is the
+governed form of what the person made. It needs `bi.generate`; it is refused on a project that stands in UAT
+or PROD, as a regeneration is; and a reviewer cannot approve the edited dashboard before it — the fingerprint
+no longer matches the version (chapter 4). `ai-bi.sh restore` remains the way back to the version as it was.
+
+`GET /projects/<id>/changes` is what `validate` prints; `POST /projects/<id>/commit` starts the run.
+
 ### The menu, and dbt's documentation — `superset-addon/`
 
 Two files, mounted into the kit's Superset by the engine's compose overlay. The kit's image and its
@@ -202,7 +239,7 @@ not there yet.
 | the connection | a second Superset connection, « SharpSight BI records (read-only) », **closed to SQL Lab** |
 | the dashboards | granted — Superset's dashboard roles — to the BI-engine roles of those `rbac.yaml` gives the matching capability: *BI Factory*, *Data Quality*, *Impact Analysis* and *Releases* to those who generate or approve (`bi.generate`, `bi.approve_uat`, `bi.approve_prod`), *Audit trail* to those who hold `audit.read`. `ai-bi.sh people` gives a person's account those roles |
 | the badge | these dashboards are **not certified**: in Superset's list that badge means « a person approved this for PROD ». They carry the tag `sharpsight:system` |
-| the workspace | the rows of a project carry its `tenant`. This kit has one workspace, so no row-level rule is set on these tables — with several, one rule per workspace is what is missing |
+| the workspace | the rows of a project carry its `tenant`; four tables have none — `metrics`, `dbt_models`, `dbt_tests`, `published` — because the registries and dbt's project are one for everybody here. This kit has one workspace, so no row-level rule is set on these tables — with several, one rule per workspace is what is missing, and those four would need a tenant first |
 
 **Tags, in Superset's own lists.** On a project's dashboard, three: `env:<DEV|UAT|PROD>`, `gate:<GATE>`,
 `project:<id>` — kept exact as the gate moves, and a tag a person added is left alone. Three, and those, on
@@ -533,6 +570,7 @@ holds nothing that can change a governed table.
 | `GET /projects` · `/projects/<id>` · `/projects/<id>/versions/<v>` | projects (`status`, and `last_attempt` — also for a project whose only run failed) and versions (`status`, `history`) |
 | `GET …/versions/<v>/spec` · `/validation` · `/screenshot?viewport=desktop` · `/package` | what a version is |
 | `POST /projects/<id>/approve` `{target, comment, confirm}` · `/reject` · `/restore` · `/discard` | review, and taking a draft away |
+| `GET /projects/<id>/changes` · `POST /projects/<id>/commit` `{comment}` | what Superset holds against the specification, chart by chart; taking what was edited there into a new version (`bi.generate`) |
 | `GET /datasets` · `/datasets/<id>` · `/datasets/<id>/lineage` · `/metrics` · `/dimensions/<word>` · `/templates` | the registries |
 | `GET /compatibility` | the matrix, beside what is running |
 | `GET /me` · `/security/overview` | who is calling; users, roles and permissions for those who administer or audit them |
@@ -583,8 +621,9 @@ platform that was not touched:
 | A person, not a probe | `east.analyst`, created by the command, signs in: the PROD dashboard and nothing else; three regions in every chart, on the map, and in the region filter's own choices; SQL Lab refused. A role given to `admin` by hand in Superset was taken back by `people` |
 | The brief's specification | section 23's example given to `save_dashboard_spec` as written — `version: "1.0"`, `template: executive-telecom-v1`, no dataset on any component: read, its four datasets found in the registry, and one finding, the map by a column called `site` that this registry does not have. Without that component it is valid |
 | **In Superset**, in a real browser | As an administrator: the SharpSight menu in Superset's top bar, with its six entries; the five dashboards over the records draw every chart — ten, eight, four, six and six — with none in error, and the counts *BI Factory* shows are the engine's own answer; Superset's own dashboard list shows a project's environment and gate as tags, and « certified » on the PROD dashboard only; its seven charts carry their project and domain, and are certified with it; dbt's documentation opens when signed in (« dbt Docs », with the project's tree), and an anonymous request is sent to the sign-in. Then as five kinds of people, with an account made for the question and switched off after it: with no SharpSight role, or with a role granted no dataset, no SharpSight menu, every dashboard refused, and the documentation refused (403); an analyst sees the documentation's entry and nothing else; a developer sees the four dashboards of the factory and the documentation, and is refused the audit trail; an auditor sees the trail and the documentation, and is refused the factory's. The records' connection is closed to SQL Lab. Asked directly, the database refuses `bi_reader` the schema, and lets `bi_records_reader` read it, read nothing governed, and write nothing. The engine's own address answers 404 for `/studio/`, `/builder/…` and `/dbt-docs/`. No request left the machine: Superset's telemetry pixel is attempted and blocked by the kit's own header |
+| **Edited in Superset**, validated, committed | A second dashboard is generated (operational template, five charts) and nobody touches it: `validate` finds every chart as specified and nothing to commit. Three charts are then edited the way Explore saves them — through Superset's own API: the trend by week; the ranking cut to five, renamed, with a legend; a KPI given an ad-hoc metric. A commit is refused, naming that chart; the reviewer is refused too, the fingerprint having changed. `validate` says the rest in the specification's words: `time_grain: P1D → P1W`, `row_limit: None → 5`, the new title, and the legend as something a specification has no place for. The KPI's governed metric is put back in Superset; a commit by an analyst is refused (`bi.generate`); the developer's goes through steps 11 to 22 — 162 checks, none failed — and leaves version 1.1.0 at `READY_FOR_REVIEW`, by way of `DRAFT → VALIDATING`: its specification says week and top five, Superset's ranking has five rows and no legend, and `validate` finds all five charts as specified again. The reviewer approves 1.1.0 for UAT; a further commit is refused, the project being in UAT; its dashboard is tagged `env:UAT`, `gate:UAT` |
 | What reading the output, the pictures and a second reader caught | a tag changed the fingerprint a dashboard is validated under — every tagged dashboard would have been refused at its next gate as « changed after validation »; menu entries added by the hook had no permission, so nobody saw them; with four tags on a dashboard, Superset's list showed two and hid the gate. And, found by an audit of the branch from another session rather than by the tests: the copy of the records could be read through the connection every chart uses, SQL Lab included, while the auditors `rbac.yaml` names could not open the trail's dashboard; the two system dashboards wore the badge that means « approved for PROD »; the menu led to dashboards that were not made yet for some minutes after a start; and dbt's documentation was open to every signed-in account, one with no dataset included. All fixed |
-| The engine's rules | 149 tests, no database needed: `bash ai-bi.sh test` |
+| The engine's rules | 161 tests, no database needed: `bash ai-bi.sh test` |
 
 ## 9 · What is not here yet
 
@@ -593,7 +632,7 @@ platform that was not touched:
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
 | **The Superset extension package** (`sharpsight-bi.supx`) | not built yet: it is the second step of the decision in chapter 3. What it can carry on 6.1.0 is a backend API, commands, and panels in SQL Lab |
 | **A context bar, an outline, a governance drawer, an AI chat on dashboards and in Explore** | Superset 6.1.0 has no extension point there, and a fork was not chosen (chapter 3). What stands in their place is Superset's own: tags, badges, the SharpSight menu, five dashboards |
-| **Validating and committing what a person builds in Superset by hand** | not yet. A dashboard is generated from a request; a chart edited in Superset after validation is seen as a change — the fingerprint differs — and the next approval is refused until the version is restored or the dashboard generated again. Reading a hand edit into a new version is the next piece of the native step |
+| **What a commit does not take from Superset** | only the charts a project's specification has a place for are read back. A chart added to the dashboard by hand, a row moved in Superset's dashboard editor, a filter changed there: none is taken — when a chart was changed too, a commit sets them back; when nothing else was, it is refused, saying so. And a dashboard built from nothing in Superset is not adopted as a project: a project starts with a request |
 | **The records' dashboards, per workspace** | this kit has one workspace, so no row-level rule is set on `bi_factory`; every row carries its tenant for the day there are several |
 | **SharpSight's own colours leading the theme** | decided on 2026-10-04, not done: the theme still leads with the client's magenta, and the two system dashboards have English titles under a French menu |
 | **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file, and people reach Superset through a command an administrator runs |

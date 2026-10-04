@@ -36,8 +36,6 @@ import os
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, abort, redirect, request, send_from_directory
-from flask_login import current_user
 
 CATEGORY = "SharpSight"
 ROLE_PREFIX = "sharpsight_"                       # aibi/people.py: an rbac.yaml role, as a Superset role
@@ -75,6 +73,9 @@ def audiences(rbac_file: Path) -> dict[str, set[str]]:
 
 
 def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built)
+    # imported here, not at the top: `audiences` above is also read by the engine's tests, where there is no Flask
+    from flask import Blueprint, abort, redirect, request, send_from_directory
+    from flask_login import current_user
     from superset.extensions import appbuilder
 
     allowed = audiences(Path(os.environ.get("SHARPSIGHT_RBAC_FILE", "/app/sharpsight/rbac.yaml")))

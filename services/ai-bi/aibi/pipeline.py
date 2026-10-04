@@ -135,7 +135,11 @@ class Pipeline:
         self.audit: AuditLog = tools.audit
         self.datasets = DatasetAgent(tools.registry, tools.semantic)
 
-    def execute(self, run: RunRecord, identity: Identity) -> RunRecord:
+    def execute(self, run: RunRecord, identity: Identity,
+                edited: Optional[tuple[str, DashboardSpec]] = None) -> RunRecord:
+        """`edited`: a project, and its own specification with what a person edited in Superset taken into
+        it (a commit). The run then starts from that specification instead of reading a sentence — and goes
+        through everything else: validation, the BI engine, visual QA, a version, a commit, a package."""
         ctx = ToolContext(identity=identity, request_id=run.request_id, ai_model=run.ai_model)
         self.audit.record(action="request", user=identity.user, request_id=run.request_id, actor="human",
                           ai_model=run.ai_model, detail={"prompt": run.prompt, "run_id": run.id})
@@ -143,7 +147,10 @@ class Pipeline:
         gates = _Gates(run, ctx, self.tools)
         try:
             self.tools.policy.require(identity, "bi.generate")
-            self._run(run, ctx, _Steps(run, self.store), notes, gates)
+            if edited is None:
+                self._run(run, ctx, _Steps(run, self.store), notes, gates)
+            else:
+                self._run_edited(run, ctx, _Steps(run, self.store), notes, gates, *edited)
             run.status = "succeeded"
         except Exception as exc:  # noqa: BLE001 — whatever stopped it, the run must say so
             run.status, run.error = "failed", f"{type(exc).__name__}: {str(exc)[:1500]}"
@@ -305,6 +312,46 @@ class Pipeline:
                                    f"{len(spec.components)} components on template {template.id}"
                                    + (f", and the dbt model {plan.name}" if plan else ""))
 
+        self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
+                    template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
+
+    # ── a specification a person changed by editing in Superset ──────────────────────────────────────────────
+    def _run_edited(self, run: RunRecord, ctx: ToolContext, steps: _Steps, notes: list[str], gates: _Gates,
+                    project_id: str, spec: DashboardSpec) -> None:
+        """A commit of what was edited in Superset: there is no sentence to read and nothing to discover — the
+        project has its specification, and a person changed charts of it in Superset's own Explore — so steps
+        2 to 5 have nothing to do. From step 12 on it is the same road, checks and gates included: the
+        specification is applied again, so what Superset holds afterwards is its governed form."""
+        tools, registry, identity = self.tools, self.registry, ctx.identity
+        with steps.step("parse_requirement") as step:
+            project = self.store.get_project(project_id)
+            if project is None or project["tenant"] != identity.tenant:
+                raise PolicyError(f"{identity.user} has no access to BI project {project_id}", "tenant")
+            run.project_id = ctx.project_id = project_id
+            template = registry.template(spec.dashboard.template)
+            latest = self.store.latest_version(project_id)
+            if latest and latest.status in HELD:
+                raise PipelineError(f"BI project {project_id} v{latest.version} is {latest.status}. This kit has ONE "
+                                    "BI engine, so committing to it would rewrite the promoted dashboard in place.")
+            gates.open(project_id)
+            requirement = Requirement(prompt=run.prompt, subject=project.get("title") or spec.dashboard.title,
+                                      template=template.id, metrics=spec.metrics(), filters=spec.filters,
+                                      parser="Superset (edited by a person)")
+            step.summary = {"project_id": project_id, "template": template.id, "metrics": requirement.metrics,
+                            "read_by": requirement.parser, "reason": "edited in Superset: there is no sentence to read"}
+        for key in ("find_datasets", "find_metrics", "identify_missing_data", "determine_transformations"):
+            steps.skip(key, "the project has its specification; what was edited in Superset was taken into it")
+        metrics = [registry.metrics[m] for m in spec.metrics() if m in registry.metrics]
+        dbt_results: list[dict[str, Any]] = []
+        mine = [d for d in spec.datasets() if d in registry.datasets and registry.datasets[d].project == project_id]
+        if mine and project.get("model_plan"):
+            # a dataset this project generated earlier is rebuilt, so that what is validated is today's data
+            self._transform(ctx, steps, ModelPlan(**project["model_plan"]), project_id, dbt_results)
+        else:
+            self._no_transformation(steps)
+        with steps.step("generate_specification") as step:
+            spec.dashboard.version = self.lifecycle.next_version(project_id)
+            step.summary = {"specification": spec.model_dump(exclude_none=True), "edited_by": identity.user}
         self._build(run, ctx, steps, notes, gates, project_id=project_id, requirement=requirement,
                     template=template, metrics=metrics, spec=spec, dbt_results=dbt_results)
 

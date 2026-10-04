@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from .models import ComponentSpec, DatasetDef, MetricDef, TemplateDef
+from .models import ComponentOptions, ComponentSpec, DatasetDef, MetricDef, TemplateDef
 from .registry import Registry
 from .semantic_agent import d3_format
 
@@ -172,6 +172,124 @@ class ChartAgent:
             # where this chart is defined: a SharpSight project and slot, not the engine's editor
             "external_url": f"sharpsight://bi-project/{project_id}/slot/{component.slot}",
         }
+
+    # ── a chart, read back from the engine ──────────────────────────────────────────────────────────────────
+    _ROW_DEFAULT = {"bar": 100, "table": 200, "pie": 100}
+
+    def read_back(self, component: ComponentSpec, chart: dict[str, Any], purpose: str,
+                  datasets_by_engine_id: dict[int, str]) -> dict[str, Any]:
+        """A chart as the BI engine holds it NOW — after a person edited it in the engine's own editor — told
+        in the specification's vocabulary. `form_data` above is one direction; this is the other.
+
+        What comes back is the component the chart now IS (`component`), what differs from the one specified
+        (`changed`), and — when it cannot be a component at all — why (`refused`): a visualization nobody
+        approved, an ad-hoc metric in place of a governed one, a dataset that is not registered. Nothing is
+        guessed: a chart that is not expressible in governed terms is refused, not approximated."""
+        registry = self.registry
+        form = json.loads(chart.get("params") or "{}")
+        refused: list[str] = []
+        kinds = {v.engine_type: kind for kind, v in registry.visualizations.items()}
+        viz = form.get("viz_type") or chart.get("viz_type")
+        kind = kinds.get(viz)
+        if kind is None:
+            return {"component": None, "changed": {}, "refused": [f"« {viz} » is not an approved visualization"]}
+        by_key = {m.key: m for m in registry.metrics.values()}
+
+        def governed(value: Any) -> Optional[MetricDef]:
+            if isinstance(value, dict):
+                refused.append(f"an ad-hoc metric (« {value.get('label') or value.get('sqlExpression') or 'custom'} ») "
+                               "— a chart shows a governed metric")
+                return None
+            if value not in by_key:
+                refused.append(f"metric « {value} » is not in the metric registry")
+                return None
+            return by_key[value]
+
+        current = registry.metrics.get(component.metric)
+        if kind == "histogram":
+            column = form.get("column")
+            metric = current if current is not None and current.distribution_column == column else next(
+                (m for m in registry.metrics.values() if m.distribution_column == column), None)
+            if metric is None:
+                refused.append(f"no governed metric has a distribution of « {column} »")
+        elif kind in ("big_number", "pie", "map"):
+            metric = governed(form.get("metric"))
+        else:
+            several = form.get("metrics") or []
+            if len(several) != 1:
+                refused.append(f"one metric per chart, and it has {len(several)}")
+            metric = governed(several[0]) if len(several) == 1 else None
+
+        engine_id = str(form.get("datasource", "")).split("__")[0]
+        dataset_id = datasets_by_engine_id.get(int(engine_id)) if engine_id.isdigit() else None
+        if dataset_id is None:
+            refused.append("it reads a dataset that is not one of this project's governed datasets")
+        dataset = registry.datasets.get(dataset_id or "")
+
+        dimension: Any = None
+        if kind == "bar":
+            dimension = form.get("x_axis")
+        elif kind in ("pie", "table"):
+            columns = form.get("groupby") or []
+            if len(columns) != 1:
+                refused.append(f"one dimension per {kind}, and it has {len(columns)}")
+            dimension = columns[0] if len(columns) == 1 else None
+        elif kind == "map":
+            dimension = form.get("entity")
+        elif kind in ("line", "area"):
+            axis = form.get("x_axis")
+            if dataset is not None and axis not in (None, dataset.time_column):
+                refused.append(f"a {kind} is drawn over time ({dataset.time_column}), not over « {axis} »")
+            dimension = component.dimension
+        if isinstance(dimension, dict):
+            refused.append("an ad-hoc column in place of a dimension of the dataset")
+            dimension = None
+
+        options = component.options.model_dump()
+        if kind in self._ROW_DEFAULT:
+            default = self._ROW_DEFAULT[kind]
+            rows = int(form.get("row_limit") or default)
+            if rows > 1000:
+                refused.append(f"{rows} rows: a chart shows at most 1000")
+            options["row_limit"] = None if rows == default else rows
+        if kind in ("bar", "table"):
+            options["sort"] = "asc" if form.get("order_desc") is False else (None if options.get("sort") != "desc" else "desc")
+        if kind in ("line", "area"):
+            grain = form.get("time_grain_sqla") or "P1D"
+            if grain not in ("P1D", "P1W", "P1M"):
+                refused.append(f"time grain « {grain} »: day, week or month")
+            elif grain != (options.get("time_grain") or "P1D"):
+                options["time_grain"] = grain
+        if kind == "histogram":
+            bins = int(form.get("bins") or 12)
+            if not 4 <= bins <= 40:
+                refused.append(f"{bins} bins: between 4 and 40")
+            elif bins != (options.get("bins") or 12):
+                options["bins"] = bins
+        if refused or metric is None or dataset_id is None:
+            return {"component": None, "changed": {}, "refused": refused}
+
+        adopted = ComponentSpec(slot=component.slot, type=kind, metric=metric.id, dimension=dimension, dataset=dataset_id,
+                                options=ComponentOptions(**options), description=component.description)
+        name = chart.get("slice_name") or ""
+        adopted.title = None if name == self.title(adopted, metric, purpose) else name[:80]
+        changed = {field: {"specification": getattr(component, field), "superset": getattr(adopted, field)}
+                   for field in ("type", "metric", "dimension", "dataset")
+                   if getattr(component, field) != getattr(adopted, field)}
+        # The title is compared as people READ it: the one the specification shows — its own, or the one
+        # generated for it — against the one Superset shows.
+        shown = component.title or (self.title(component, current, purpose) if current is not None else None)
+        if name and name != shown:
+            changed["title"] = {"specification": shown, "superset": name}
+        defaults = {"time_grain": "P1D", "bins": 12, "sort": "desc"}
+        for key, value in adopted.options.model_dump().items():
+            before = getattr(component.options, key)
+            if (before or defaults.get(key)) != (value or defaults.get(key)):
+                changed[key] = {"specification": before, "superset": value}
+        # a chart nobody touched keeps its title as the specification wrote it
+        if not changed:
+            adopted.title = component.title
+        return {"component": adopted, "changed": changed, "refused": []}
 
     # ── the same component, as a plain query ────────────────────────────────────────────────────────────────
     def query_context(self, component: ComponentSpec, dataset: DatasetDef, metric: MetricDef,

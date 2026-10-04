@@ -4,6 +4,8 @@
 #   bash ai-bi.sh              start the kit and the engine (first use: writes the engine's secrets into .env)
 #   bash ai-bi.sh demo         the brief's request, end to end, as dev.user
 #   bash ai-bi.sh request "Create a … dashboard using the … template. …"      (generate is the same command)
+#   bash ai-bi.sh validate <project>                       what was edited in Superset since: taken, refused, set back
+#   bash ai-bi.sh commit <project> ["what changed"]        take it: a new version, validated, awaiting review
 #   bash ai-bi.sh approve <project> UAT                    as lead.reviewer
 #   bash ai-bi.sh approve <project> PROD "what was checked"   as release.manager — a second person, on purpose
 #   bash ai-bi.sh audit [project]                          the audit trail, and whether its chain is intact
@@ -49,6 +51,8 @@ case "${1:-}" in
     echo "the two dashboards then show an engine that knows no project."; exit 0 ;;
   demo)     shift; cli demo "$@"; exit $? ;;
   request|generate) shift; cli generate "$@"; exit $? ;;
+  validate) cli validate "${2:?usage: ai-bi.sh validate <project>}"; exit $? ;;
+  commit)   cli commit "${2:?usage: ai-bi.sh commit <project> [what was changed, in a sentence]}" --comment "${3:-}"; exit $? ;;
   approve)
     project="${2:?usage: ai-bi.sh approve <project> UAT|PROD [comment]}"; target="${3:?UAT or PROD}"
     if [ "$target" = "PROD" ]; then
@@ -74,6 +78,7 @@ case "${1:-}" in
     echo "  SharpSight ▸ Data models       dbt's own documentation and lineage                 $bi/sharpsight/dbt-docs/"
     echo "A person sees the entries they may open (registry/security/rbac.yaml); an administrator sees all six."
     echo "Asking and approving are here:  bash ai-bi.sh request \"…\"   ·   bash ai-bi.sh approve <project> UAT|PROD"
+    echo "A chart is edited in Superset's own Explore; then:  bash ai-bi.sh validate <project>   ·   bash ai-bi.sh commit <project>"
     exit 0 ;;
   person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
   check-adapter)

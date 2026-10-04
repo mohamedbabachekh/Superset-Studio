@@ -35,7 +35,7 @@ from .git_adapter import GitAdapter, GitError
 from .lifecycle import Lifecycle, LifecycleError
 from .llm import get_parser
 from .people import People
-from .models import RunRecord
+from .models import HELD, ComponentSpec, DashboardSpec, RunRecord
 from .pipeline import Pipeline
 from .planner import new_steps
 from .policy_engine import Identity, PolicyEngine, PolicyError
@@ -316,6 +316,89 @@ def list_runs(project_id: Optional[str] = None, identity: Identity = Depends(rea
              "user": r.user, "version": r.version, "started_at": r.started_at, "ended_at": r.ended_at,
              "error": r.error}
             for r in service.store.list_runs(project_id)]
+
+
+# ── what a person edited in Superset: validated, and committed as a version ────────────────────────────────
+# Superset is where a chart is edited — its own Explore, not a screen of ours. What a person changed there is
+# read back in the specification's words (ChartAgent.read_back). `validate` says what would be taken, what
+# cannot be, and what a specification has no place for; `commit` takes it and sends the project down the same
+# road as a generated one — validation, the BI engine, visual QA, a version, a git commit, a package, review.
+def _edited(project: dict[str, Any]) -> dict[str, Any]:
+    project_id = project["project_id"]
+    if not project.get("spec") or not (project.get("engine") or {}).get("dashboard"):
+        raise LifecycleError(f"{project_id} has no dashboard in Superset to read")
+    latest = service.store.latest_version(project_id)
+    charts = service.tools.superset_changes(project)
+    takeable = [c for c in charts if c["changed"] and not c["refused"]]
+    refused = [c for c in charts if c["refused"]]
+    set_back = [c for c in charts if c["not_carried"]]
+    drift = service.lifecycle.drift(latest) if latest else None
+    why_not = None
+    if latest and latest.status in HELD:
+        why_not = (f"{project_id} v{latest.version} is {latest.status}: this kit has one BI engine, so a commit would "
+                   "rewrite the promoted dashboard in place")
+    elif refused:
+        why_not = "Superset holds what cannot be a governed chart — " + "; ".join(
+            f"{c['title']} ({c['slot']}): {', '.join(c['refused'])}" for c in refused)
+    elif not takeable:
+        why_not = ("no chart was changed in Superset in a way a specification carries" + (
+            f"; the dashboard still differs from version {latest.version} ({drift}) — a layout, a filter or a setting "
+            "a specification has no place for: restore the version to put it back" if drift else
+            f": Superset shows version {latest.version} as validated" if latest else ""))
+    return {"project_id": project_id, "version": latest.version if latest else None,
+            "gate": latest.status if latest else (project.get("attempt") or {}).get("status"),
+            "dashboard": project["engine"]["dashboard"].get("url"),
+            "same_as_validated": drift is None if latest else None, "difference": drift,
+            "charts": [{k: c[k] for k in ("slot", "chart_id", "title", "changed", "refused", "not_carried", "in_step")}
+                       for c in charts],
+            "would_take": [c["slot"] for c in takeable], "would_set_back": [c["slot"] for c in set_back],
+            "can_commit": why_not is None, "why_not": why_not, "_adopted": {c["slot"]: c["adopted"] for c in takeable}}
+
+
+@app.get("/projects/{project_id}/changes")
+def project_changes(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    found = _edited(_project(project_id, identity))
+    found.pop("_adopted")
+    return found
+
+
+class Commit(BaseModel):
+    comment: str = Field(default="", max_length=500)
+
+
+@app.post("/projects/{project_id}/commit")
+def project_commit(project_id: str, body: Commit, response: Response, identity: Identity = Depends(caller)) -> Any:
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    found = _edited(project)
+    if not found["can_commit"]:
+        raise LifecycleError("nothing was committed: " + found["why_not"])
+    spec = DashboardSpec(**project["spec"])
+    spec.components = [ComponentSpec(**found["_adopted"][c.slot]) if c.slot in found["_adopted"] else c
+                       for c in spec.components]
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
+    taken = {c["slot"]: c["changed"] for c in found["charts"] if c["slot"] in found["would_take"]}
+    run = RunRecord(id=uuid.uuid4().hex[:12], request_id=str(uuid.uuid4()), user=identity.user, project_id=project_id,
+                    prompt=(f"Commit of what was edited in Superset for {project_id} ({', '.join(sorted(taken))})"
+                            + (f": {body.comment}" if body.comment else "")),
+                    ai_model=service.parser.name, steps=new_steps())
+    service.store.save_run(run)
+    service.audit.record(action="commit:edited_in_superset", user=identity.user, request_id=run.request_id,
+                         actor="human", project_id=project_id, metrics=spec.metrics(),
+                         detail={"taken": taken, "comment": body.comment, "from_version": found["version"],
+                                 "set_back": {c["slot"]: c["not_carried"] for c in found["charts"] if c["not_carried"]}})
+
+    def work() -> None:
+        try:
+            service.pipeline.execute(run, identity, edited=(project_id, spec))
+        finally:
+            service.busy.release()
+
+    threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
+    response.status_code = 202
+    return {"run_id": run.id, "request_id": run.request_id, "status": "running", "taken": sorted(taken),
+            "set_back": found["would_set_back"]}
 
 
 # ── projects and versions ───────────────────────────────────────────────────────────────────────────────────

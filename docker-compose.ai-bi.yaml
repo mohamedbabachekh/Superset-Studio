@@ -135,6 +135,8 @@ services:
       - ./registry:/app/registry:ro
       - ./dbt:/app/dbt:ro
       - aibi-dbt-prod:/var/lib/dbt-prod:ro
+      # read by the engine's own tests only: the rule of who sees what in Superset is stated there too
+      - ./superset-addon:/app/superset-addon:ro
       # its own state: the two git repositories, the AI's dbt workspaces, the audit log, the packages
       - aibi-state:/var/lib/ai-bi
       # a .ssbi package lands beside the dashboards you export by hand

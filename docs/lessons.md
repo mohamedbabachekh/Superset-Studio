@@ -462,3 +462,15 @@ which Superset's own role sync gives to every standard role. Every signed-in acc
 SQL, including one the engine refuses a model's schema. → the route asks the rule itself (a role granted a
 dataset), and the entry is shown by that same rule: one rule, read from rbac.yaml, used twice. Found by a
 second reader of the commit, an hour after it was made.
+
+**The reading of an edited chart was deleted with the screen that called it.** When the Studio went, so did
+`read_back` — its only caller was the Studio's « take into the specification » button. It never needed a
+page: it compares a Superset chart with a specification. A day later it was the heart of « Superset is where a
+person edits »: restored from history, behind two commands. → when a screen is removed, ask of each thing
+behind it whether it served the screen or the person; the first goes, the second gets another way in.
+
+**Two statements of one rule need a test that holds them equal.** Who sees which entry of the SharpSight menu
+is said in Superset's process (the add-on) and who is granted the dashboard is said in the engine's: two
+files, two containers. Nothing failed — and nothing would have, the day one was edited alone: an entry that
+opens nothing, or a dashboard nobody is shown. → the engine's tests load the add-on's rule from its file and
+compare, dashboard by dashboard. Asked for by a second reader.

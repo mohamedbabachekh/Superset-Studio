@@ -51,6 +51,12 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
 
   `ai-bi.sh where` says where to look; `ai-bi.sh request` is `generate` under the word the menu uses. The kit's
   Superset image and configuration are not edited: a configuration layer and three mounts, in the overlay.
+- **A chart is edited in Superset, and the edit becomes a version.** `ai-bi.sh validate <project>` reads what
+  a person changed in Superset's own Explore back in the specification's words — what changed (metric,
+  dimension, kind, top N, time grain, order, title), what cannot be a governed chart and why (an ad-hoc metric,
+  an unapproved visualization), and what a specification has no place for. `ai-bi.sh commit <project>` takes it:
+  the same validation, visual QA, version, git commit, package and review as a generated dashboard. Until then
+  a reviewer is refused, as before.
 - **Sections stay.** A template groups its rows into sections, each announced by a header on the Superset
   dashboard, with filters of its own; a section can be hidden.
 - **What Superset 6.1.0's extension system can carry was read from the image** before anything was built on

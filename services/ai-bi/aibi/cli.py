@@ -92,11 +92,49 @@ def follow(run_id: str, user: str) -> dict[str, Any]:
         time.sleep(2)
 
 
+def validate(project_id: str, user: str) -> dict[str, Any]:
+    """What Superset holds now against the project's specification — said chart by chart."""
+    found = call("GET", f"/projects/{project_id}/changes", user)
+    same = found["same_as_validated"]
+    print(f"{project_id} {found['version'] or '(no version)'} — {found['gate']}   {found['dashboard']}")
+    print("  Superset shows " + ("the version as it was validated" if same else
+                                 "something other than the validated version" if same is False else "a dashboard never validated"))
+    for chart in found["charts"]:
+        if chart["in_step"]:
+            continue
+        print(f"  {chart['title']}  ({chart['slot']})")
+        for field, change in chart["changed"].items():
+            print(f"      {field}: {change['specification']} → {change['superset']}")
+        for reason in chart["refused"]:
+            print(f"      ✗ cannot be taken — {reason}")
+        if chart["not_carried"]:
+            print(f"      · a specification has no place for: {', '.join(chart['not_carried'])}  (a commit sets it back)")
+    untouched = sum(1 for chart in found["charts"] if chart["in_step"])
+    print(f"  {untouched} of {len(found['charts'])} charts are as specified")
+    print("  a commit would take: " + (", ".join(found["would_take"]) or "nothing")
+          if found["can_commit"] else f"  cannot be committed: {found['why_not']}")
+    return found
+
+
+def commit(project_id: str, comment: str, user: str) -> int:
+    found = validate(project_id, user)
+    if not found["can_commit"]:
+        return 1
+    started = call("POST", f"/projects/{project_id}/commit", user, json={"comment": comment})
+    print(f"\ncommit, as {user}: taking {', '.join(started['taken'])}"
+          + (f"; setting back {', '.join(started['set_back'])}" if started["set_back"] else "")
+          + f"\nrun {started['run_id']} · request {started['request_id']}\n")
+    return report(follow(started["run_id"], user), user)
+
+
 def generate(prompt: str, user: str) -> int:
     print(f"request, as {user}:\n  " + prompt.replace("\n", "\n  ") + "\n")
     started = call("POST", "/projects/generate", user, json={"prompt": prompt})
     print(f"run {started['run_id']} · request {started['request_id']}\n")
-    run = follow(started["run_id"], user)
+    return report(follow(started["run_id"], user), user)
+
+
+def report(run: dict[str, Any], user: str) -> int:
     print()
     if run["status"] != "succeeded":
         print(f"the run FAILED, and left the project at {run.get('quality_gate')}: {run['error']}")
@@ -120,19 +158,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="aibi", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health", "people",
-                 "person", "compatibility"):
+                 "person", "compatibility", "validate", "commit"):
         command = sub.add_parser(name)
         command.add_argument("--user", default="dev.user")
         if name == "generate":
             command.add_argument("prompt")
         if name == "run":
             command.add_argument("run_id")
-        if name in ("project", "approve", "reject", "discard"):
+        if name in ("project", "approve", "reject", "discard", "validate", "commit"):
             command.add_argument("project_id")
         if name == "approve":
             command.add_argument("target", choices=["UAT", "PROD"])
             command.add_argument("--confirm", action="store_true")
-        if name in ("approve", "reject"):
+        if name in ("approve", "reject", "commit"):
             command.add_argument("--comment", default="")
         if name == "person":
             command.add_argument("username")
@@ -148,6 +186,10 @@ def main() -> int:
         return generate(DEMO, args.user)
     elif args.command == "generate":
         return generate(args.prompt, args.user)
+    elif args.command == "validate":
+        validate(args.project_id, args.user)
+    elif args.command == "commit":
+        return commit(args.project_id, args.comment, args.user)
     elif args.command == "run":
         print(json.dumps(follow(args.run_id, args.user), indent=2, ensure_ascii=False))
     elif args.command == "project":
