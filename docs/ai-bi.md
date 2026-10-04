@@ -11,8 +11,9 @@ here yet is listed at the end, and nothing below claims otherwise.
 
 **Superset is the interface** (chapter 3). The engine has no page of its own: what it produces is a Superset
 dashboard, and what it knows — the gate each project stands at, the checks of every validation, the audit
-trail, dbt's documentation — is shown in Superset too, through a SharpSight menu in Superset's own top bar,
-tags and badges in Superset's own lists, and two ordinary Superset dashboards. A dashboard is asked for and
+trail, data quality, what a change would touch, releases, dbt's documentation — is shown in Superset too,
+through a SharpSight menu in Superset's own top bar, tags and badges in Superset's own lists, and five ordinary
+Superset dashboards. A dashboard is asked for and
 approved on the command line.
 
 ---
@@ -57,7 +58,7 @@ bash ai-bi.sh check-adapter <project>    # every road of the Superset adapter, d
 bash ai-bi.sh person east.analyst        # a Superset account for a person of rbac.yaml; its password is shown once
 bash ai-bi.sh people                     # every Superset account given the SharpSight roles rbac.yaml says, no others
 bash ai-bi.sh compatibility              # the compatibility matrix, beside the versions actually running
-bash ai-bi.sh where                      # where to look in Superset: the menu, the two dashboards, dbt's documentation
+bash ai-bi.sh where                      # where to look in Superset: the menu's six entries, and who sees which
 ```
 
 | | |
@@ -143,10 +144,14 @@ shown there, by Superset's own means.
 
 | In Superset | What a person sees | How it gets there |
 |---|---|---|
-| **Dashboards** (Superset's own list) | each project's dashboard, with the gate it stands at as a tag — `gate:READY_FOR_REVIEW`, `gate:UAT`, `gate:PROD` — and Superset's « certified » badge once a person approved it for PROD | the REST API: a tag, and the certification a promotion sets |
-| **Datasets**, **Explore** | governed datasets and metrics certified, with their owner; a generated dataset carries a warning instead | the REST API, when a dataset is registered (chapter 4) |
+| **Dashboards** (Superset's own list) | each project's dashboard, tagged with the environment and the gate it stands in and with its project — `env:UAT`, `gate:UAT`, `project:cem-qoe` — and Superset's « certified » badge once a person approved it for PROD | the REST API: tags, and the certification a promotion sets |
+| **Charts** (Superset's own list) | a project's charts, tagged with their project and the domain of their data, and certified with their dashboard at PROD | the same |
+| **Datasets**, **Explore** | governed datasets and metrics certified, with their owner; a generated dataset carries a warning instead. Tagged with their domain, and `sharpsight:certified` or `sharpsight:generated` | the REST API, when a dataset is registered (chapter 4) |
 | **SharpSight ▸ BI Factory** | where every project stands: counts by gate; the projects with their version, gate, checks and package; the checks of each latest version by category, and those that did not pass; the way through the gates; what was asked | a Superset dashboard over the engine's records |
-| **SharpSight ▸ Audit trail** | every action, by whom, how it ended; refusals and errors counted; actions per day; whether the chain was intact when it was published | a Superset dashboard over the engine's records |
+| **SharpSight ▸ Data Quality** | the governed datasets — owner, domain, certification, freshness target, how many dashboards use each; the dbt models behind them, what each is built from, every dbt test and how it ended; the data checks of each project's latest validation | the same |
+| **SharpSight ▸ Impact Analysis** | what a change would touch: dashboards and charts per dataset and per metric; every use of each — dataset, model, metric, dimension, chart, dashboard, gate — to search; dbt's lineage upstream | the same |
+| **SharpSight ▸ Releases** | every approval and rejection, by whom, with its comment; the package and commit of each version and the gate it stands at; the way through the release gates | the same |
+| **SharpSight ▸ Audit trail** | every action, by whom, how it ended; refusals and errors counted; actions per day; whether the chain was intact when it was published | the same |
 | **SharpSight ▸ Data models (dbt)** | dbt's own documentation site — models, columns, tests, the lineage graph — behind Superset's sign-in | one route added to Superset, serving the file `dbt docs generate` writes |
 
 `bash ai-bi.sh where` prints the addresses.
@@ -161,21 +166,27 @@ Two files, mounted into the kit's Superset by the engine's compose overlay. The 
 extends one hook, and `SUPERSET_CONFIG_PATH` points at it. Without the overlay Superset starts exactly as the
 kit ships it.
 
-- **The menu** is three `appbuilder.add_link` calls — what Superset does for its own entries — under a
-  « SharpSight » category, with their permissions (« menu access on BI Factory », …) granted to the
-  administrator role and to Superset's standard roles. Seeing an entry opens nothing: each target has its own
-  audience (below).
-- **dbt's documentation** is served at `/sharpsight/dbt-docs/` to a signed-in account that holds the menu
-  entry; anyone else is sent to Superset's sign-in. The `dbt-runner` writes the three files of the site
-  (`index.html`, `manifest.json`, `catalog.json`) into a volume Superset mounts read-only.
+- **The menu** is six `appbuilder.add_link` calls — what Superset does for its own entries — under a
+  « SharpSight » category.
+- **A person sees the entries they may open, and no others.** The rule is SharpSight's: `rbac.yaml`, mounted
+  read-only, read once at start. The four dashboards of the factory are for the roles that hold
+  `bi.generate`, `bi.approve_uat` or `bi.approve_prod`; the audit trail for those that hold `audit.read`;
+  dbt's documentation for a role granted at least one dataset, or one of the above. A role of `rbac.yaml` is the
+  Superset role `sharpsight_<role>`; an administrator of Superset sees everything; someone who may open nothing
+  sees no SharpSight menu at all.
+- **dbt's documentation** is served at `/sharpsight/dbt-docs/`, and the route checks that same rule itself —
+  hiding an entry is not what protects it. An account with no dataset is refused (403), as the engine refuses it
+  a model's schema; an anonymous request is sent to Superset's sign-in. The `dbt-runner` writes the three files
+  of the site (`index.html`, `manifest.json`, `catalog.json`) into a volume Superset mounts read-only.
 
 ### The engine's records, where Superset can draw them — `aibi/superset_view.py`
 
 The records live in the engine's volume: a SQLite file, a JSON-lines audit trail, git. They are **copied**, whole
 and in one transaction, into the schema `bi_factory` of the warehouse — `projects`, `gate_history`, `checks`,
-`requests`, `audit` (the newest 5 000 records), `published` — and two dashboards are made over them through the
-REST API. Nothing reads the copy back: drop the schema, delete a dashboard, take a tag off, and the next refresh
-puts it back.
+`requests`, `audit` (the newest 5 000 records), `datasets`, `metrics`, `dbt_models`, `dbt_tests`, `usage`,
+`deployments`, `published` — and five dashboards are made over them through the REST API. The registries and
+dbt's artifacts are rows there too: that is what Data Quality and Impact Analysis are drawn from. Nothing reads
+the copy back: drop the schema, delete a dashboard, take a tag off, and the next refresh puts it back.
 
 It is refreshed when something happens: every action leaves an audit record, and the trail tells the view
 (nothing is polled; a burst of records is one refresh). `GET /health` says when it was last done and how many
@@ -189,16 +200,23 @@ not there yet.
 |---|---|
 | the database | `bi_factory` is read by a role of its own, `bi_records_reader`. The role every BI chart reads through, `bi_reader`, is refused the schema |
 | the connection | a second Superset connection, « SharpSight BI records (read-only) », **closed to SQL Lab** |
-| the dashboards | granted — Superset's dashboard roles — to the BI-engine roles of those `rbac.yaml` gives the matching capability: *BI Factory* to those who generate or approve (`bi.generate`, `bi.approve_uat`, `bi.approve_prod`), *Audit trail* to those who hold `audit.read`. `ai-bi.sh people` gives a person's account those roles |
-| the badge | the two dashboards are **not certified**: in Superset's list that badge means « a person approved this for PROD ». They carry the tag `sharpsight:system` |
-| the workspace | every row carries its `tenant`. This kit has one workspace, so no row-level rule is set on these tables — with several, one rule per workspace is what is missing |
+| the dashboards | granted — Superset's dashboard roles — to the BI-engine roles of those `rbac.yaml` gives the matching capability: *BI Factory*, *Data Quality*, *Impact Analysis* and *Releases* to those who generate or approve (`bi.generate`, `bi.approve_uat`, `bi.approve_prod`), *Audit trail* to those who hold `audit.read`. `ai-bi.sh people` gives a person's account those roles |
+| the badge | these dashboards are **not certified**: in Superset's list that badge means « a person approved this for PROD ». They carry the tag `sharpsight:system` |
+| the workspace | the rows of a project carry its `tenant`. This kit has one workspace, so no row-level rule is set on these tables — with several, one rule per workspace is what is missing |
 
-**The gate, as a tag.** One `gate:<GATE>` tag per project dashboard, replaced when the gate moves; a tag a person
-added is left alone. A tag is not content: an export carries a dashboard's tags (measured on 6.1), so `tags` is
-among the keys left out of the fingerprint a dashboard is validated under — otherwise showing a gate would look
-like a change made after validation, and the next approval would be refused.
+**Tags, in Superset's own lists.** On a project's dashboard, three: `env:<DEV|UAT|PROD>`, `gate:<GATE>`,
+`project:<id>` — kept exact as the gate moves, and a tag a person added is left alone. Three, and those, on
+purpose: the list shows the first two tags of a dashboard in the order of the alphabet and counts the rest, and
+with a domain tag as well the gate was the one hidden. The domain is said where it describes something: a
+project's charts are tagged `project:<id>` and `domain:<domain>`, its datasets `domain:<domain>` and
+`sharpsight:certified` or `sharpsight:generated`. A tag is not content: an export carries them (measured on
+6.1), so `tags` is among the keys left out of the fingerprint a dashboard is validated under — otherwise
+showing a gate would look like a change made after validation, and the next approval would be refused.
 
-These two dashboards are plain Superset charts over a table — a count, a table, bars over time — written as
+**Certified, at PROD.** A promotion to PROD certifies the dashboard and, with it, its charts: the same badge in
+the chart list, set by the same person. Withdrawn together if the promotion is.
+
+These five dashboards are plain Superset charts over a table — a count, a table, bars over time — written as
 form data, without a template or a specification. They show records; they are not BI projects, and nothing of a
 project's own is made this way.
 
@@ -257,6 +275,7 @@ are what would notice.
 | the hook | `FLASK_APP_MUTATOR` | being called with the application, before Superset adds its own views |
 | menu entries and their permissions | `appbuilder.add_link`, `sm.add_permissions_menu`, `sm.add_permission_role` | Flask-AppBuilder's public API; Superset building its AppBuilder with `update_perms=False` is why the permissions are created by hand |
 | the entries placed last | `appbuilder.menu.menu`, reordered at the first request | Flask-AppBuilder keeping its menu as a list |
+| who sees which entry | `cond=` on each link and on the category; `current_user.roles` | Flask-AppBuilder asking `cond` when it lists the menu; `registry/security/rbac.yaml` mounted read-only, and a role of it being the Superset role `sharpsight_<role>` |
 | the route for dbt's documentation | a Flask blueprint, `/sharpsight/dbt-docs/` | Flask, and `flask_login.current_user` |
 | tags on a dashboard | `POST`/`DELETE /api/v1/tag/3/<id>/` | object type 3 being a dashboard (`superset.tags.models.ObjectType`); the `TAGGING_SYSTEM` flag, which the kit sets |
 | a dashboard's audience | `roles` on `PUT /api/v1/dashboard/<id>` | the `DASHBOARD_RBAC` flag, which the kit sets |
@@ -563,9 +582,9 @@ platform that was not touched:
 | Discard | a DEV project taken away with its generated dataset; one standing in UAT refused; a reviewer refused |
 | A person, not a probe | `east.analyst`, created by the command, signs in: the PROD dashboard and nothing else; three regions in every chart, on the map, and in the region filter's own choices; SQL Lab refused. A role given to `admin` by hand in Superset was taken back by `people` |
 | The brief's specification | section 23's example given to `save_dashboard_spec` as written — `version: "1.0"`, `template: executive-telecom-v1`, no dataset on any component: read, its four datasets found in the registry, and one finding, the map by a column called `site` that this registry does not have. Without that component it is valid |
-| **In Superset**, in a real browser | As an administrator: the SharpSight menu in Superset's top bar, with its three entries; *BI Factory* draws its ten charts, none in error, and the counts it shows are the engine's own answer; *Audit trail* draws its six; Superset's own dashboard list shows each project's gate as a tag, and « certified » on the PROD dashboard only; dbt's documentation opens when signed in (« dbt Docs », with the project's tree), and an anonymous request is sent to the sign-in. Then as four kinds of people, with accounts made for the question and switched off after it: a developer opens *BI Factory* and is refused *Audit trail*; an auditor the reverse; an analyst, and an account with no SharpSight role, neither. The records' connection is closed to SQL Lab. Asked directly, the database refuses `bi_reader` the schema, and lets `bi_records_reader` read it, read nothing governed, and write nothing. The engine's own address answers 404 for `/studio/`, `/builder/…` and `/dbt-docs/`. No request left the machine: Superset's telemetry pixel is attempted and blocked by the kit's own header |
-| What reading the output, the pictures and a second reader caught | a tag changed the fingerprint a dashboard is validated under — every tagged dashboard would have been refused at its next gate as « changed after validation »; menu entries added by the hook had no permission, so nobody saw them. And, found by an audit of the branch from another session rather than by the tests: the copy of the records could be read through the connection every chart uses, SQL Lab included, while the auditors `rbac.yaml` names could not open the trail's dashboard; the two system dashboards wore the badge that means « approved for PROD »; the menu led to dashboards that were not made yet for some minutes after a start. All fixed |
-| The engine's rules | 148 tests, no database needed: `bash ai-bi.sh test` |
+| **In Superset**, in a real browser | As an administrator: the SharpSight menu in Superset's top bar, with its six entries; the five dashboards over the records draw every chart — ten, eight, four, six and six — with none in error, and the counts *BI Factory* shows are the engine's own answer; Superset's own dashboard list shows a project's environment and gate as tags, and « certified » on the PROD dashboard only; its seven charts carry their project and domain, and are certified with it; dbt's documentation opens when signed in (« dbt Docs », with the project's tree), and an anonymous request is sent to the sign-in. Then as five kinds of people, with an account made for the question and switched off after it: with no SharpSight role, or with a role granted no dataset, no SharpSight menu, every dashboard refused, and the documentation refused (403); an analyst sees the documentation's entry and nothing else; a developer sees the four dashboards of the factory and the documentation, and is refused the audit trail; an auditor sees the trail and the documentation, and is refused the factory's. The records' connection is closed to SQL Lab. Asked directly, the database refuses `bi_reader` the schema, and lets `bi_records_reader` read it, read nothing governed, and write nothing. The engine's own address answers 404 for `/studio/`, `/builder/…` and `/dbt-docs/`. No request left the machine: Superset's telemetry pixel is attempted and blocked by the kit's own header |
+| What reading the output, the pictures and a second reader caught | a tag changed the fingerprint a dashboard is validated under — every tagged dashboard would have been refused at its next gate as « changed after validation »; menu entries added by the hook had no permission, so nobody saw them; with four tags on a dashboard, Superset's list showed two and hid the gate. And, found by an audit of the branch from another session rather than by the tests: the copy of the records could be read through the connection every chart uses, SQL Lab included, while the auditors `rbac.yaml` names could not open the trail's dashboard; the two system dashboards wore the badge that means « approved for PROD »; the menu led to dashboards that were not made yet for some minutes after a start; and dbt's documentation was open to every signed-in account, one with no dataset included. All fixed |
+| The engine's rules | 149 tests, no database needed: `bash ai-bi.sh test` |
 
 ## 9 · What is not here yet
 
@@ -573,9 +592,8 @@ platform that was not touched:
 |---|---|
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
 | **The Superset extension package** (`sharpsight-bi.supx`) | not built yet: it is the second step of the decision in chapter 3. What it can carry on 6.1.0 is a backend API, commands, and panels in SQL Lab |
-| **A context bar, an outline, a governance drawer, an AI chat on dashboards and in Explore** | Superset 6.1.0 has no extension point there, and a fork was not chosen (chapter 3). What stands in their place is Superset's own: tags, badges, the SharpSight menu, two dashboards |
+| **A context bar, an outline, a governance drawer, an AI chat on dashboards and in Explore** | Superset 6.1.0 has no extension point there, and a fork was not chosen (chapter 3). What stands in their place is Superset's own: tags, badges, the SharpSight menu, five dashboards |
 | **Validating and committing what a person builds in Superset by hand** | not yet. A dashboard is generated from a request; a chart edited in Superset after validation is seen as a change — the fingerprint differs — and the next approval is refused until the version is restored or the dashboard generated again. Reading a hand edit into a new version is the next piece of the native step |
-| **Tags for project, environment and domain; Data Quality, Impact Analysis and Releases under the SharpSight menu; certified charts** | not yet: the rest of the native step. Today the gate is the only tag, and certification is on datasets, metrics and the PROD dashboard |
 | **The records' dashboards, per workspace** | this kit has one workspace, so no row-level rule is set on `bi_factory`; every row carries its tenant for the day there are several |
 | **SharpSight's own colours leading the theme** | decided on 2026-10-04, not done: the theme still leads with the client's magenta, and the two system dashboards have English titles under a French menu |
 | **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file, and people reach Superset through a command an administrator runs |

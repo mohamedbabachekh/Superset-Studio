@@ -450,3 +450,15 @@ brief listed panels on dashboards, a chat, a semantic layer. The image (`apache-
 contribution points in SQL Lab only; the chat is in the unreleased documentation; the semantic-layer module
 the 6.1.0 documentation lists is not in the package. → listed side by side in docs/ai-bi.md before a line of an
 extension is written.
+
+**Superset's dashboard list shows the first two tags of a dashboard, by the alphabet, and counts the rest.**
+With four tags — domain, env, gate, project — the list read « domain:cem  env:PROD  +2… »: the gate, the one
+thing the tags were for, was the one hidden. Seen in the picture of the list, not in the API, which returned
+all four. → three tags on a dashboard, chosen so that the environment and the gate come first; the domain goes
+on the charts and the datasets, where it describes something.
+
+**Hiding a menu entry protects nothing.** dbt's documentation was gated by the permission to see its entry —
+which Superset's own role sync gives to every standard role. Every signed-in account could read every model's
+SQL, including one the engine refuses a model's schema. → the route asks the rule itself (a role granted a
+dataset), and the entry is shown by that same rule: one rule, read from rbac.yaml, used twice. Found by a
+second reader of the commit, an hour after it was made.

@@ -40,12 +40,17 @@ An optional overlay; the kit itself is unchanged and starts without it. See [doc
   was taken for a password), and a pie of four parts left one unnamed.
 - **Superset is the interface** (the brief's « Superset-native » revision). A BI Studio of our own was built —
   first with its own screens, then as a frame around Superset — and taken out again: the engine has no page.
-  What it knows is shown by Superset itself: a **SharpSight menu** in Superset's top bar; each project's **gate
-  as a tag** in Superset's own dashboard list, beside the certified badge a PROD approval sets; **BI Factory**
-  and **Audit trail**, two ordinary Superset dashboards over a copy of the engine's records, each granted to the
-  roles `rbac.yaml` gives the matching capability; and **dbt's own documentation**, behind Superset's sign-in.
+  What it knows is shown by Superset itself:
+  - a **SharpSight menu** in Superset's top bar, where a person sees the entries they may open and no others
+    (`rbac.yaml` decides): **BI Factory**, **Data Quality**, **Impact Analysis**, **Releases** and **Audit
+    trail** — five ordinary Superset dashboards over a copy of the engine's records, each granted to the roles
+    that hold the matching capability — and **dbt's own documentation**, behind Superset's sign-in;
+  - **tags in Superset's own lists**: a project's dashboard says its environment, its gate and its project;
+    its charts their project and domain; its datasets their domain and whether they are certified;
+  - the **certified badge**, set on a dashboard and its charts when a person approves them for PROD.
+
   `ai-bi.sh where` says where to look; `ai-bi.sh request` is `generate` under the word the menu uses. The kit's
-  Superset image and configuration are not edited: a configuration layer and two mounts, in the overlay.
+  Superset image and configuration are not edited: a configuration layer and three mounts, in the overlay.
 - **Sections stay.** A template groups its rows into sections, each announced by a header on the Superset
   dashboard, with filters of its own; a section can be hidden.
 - **What Superset 6.1.0's extension system can carry was read from the image** before anything was built on

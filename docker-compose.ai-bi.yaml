@@ -167,10 +167,13 @@ services:
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config_ai_bi.py
       SHARPSIGHT_DBT_DOCS_DIR: /app/sharpsight/dbt-docs
+      SHARPSIGHT_RBAC_FILE: /app/sharpsight/rbac.yaml
     volumes:
       - ./superset-addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
       - ./superset-addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
       - aibi-dbt-docs:/app/sharpsight/dbt-docs:ro
+      # who may see which entry of the SharpSight menu, and read dbt's documentation: the same file the engine reads
+      - ./registry/security/rbac.yaml:/app/sharpsight/rbac.yaml:ro
 
 volumes:
   aibi-state:

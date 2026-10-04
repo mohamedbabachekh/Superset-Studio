@@ -537,8 +537,11 @@ class Lifecycle:
                                               f"Package sha256 {record.package['sha256'][:16]}…"}
             project = self.store.get_project(project_id)
             charts = list(self.tools.live_charts(project["engine"]).values())
+            # its charts carry the same badge in Superset's own chart list: they were approved with it
             for chart in charts:
-                self.superset.update_chart(chart["id"], {"is_managed_externally": True})
+                self.superset.update_chart(chart["id"], {"is_managed_externally": True,
+                                                         "certified_by": marks["certified_by"],
+                                                         "certification_details": marks["certification_details"]})
             self.superset.update_dashboard(dashboard_id, marks)
             # Published, the dashboard's grants take effect — so THIS is the moment to ask the BI engine who it
             # lets in. If the answer is not SharpSight's, the dashboard is withdrawn and nothing is recorded.
@@ -547,7 +550,8 @@ class Lifecycle:
                 self.superset.update_dashboard(dashboard_id, {"published": False, "is_managed_externally": False,
                                                               "certified_by": "", "certification_details": ""})
                 for chart in charts:
-                    self.superset.update_chart(chart["id"], {"is_managed_externally": False})
+                    self.superset.update_chart(chart["id"], {"is_managed_externally": False, "certified_by": "",
+                                                             "certification_details": ""})
                 reason = ("the dashboard was published and withdrawn again: the BI engine does not enforce the "
                           "access SharpSight grants — " + "; ".join(asked["problems"]))
                 record.move("UAT", by="system", note=reason)

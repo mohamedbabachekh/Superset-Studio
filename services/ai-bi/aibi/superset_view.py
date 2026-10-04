@@ -45,7 +45,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 from .audit import AuditLog
-from .models import utcnow
+from .models import DashboardSpec, utcnow
 from .people import READS_THE_TRAIL, ROLE_PREFIX, WORKS_IN_THE_FACTORY
 from .registry import Registry
 from .store import Store
@@ -55,8 +55,9 @@ log = logging.getLogger("aibi.superset_view")
 
 SCHEMA = "bi_factory"
 GATE_TAG = "gate:"
+MANAGED_TAGS = (GATE_TAG, "project:", "env:", "domain:")      # on a project's dashboard: kept exact
 SYSTEM_TAG = "sharpsight:system"
-VIEW_VERSION = 2                 # raise it when a dashboard below changes: it is then made again
+VIEW_VERSION = 3                 # raise it when a dashboard below changes: it is then made again
 VERSION_TAG = f"sharpsight:view-v{VIEW_VERSION}"
 AUDIT_ROWS = 5000                # the newest records; the whole trail stays in the engine's volume
 
@@ -75,6 +76,23 @@ TABLES: dict[str, list[tuple[str, str]]] = {
     "audit": [("tenant", "text"), ("seq", "integer"), ("at", "timestamptz"), ("actor", "text"), ("by_user", "text"),
               ("action", "text"), ("project_id", "text"), ("outcome", "text"), ("metrics", "text"),
               ("datasets", "text"), ("git_commit", "text"), ("note", "text")],
+    "datasets": [("tenant", "text"), ("dataset_id", "text"), ("name", "text"), ("owner", "text"), ("domain", "text"),
+                 ("certified", "text"), ("kind", "text"), ("environment", "text"), ("generated_for", "text"),
+                 ("dbt_model", "text"), ("relation", "text"), ("version", "text"),
+                 ("freshness_sla_minutes", "integer"), ("tests", "integer"), ("tests_passed", "integer"),
+                 ("tests_not_passed", "integer"), ("used_by_dashboards", "integer")],
+    "metrics": [("metric_id", "text"), ("name", "text"), ("owner", "text"), ("certified", "text"),
+                ("classification", "text"), ("version", "text"), ("unit", "text"), ("used_by_dashboards", "integer")],
+    "dbt_models": [("model", "text"), ("layer", "text"), ("environment", "text"), ("materialized", "text"),
+                   ("relation", "text"), ("built_from", "text"), ("tests", "integer"), ("tests_passed", "integer"),
+                   ("tests_not_passed", "integer"), ("feeds_dataset", "text")],
+    "dbt_tests": [("model", "text"), ("environment", "text"), ("test", "text"), ("result", "text")],
+    "usage": [("tenant", "text"), ("project_id", "text"), ("dashboard", "text"), ("gate", "text"),
+              ("environment", "text"), ("slot", "text"), ("chart", "text"), ("chart_type", "text"),
+              ("metric_id", "text"), ("dataset_id", "text"), ("dimension", "text"), ("dbt_model", "text")],
+    "deployments": [("tenant", "text"), ("project_id", "text"), ("version", "text"), ("target", "text"),
+                    ("decision", "text"), ("decided_by", "text"), ("decided_at", "timestamptz"), ("comment", "text"),
+                    ("package", "text"), ("package_sha256", "text"), ("git_commit", "text")],
     "published": [("at", "timestamptz"), ("audit_chain", "text"), ("audit_records", "integer"),
                   ("projects", "integer")],
 }
@@ -143,6 +161,73 @@ DASHBOARDS: dict[str, dict[str, Any]] = {
                      "error"], newest="started_at"))],
         ],
     },
+    "sharpsight-data-quality": {
+        "title": "Data Quality",
+        "audience": WORKS_IN_THE_FACTORY,
+        "rows": [
+            "What the governed data is, and whether it passed its tests",
+            [("datasets", "datasets", "Governed datasets", 3, 18, _count("datasets")),
+             ("certified", "datasets", "Certified", 3, 18, _count("certified", "certified = 'yes'")),
+             ("tests-passed", "dbt_tests", "dbt tests passed", 3, 18, _count("passed", "result = 'pass'")),
+             ("tests-not-passed", "dbt_tests", "dbt tests not passed", 3, 18, _count("not passed", "result <> 'pass'"))],
+            [("list", "datasets", "Datasets: owner, domain, certification, tests", 12, 40,
+              _rows(["name", "dataset_id", "owner", "domain", "certified", "environment", "generated_for", "dbt_model",
+                     "tests", "tests_passed", "tests_not_passed", "freshness_sla_minutes", "used_by_dashboards",
+                     "version"]))],
+            "dbt: the models behind them",
+            [("models", "dbt_models", "Models, where each is built and what it is built from", 7, 44,
+              _rows(["model", "layer", "environment", "materialized", "built_from", "tests", "tests_passed",
+                     "tests_not_passed", "feeds_dataset"])),
+             ("tests", "dbt_tests", "Every dbt test, and how it ended", 5, 44,
+              _rows(["model", "test", "result", "environment"]))],
+            "The data checks of each project's latest validation",
+            [("data-checks", "checks", "Null rates, ranges, row counts, freshness", 12, 44,
+              _rows(["project_id", "version", "check_name", "result", "subject", "detail"], where="category = 'data'"))],
+        ],
+    },
+    "sharpsight-impact-analysis": {
+        "title": "Impact Analysis",
+        "audience": WORKS_IN_THE_FACTORY,
+        "rows": [
+            "What a change to a dataset or a metric would touch",
+            [("per-dataset", "usage", "Dashboards and charts per dataset", 6, 40,
+              {"viz_type": "table", "query_mode": "aggregate", "groupby": ["dataset_id", "dbt_model"],
+               "metrics": [{"expressionType": "SQL", "label": "dashboards", "sqlExpression": "COUNT(DISTINCT project_id)"},
+                           {"expressionType": "SQL", "label": "charts", "sqlExpression": "COUNT(*)"}],
+               "row_limit": 500, "include_search": True, "page_length": 25, "show_cell_bars": False}),
+             ("per-metric", "usage", "Dashboards and charts per metric", 6, 40,
+              {"viz_type": "table", "query_mode": "aggregate", "groupby": ["metric_id"],
+               "metrics": [{"expressionType": "SQL", "label": "dashboards", "sqlExpression": "COUNT(DISTINCT project_id)"},
+                           {"expressionType": "SQL", "label": "charts", "sqlExpression": "COUNT(*)"}],
+               "row_limit": 500, "include_search": True, "page_length": 25, "show_cell_bars": False})],
+            [("where-used", "usage", "Where each one is used — search a dataset, a metric or a model", 12, 56,
+              _rows(["dataset_id", "dbt_model", "metric_id", "dimension", "chart", "chart_type", "dashboard",
+                     "project_id", "gate", "environment"]))],
+            "Upstream: what each model is built from",
+            [("lineage", "dbt_models", "dbt lineage", 12, 40,
+              _rows(["model", "layer", "built_from", "feeds_dataset", "environment", "relation"]))],
+        ],
+    },
+    "sharpsight-releases": {
+        "title": "Releases",
+        "audience": WORKS_IN_THE_FACTORY,
+        "rows": [
+            "What was approved, by whom, and what shipped",
+            [("to-uat", "deployments", "Approved for UAT", 4, 18, _count("approved for UAT", "target = 'UAT' AND decision = 'approved'")),
+             ("to-prod", "deployments", "Approved for PROD", 4, 18, _count("approved for PROD", "target = 'PROD' AND decision = 'approved'")),
+             ("rejected", "deployments", "Rejected", 4, 18, _count("rejected", "decision = 'rejected'"))],
+            [("decisions", "deployments", "Every decision, newest first", 12, 44,
+              _rows(["decided_at", "project_id", "version", "target", "decision", "decided_by", "comment", "package",
+                     "package_sha256", "git_commit"], newest="decided_at"))],
+            "The package of each version, and where it stands",
+            [("packages", "projects", "Versions and their packages", 6, 44,
+              _rows(["project_id", "version", "gate", "environment", "package", "git_commit", "gate_since"],
+                    newest="gate_since")),
+             ("promotions", "gate_history", "Through the release gates", 6, 44,
+              _rows(["moved_at", "project_id", "version", "gate", "moved_by", "note"], newest="moved_at",
+                    where="gate IN ('APPROVED_FOR_UAT', 'UAT', 'UAT_FAILED', 'APPROVED_FOR_PROD', 'PROD')"))],
+        ],
+    },
     "sharpsight-audit-trail": {
         "title": "Audit trail",
         "audience": READS_THE_TRAIL,
@@ -181,6 +266,7 @@ class SupersetView:
         self._tables_ready = False
         self._dashboards_ready = False
         self._checks: dict[tuple[str, str, Optional[str]], list[dict[str, Any]]] = {}
+        self._tagged: set[tuple[str, int]] = set()      # charts and datasets already given their tags
         self.last: dict[str, Any] = {}
         self.error: Optional[str] = None
 
@@ -238,6 +324,63 @@ class SupersetView:
                                   record.get("action"), record.get("project_id"), record.get("outcome"),
                                   ", ".join(record.get("metrics") or []), ", ".join(record.get("datasets") or []),
                                   (record.get("git_commit") or "")[:12] or None, " ".join(note.split())[:300]))
+        # ── the registries and dbt, as rows: what Data Quality and Impact Analysis are drawn from ──────────
+        nodes = self.store.list_lineage()
+        node_of = {node["name"]: node for node in reversed(nodes)}            # production's, when it knows the model
+        used_dataset: dict[str, set[str]] = {}
+        used_metric: dict[str, set[str]] = {}
+        for body in self.store.list_projects():
+            project_id, latest = body["project_id"], self.store.latest_version(body["project_id"])
+            charts = (body.get("engine") or {}).get("charts", {})
+            try:
+                spec = DashboardSpec(**body["spec"]) if body.get("spec") else None
+            except ValueError:
+                spec = None                                                   # an older engine's: not read as usage
+            for component in spec.components if spec else []:
+                dataset = self.registry.datasets.get(component.dataset or "")
+                used_dataset.setdefault(component.dataset or "", set()).add(project_id)
+                used_metric.setdefault(component.metric, set()).add(project_id)
+                rows["usage"].append((
+                    body.get("tenant"), project_id, spec.dashboard.title,
+                    latest.status if latest else (body.get("attempt") or {}).get("status") or "DRAFT",
+                    latest.state if latest else "DEV", component.slot,
+                    (charts.get(component.slot) or {}).get("name") or component.title, component.type,
+                    component.metric, component.dataset, component.dimension,
+                    dataset.source_model if dataset else None))
+            for version in self.store.list_versions(project_id):
+                package = version.package or {}
+                rows["deployments"] += [(body.get("tenant"), project_id, version.version, a.target, a.decision, a.by,
+                                         a.at, a.comment, package.get("file"), (package.get("sha256") or "")[:16] or None,
+                                         (version.git_commit or "")[:12] or None) for a in version.approvals]
+
+        def tests_of(node: Optional[dict[str, Any]]) -> tuple[int, int, int]:
+            tests = (node or {}).get("tests", [])
+            passed = sum(1 for test in tests if test.get("status") == "pass")
+            return len(tests), passed, len(tests) - passed
+
+        for dataset in self.registry.datasets.values():
+            rows["datasets"].append((
+                dataset.tenant, dataset.id, dataset.name, dataset.owner, dataset.domain or None,
+                "yes" if dataset.certified else "no", dataset.kind, dataset.environment, dataset.project,
+                dataset.source_model, f"{dataset.db_schema}.{dataset.source_model}" if dataset.db_schema else None,
+                dataset.version, dataset.freshness_sla_minutes, *tests_of(node_of.get(dataset.source_model)),
+                len(used_dataset.get(dataset.id, ()))))
+        for metric in self.registry.metrics.values():
+            rows["metrics"].append((metric.id, metric.name, metric.owner, "yes" if metric.certified else "no",
+                                    metric.classification, metric.version, metric.unit or None,
+                                    len(used_metric.get(metric.id, ()))))
+        feeds = {dataset.source_model: dataset.id for dataset in self.registry.datasets.values()}
+        for node in nodes:
+            path = node.get("path") or ""
+            layer = ("generated" if "ai_generated" in node.get("tags", []) else
+                     "seed" if node.get("resource_type") == "seed" else
+                     next((part for part in ("staging", "intermediate", "marts") if part in path), "model"))
+            rows["dbt_models"].append((node["name"], layer, node.get("environment"), node.get("materialized"),
+                                       (node.get("relation") or "").replace('"', ""),
+                                       ", ".join(parent["name"] for parent in node.get("depends_on", [])) or None,
+                                       *tests_of(node), feeds.get(node["name"])))
+            rows["dbt_tests"] += [(node["name"], node.get("environment"), test.get("name"), test.get("status") or "not run")
+                                  for test in node.get("tests", [])]
         chain = self.audit.verify()
         rows["published"].append((utcnow(), "intact" if chain.get("ok") else f"BROKEN at record {chain.get('broken_at_seq')}",
                                   chain.get("records"), len(rows["projects"])))
@@ -355,25 +498,54 @@ class SupersetView:
         return dashboard_id
 
     # ── 3 · the gate, in Superset's own dashboard list ──────────────────────────────────────────────────────
-    def mark_gates(self) -> list[dict[str, Any]]:
+    def marks(self, body: dict[str, Any]) -> list[str]:
+        """What Superset's own dashboard list should say of a project's dashboard: the environment and the gate
+        it stands in, and its project. Three, and in that order of the alphabet, on purpose: the list shows the
+        first two tags of a dashboard and counts the rest (seen on 6.1) — with a domain tag as well, the gate
+        was the one hidden. The domain is said where it describes something: on the charts and the datasets."""
+        latest = self.store.latest_version(body["project_id"])
+        gate = latest.status if latest else (body.get("attempt") or {}).get("status") or "DRAFT"
+        return [GATE_TAG + gate, f"project:{body['project_id']}", f"env:{latest.state if latest else 'DEV'}"]
+
+    def domains(self, body: dict[str, Any]) -> list[str]:
+        datasets = (body.get("engine") or {}).get("datasets", {})
+        return sorted({self.registry.datasets[d].domain for d in datasets
+                       if d in self.registry.datasets and self.registry.datasets[d].domain})
+
+    def mark_projects(self) -> list[dict[str, Any]]:
+        """Tags, in Superset's own lists. On a dashboard they are kept EXACT — the gate moves, the environment
+        with it — and a tag a person added is left alone. On its charts and datasets they never change
+        (which project, which domain), so they are added once and not asked about again."""
         changed: list[dict[str, Any]] = []
         for body in self.store.list_projects():
-            dashboard_id = (body.get("engine") or {}).get("dashboard", {}).get("id")
+            engine = body.get("engine") or {}
+            dashboard_id = engine.get("dashboard", {}).get("id")
             if dashboard_id is None or self.superset.get_dashboard(dashboard_id) is None:
                 continue
-            latest = self.store.latest_version(body["project_id"])
-            gate = latest.status if latest else (body.get("attempt") or {}).get("status") or "DRAFT"
-            wanted = GATE_TAG + gate
-            ours = [tag for tag in self.superset.dashboard_tags(dashboard_id) if tag.startswith(GATE_TAG)]
-            if ours == [wanted]:
-                continue
-            for tag in ours:
-                if tag != wanted:
-                    self.superset.untag_dashboard(dashboard_id, tag)
-            if wanted not in ours:
-                self.superset.tag_dashboard(dashboard_id, [wanted])
-            changed.append({"project_id": body["project_id"], "dashboard": dashboard_id, "tag": wanted,
-                            "was": ours})
+            wanted = self.marks(body)
+            ours = [tag for tag in self.superset.dashboard_tags(dashboard_id) if tag.startswith(MANAGED_TAGS)]
+            if sorted(ours) != sorted(wanted):
+                for tag in ours:
+                    if tag not in wanted:
+                        self.superset.untag_dashboard(dashboard_id, tag)
+                missing = [tag for tag in wanted if tag not in ours]
+                if missing:
+                    self.superset.tag_dashboard(dashboard_id, missing)
+                changed.append({"project_id": body["project_id"], "dashboard": dashboard_id, "tag": wanted[0],
+                                "tags": wanted, "was": ours})
+            chart_tags = [f"project:{body['project_id']}", *(f"domain:{domain}" for domain in self.domains(body))]
+            for chart in engine.get("charts", {}).values():
+                if chart.get("id") is not None and ("chart", chart["id"]) not in self._tagged:
+                    self.superset.tag("chart", chart["id"], chart_tags)
+                    self._tagged.add(("chart", chart["id"]))
+            for dataset_id, engine_id in engine.get("datasets", {}).items():
+                dataset = self.registry.datasets.get(dataset_id)
+                if dataset is None or ("dataset", engine_id) in self._tagged:
+                    continue
+                self.superset.tag("dataset", engine_id, [tag for tag in (
+                    f"domain:{dataset.domain}" if dataset.domain else None,
+                    "sharpsight:certified" if dataset.certified else "sharpsight:generated") if tag])
+                self._tagged.add(("dataset", engine_id))
         return changed
 
     # ── keeping it current ──────────────────────────────────────────────────────────────────────────────────
@@ -384,13 +556,13 @@ class SupersetView:
             if self._dashboards_ready and any(self.superset.get_dashboard(slug) is None for slug in DASHBOARDS):
                 self._dashboards_ready = False
             made = [] if self._dashboards_ready else self.ensure_dashboards()
-            tagged = self.mark_gates()
+            tagged = self.mark_projects()
             for change in tagged:
                 self.audit.record(action="superset:gate_tag", user="system", actor="system", request_id="-",
                                   project_id=change["project_id"],
                                   superset_assets=[{"type": "dashboard", "id": change["dashboard"],
                                                     "action": "tagged", "tag": change["tag"]}],
-                                  detail={"note": f"{change['tag']} in Superset's dashboard list", "was": change["was"]})
+                                  detail={"note": ", ".join(change["tags"]) + " in Superset's dashboard list", "was": change["was"]})
             self.last = {"at": utcnow(), "rows": published, "dashboards_made": made, "gates_tagged": len(tagged)}
             self.error = None
             return self.last

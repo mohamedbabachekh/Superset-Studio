@@ -253,11 +253,17 @@ class SupersetAdapter:
         return [tag["name"] for tag in found.get("tags") or [] if tag.get("type") == 1]
 
     def tag_dashboard(self, dashboard_id: int, names: list[str]) -> None:
-        self._request("POST", f"/api/v1/tag/{self._DASHBOARD}/{dashboard_id}/", json={"properties": {"tags": names}})
+        self.tag("dashboard", dashboard_id, names)
 
     def untag_dashboard(self, dashboard_id: int, name: str) -> None:
         self._request("DELETE", f"/api/v1/tag/{self._DASHBOARD}/{dashboard_id}/{quote(name, safe='')}/",
                       expect=(200, 204, 404))
+
+    _TAGGED = {"chart": 2, "dashboard": 3, "dataset": 4}      # superset.tags.models.ObjectType
+
+    def tag(self, kind: str, object_id: int, names: list[str]) -> None:
+        """Add tags to a chart, a dashboard or a dataset. One already there is left as it is."""
+        self._request("POST", f"/api/v1/tag/{self._TAGGED[kind]}/{object_id}/", json={"properties": {"tags": names}})
 
     # ── access: roles, row-level rules, accounts ────────────────────────────────────────────────────────────
     def find_role(self, name: str) -> Optional[int]:

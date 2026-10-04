@@ -65,10 +65,14 @@ case "${1:-}" in
     bi_port="$(grep -E '^DEVKIT_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
     bi="http://${bind:-127.0.0.1}:${bi_port:-3002}"
     echo "Everything is in Superset:  $bi   (sign in as the kit's administrator)"
-    echo "  Dashboards            the list shows each project's gate as a tag (gate:UAT …), and « certified » at PROD"
-    echo "  SharpSight ▸ BI Factory      projects, gates, the checks of each validation   $bi/superset/dashboard/sharpsight-bi-factory/"
-    echo "  SharpSight ▸ Audit trail     every action, by whom, how it ended              $bi/superset/dashboard/sharpsight-audit-trail/"
-    echo "  SharpSight ▸ Data models     dbt's own documentation and lineage              $bi/sharpsight/dbt-docs/"
+    echo "  Dashboards, Charts    each project's are tagged (env:UAT, gate:UAT, project:… ), and « certified » at PROD"
+    echo "  SharpSight ▸ BI Factory        projects, gates, the checks of each validation      $bi/superset/dashboard/sharpsight-bi-factory/"
+    echo "  SharpSight ▸ Data Quality      governed datasets, dbt models and their tests       $bi/superset/dashboard/sharpsight-data-quality/"
+    echo "  SharpSight ▸ Impact Analysis   what a change to a dataset or a metric would touch  $bi/superset/dashboard/sharpsight-impact-analysis/"
+    echo "  SharpSight ▸ Releases          what was approved, by whom, and what shipped        $bi/superset/dashboard/sharpsight-releases/"
+    echo "  SharpSight ▸ Audit trail       every action, by whom, how it ended                 $bi/superset/dashboard/sharpsight-audit-trail/"
+    echo "  SharpSight ▸ Data models       dbt's own documentation and lineage                 $bi/sharpsight/dbt-docs/"
+    echo "A person sees the entries they may open (registry/security/rbac.yaml); an administrator sees all six."
     echo "Asking and approving are here:  bash ai-bi.sh request \"…\"   ·   bash ai-bi.sh approve <project> UAT|PROD"
     exit 0 ;;
   person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
