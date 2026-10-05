@@ -86,6 +86,22 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## 20261005
+
+- **Oracle connects.** Every Oracle connection failed with « cx_Oracle version 5.2 and above are supported »,
+  whatever the connection string: `devkit_drivers.py` registered python-oracledb under the name `cx_Oracle` but
+  kept the driver's own version number (2.5.1), which SQLAlchemy 1.4 reads as cx_Oracle's and refuses. It is
+  now stated as the 8.3 the dialect expects. Checked on the running kit: « test connection » to a port where
+  nothing listens answers `DPY-6005 … Connection refused` — the driver reaches the network. Not checked: a real
+  Oracle server, none being reachable.
+- **The kit's database may use four CPUs, not one** (`DEVKIT_DB_CPUS`). A dashboard tab sends its chart queries
+  together and a query over the mart's views is CPU work: Roaming Outbound's four KPI tables took 6–8 s each
+  on the page while the same query answers in 0.2 s alone. Measured through Superset, uncached, asked as the
+  page asks: 0.25 s each alone, the four together done in 0.75 s. A limit, not a reservation: no memory cost.
+- Checked on the rebuilt kit, as its admin: sign-in, French interface, the five engines offered, SQL Lab on
+  every connection, all 246 charts of the 10 dashboards (none failed, median 0.13 s), the engine and its seven
+  menu pages.
+
 ## 20261002
 
 - **The import sets the connection's URI again after importing.** `import-dashboards` matches a database by

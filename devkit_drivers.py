@@ -38,9 +38,14 @@ def install() -> list[str]:
         return done
 
     if "cx_Oracle" not in sys.modules:
-        # SQLAlchemy 1.4's dialect checks this attribute to decide which cx_Oracle behaviours it may use;
-        # python-oracledb does not define it, so it is stated here as the 8.3 the dialect expects.
-        oracledb.version = getattr(oracledb, "version", "8.3.0")
+        # SQLAlchemy 1.4's dialect reads this attribute as cx_Oracle's version and REFUSES anything under 5.2:
+        # « cx_Oracle version 5.2 and above are supported ». python-oracledb DOES define it — as its own
+        # version, 2.5.1 — so it must be OVERWRITTEN with the 8.3 the dialect expects, which is what
+        # python-oracledb's documentation prescribes for this alias. The first version of this line kept the
+        # driver's own value when it had one (`getattr(oracledb, "version", "8.3.0")`), so every Oracle
+        # connection failed with that message, whatever the connection string (met on 2026-10-05). The driver's
+        # real version stays readable as oracledb.__version__.
+        oracledb.version = "8.3.0"
         sys.modules["cx_Oracle"] = oracledb
         done.append("oracle+cx_oracle (python-oracledb, thin mode — no Instant Client)")
 

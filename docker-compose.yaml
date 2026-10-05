@@ -51,7 +51,12 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 512m }
+        # FOUR CPUs, NOT ONE (measured 2026-10-05). A dashboard tab sends its chart queries together, and a query
+        # over the mart's views is CPU work: one of Roaming Outbound's four KPI tables answers in 0.2 s alone,
+        # and took 1.1–1.6 s when the four ran at once on one CPU, 2.7 s at ten at once — the « slow dataset »
+        # of the first measurement was this limit, not the query. With four: 0.4–0.5 s and 1.6–2.0 s. It is a
+        # limit, not a reservation: it costs no memory, and an idle database uses none of it.
+        limits: { cpus: "${DEVKIT_DB_CPUS:-4.0}", memory: 512m }
 
   devkit-redis:
     image: redis:7-alpine

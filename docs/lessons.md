@@ -16,6 +16,15 @@ its own documentation prescribes, and aliases `oracle+oracledb` to the same dial
 nothing installed but the wheel. *Thin mode needs Oracle Database 12.1 or newer; an 11g server would need the
 thick client.*
 
+**…and the alias must LIE about its version, unconditionally.** SQLAlchemy 1.4 reads `cx_Oracle.version` and
+refuses anything under 5.2. python-oracledb has a `version` of its own — 2.5.1 — so a shim that only supplies
+one « when it is missing » (`getattr(oracledb, "version", "8.3.0")`) supplies nothing, and EVERY Oracle
+connection fails with « cx_Oracle version 5.2 and above are supported », whatever the string. It read like a
+wrong connection string and cost three of them (2026-10-05). The entry above said « Oracle then works » after
+the dialect LOADED; nobody had created an engine. → `oracledb.version = "8.3.0"`, always. Prove a driver by
+`sa.create_engine(uri)` at least, and by « test connection » to a dead port: the answer must be a NETWORK
+error (`DPY-6005 … Connection refused`), not a refusal that never left the process.
+
 **Superset offers an engine only if that backend's DEFAULT dialect can import its driver.**
 `get_available_engine_specs()` calls `sqlalchemy.dialects.registry.load("mssql")` and then `dialect.dbapi()`.
 SQLAlchemy's default for `mssql` is **pyodbc**, which needs unixODBC and Microsoft's ODBC driver. Neither was in
@@ -124,6 +133,23 @@ query is enough, and with two workers the interface then hangs. → `GUNICORN_TI
 is 5 with 10 of overflow, so a burst (SQL Lab's own bootstrap is one) queues behind the pool rather than the
 database. The platform met this in production. → `SQLALCHEMY_ENGINE_OPTIONS` sizes the pool from
 `SERVER_THREADS_AMOUNT`.
+
+**A « slow dataset » can be a database with one CPU.** Roaming Outbound's four KPI tables took 6–8 s each on
+the page, and the log said so chart by chart, so the dataset (`kpi_by_ref_day`, a view over views) was blamed.
+Asked ALONE, with the very filter the page sends, the query answers in 0.2 s. A tab sends its queries
+together, the query is CPU work, and `devkit-db` was limited to one CPU: four at once took 1.1–1.6 s each in
+the database, ten at once 2.7 s — more on a busy laptop. JIT and parallel workers made no difference; an index
+could not help (the base tables are keyed by day already, and the filter cannot use the key through the
+view). → the limit is four (`DEVKIT_DB_CPUS`); the four tables together now finish in 0.75 s through Superset.
+Before calling a query slow, time it alone AND several at once, and read the container's `cpu.max`. What is
+left if a server needs more: the view stored as a table indexed by day answers in 5–9 ms (218 MB, eleven
+seconds to refresh) — measured, not applied, because it is the product's mart.
+
+**Measure what the page sends, not what a probe finds convenient.** A check that asked each chart without the
+dashboard's « first item by default » filter measured the same four tables at 3–4 s: the query over all 78
+days, which no reader ever sends. The request the page really made is in the `logs` table (`json`, the
+`filters` of `form_data`); copy it. And sign in through `/login/`: the legacy map endpoint
+(`/superset/explore_json/`) answers 401 to an API token.
 
 **A hung SQL Lab is usually its tab state, not the server.** Symptom: skeletons for ever while the server is
 idle and every request returns 200. Look for `GET /api/v1/dataset/<id>` returning **404** right after an
