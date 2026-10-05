@@ -28,6 +28,14 @@ x-devkit-env: &devkit-env
   DEVKIT_APP_NAME: "${DEVKIT_APP_NAME:-SharpSight Superset — atelier}"
   DEVKIT_BEHIND_PROXY: "${DEVKIT_BEHIND_PROXY:-false}"
   DEVKIT_COOKIE_SECURE: "${DEVKIT_COOKIE_SECURE:-false}"
+  # THE SETTINGS superset_config.py READS MUST BE HANDED TO IT. These four were documented in .env.example and
+  # read by the configuration, and never passed here — so a value written in .env changed nothing (found
+  # 2026-10-05: the chart cache had always been the configuration's own default). The query timeout reached
+  # gunicorn alone, so a longer one let the request live and Superset still gave up at 300 s.
+  DEVKIT_DATA_CACHE_TTL: "${DEVKIT_DATA_CACHE_TTL:-3600}"
+  DEVKIT_META_CACHE_TTL: "${DEVKIT_META_CACHE_TTL:-300}"
+  DEVKIT_SQLLAB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+  DEVKIT_WEB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
 
 services:
   # Two databases in one server: `superset` is Superset's own metadata, `devkit` is where YOUR extracts land
@@ -140,6 +148,11 @@ services:
       # interface then hangs. It follows the query timeout now.
       GUNICORN_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
       GUNICORN_KEEPALIVE: "75"
+      # A worker is replaced after this many requests, so what it accumulates over days — pandas frames, a JVM for
+      # the CEM — is given back. The jitter keeps the workers from leaving together. Nothing measured asked for
+      # it (2026-10-05); it is the usual precaution for a Superset left running, and the image reads both.
+      WORKER_MAX_REQUESTS: "${DEVKIT_WORKER_MAX_REQUESTS:-10000}"
+      WORKER_MAX_REQUESTS_JITTER: "${DEVKIT_WORKER_MAX_REQUESTS_JITTER:-1000}"
     ports:
       # Loopback by default: a dev kit is not something to publish on every interface by accident. On a server,
       # set DEVKIT_BIND=0.0.0.0 deliberately, and put TLS in front of it.
@@ -182,7 +195,76 @@ services:
       resources:
         limits: { cpus: "2.0", memory: 1024m }
 
+  # ── OPTIONAL: an HTTPS entry with HTTP/2 in front of Superset (profile « tls ») ───────────────────────────────
+  #
+  # Turn it on with COMPOSE_PROFILES=tls in .env (and DEVKIT_BEHIND_PROXY=true, so Superset writes https links).
+  # Superset is then ALSO at https://localhost:${DEVKIT_TLS_PORT:-3443}; the plain port above keeps working.
+  # 3443, beside the kit's 3002 and 3003 — NOT 8443, which the SharpSight platform's own edge publishes on the
+  # very laptops this kit is built for (the first start here failed on it: « port is already allocated »).
+  #
+  # WHY. Over HTTP/1.1 a browser opens six connections to one address, and a dashboard tab asks for more charts
+  # than that at once: the rest wait in the browser, where the server's log cannot see them. HTTP/2 sends them
+  # all on one connection, and browsers speak HTTP/2 only over TLS. What this buys on OUR dashboards has not been
+  # measured yet (it needs a browser's network panel, not a log) — it is offered, not claimed.
+  #
+  # One-shot: a self-signed certificate, made once and kept in its volume, for a kit nobody gave one to. On a
+  # server, set DEVKIT_TLS_DIR to a folder holding tls.crt and tls.key and this finds them and writes nothing.
+  devkit-cert:
+    profiles: ["tls"]
+    image: sharpsight-superset-devkit:1.0.0
+    user: "0"
+    environment:
+      DEVKIT_TLS_NAME: "${DEVKIT_TLS_NAME:-}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -s /certs/tls.crt ] && [ -s /certs/tls.key ]; then echo "tls: a certificate is already there — left as it is"; exit 0; fi
+        names="DNS:localhost,IP:127.0.0.1"
+        if [ -n "$$DEVKIT_TLS_NAME" ]; then
+          case "$$DEVKIT_TLS_NAME" in
+            *[!0-9.]*) names="$$names,DNS:$$DEVKIT_TLS_NAME" ;;
+            *)         names="$$names,IP:$$DEVKIT_TLS_NAME" ;;
+          esac
+        fi
+        openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=$${DEVKIT_TLS_NAME:-localhost}" \
+          -addext "subjectAltName=$$names" -keyout /certs/tls.key -out /certs/tls.crt 2>/dev/null
+        chmod 644 /certs/tls.crt; chmod 600 /certs/tls.key
+        echo "tls: wrote a SELF-SIGNED certificate for $$names — a browser will ask you to accept it once"
+    volumes:
+      - ${DEVKIT_TLS_DIR:-devkit-certs}:/certs
+    restart: "no"
+
+  devkit-proxy:
+    profiles: ["tls"]
+    image: nginx:1.27-alpine
+    environment:
+      DEVKIT_UPSTREAM: "superset-devkit:8088"
+      # a request may wait as long as a query may run: a proxy that gives up first shows a 504 for a query that
+      # Superset was still, correctly, waiting for
+      DEVKIT_PROXY_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+    ports:
+      - "${DEVKIT_BIND:-127.0.0.1}:${DEVKIT_TLS_PORT:-3443}:8443"
+    volumes:
+      # the image renders every *.template in this folder at start, replacing ONLY the variables set above
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${DEVKIT_TLS_DIR:-devkit-certs}:/etc/nginx/certs:ro
+    depends_on:
+      devkit-cert:
+        condition: service_completed_successfully
+      superset-devkit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://127.0.0.1:8443/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 64m }
+
 volumes:
   devkit-db:
   devkit-home:
   devkit-cem:
+  devkit-certs:

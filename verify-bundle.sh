@@ -39,7 +39,8 @@ fi
 # ── what is inside ────────────────────────────────────────────────────────────────────────────────────────────
 listing="$(tar -tzf "$ARCHIVE")"
 for needed in install.sh docker-compose.yaml .env.example cem.env.example README.md MANIFEST.txt \
-              images/devkit-images.tar.gz initdb/10-devmart.sql import-into-devkit.sh export-for-devkit.sh; do
+              images/devkit-images.tar.gz initdb/10-devmart.sql import-into-devkit.sh export-for-devkit.sh \
+              nginx/default.conf.template; do
   printf '%s\n' "$listing" | grep -q "^$NAME/$needed$" \
     && ok "carries $needed" || no "MISSING $needed — install.sh would fail on the target"
 done

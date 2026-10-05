@@ -79,11 +79,15 @@ ENABLE_PROXY_FIX = os.environ.get("DEVKIT_BEHIND_PROXY", "false").lower() == "tr
 PROXY_FIX_CONFIG = {"x_for": 1, "x_proto": 1, "x_host": 1, "x_port": 0, "x_prefix": 0}
 
 # ── caches ────────────────────────────────────────────────────────────────────────────────────────────────────
-# Redis, like the product, but with a SHORT data TTL: while you are building, a stale chart is a lie about the
-# query you just changed. Raise DEVKIT_DATA_CACHE_TTL when you start showing the result to people.
+# Redis, like the product. A chart's result is kept ONE HOUR by default (DEVKIT_DATA_CACHE_TTL; six hours suits a
+# server whose sources load once a day). It was 60 seconds, « so that a stale chart is never a lie about the query
+# you just changed » — but the cache key IS the query: change a chart, a metric or a filter and the key changes
+# with it, so nothing stale is served for a query you edited. What an hour can hide is new DATA behind the same
+# query; « Force refresh » on a chart or a dashboard asks again. (Until 2026-10-05 compose did not pass this
+# setting at all: the value in .env was read by nobody, and this default was the only one that ever applied.)
 _REDIS = os.environ["SUPERSET_REDIS_URL"]
 _META_TTL = int(os.environ.get("DEVKIT_META_CACHE_TTL", "300"))
-_DATA_TTL = int(os.environ.get("DEVKIT_DATA_CACHE_TTL", "60"))
+_DATA_TTL = int(os.environ.get("DEVKIT_DATA_CACHE_TTL", "3600"))
 _cache = lambda ttl, db: {"CACHE_TYPE": "RedisCache", "CACHE_DEFAULT_TIMEOUT": ttl,
                           "CACHE_KEY_PREFIX": f"devkit_{db}_", "CACHE_REDIS_URL": _REDIS}
 CACHE_CONFIG = _cache(_META_TTL, "meta")

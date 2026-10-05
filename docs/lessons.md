@@ -145,6 +145,17 @@ Before calling a query slow, time it alone AND several at once, and read the con
 left if a server needs more: the view stored as a table indexed by day answers in 5–9 ms (218 MB, eleven
 seconds to refresh) — measured, not applied, because it is the product's mart.
 
+**A setting in `.env` reaches a container only if compose hands it over.** `DEVKIT_DATA_CACHE_TTL` was
+documented in `.env.example` and read by `superset_config.py` — and absent from the service's `environment`, so
+the value anyone wrote was read by nobody and the configuration's own default always applied. Same for the
+metadata cache and for the query timeout, which reached gunicorn and not Superset. Nothing failed, which is why
+it lasted. → all four are in `x-devkit-env`. When adding a setting, check it INSIDE the container
+(`docker exec … printenv`), or in what it changes (`cache_timeout` in a chart's answer).
+
+**Port 8443 is the platform's on a developer's laptop.** The optional HTTPS entry was first published there,
+and its first start failed: « Bind for 0.0.0.0:8443 failed: port is already allocated » — the SharpSight
+platform's own edge. → 3443, beside 3002 and 3003. The plain port never moved.
+
 **Measure what the page sends, not what a probe finds convenient.** A check that asked each chart without the
 dashboard's « first item by default » filter measured the same four tables at 3–4 s: the query over all 78
 days, which no reader ever sends. The request the page really made is in the `logs` table (`json`, the

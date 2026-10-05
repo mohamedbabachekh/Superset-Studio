@@ -64,6 +64,7 @@ with a password in it.
 | | |
 |---|---|
 | Address | `http://127.0.0.1:3002` (change `DEVKIT_PORT`; `DEVKIT_BIND=0.0.0.0` to expose it — then put TLS in front) |
+| HTTPS, optional | `COMPOSE_PROFILES=tls` and `DEVKIT_BEHIND_PROXY=true` in `.env`, then `bash install.sh`: also at `https://localhost:3443`, over HTTP/2, with a self-signed certificate made on first start (your own: `DEVKIT_TLS_DIR`) |
 | Sign in | the admin printed on first run, also in `.env` |
 | Stop / start | `bash install.sh --stop` · `bash install.sh` |
 | Erase it | `bash install.sh --erase` — deletes **only** this kit's two volumes |

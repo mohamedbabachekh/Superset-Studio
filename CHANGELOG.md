@@ -98,9 +98,24 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   together and a query over the mart's views is CPU work: Roaming Outbound's four KPI tables took 6–8 s each
   on the page while the same query answers in 0.2 s alone. Measured through Superset, uncached, asked as the
   page asks: 0.25 s each alone, the four together done in 0.75 s. A limit, not a reservation: no memory cost.
-- Checked on the rebuilt kit, as its admin: sign-in, French interface, the five engines offered, SQL Lab on
-  every connection, all 246 charts of the 10 dashboards (none failed, median 0.13 s), the engine and its seven
-  menu pages.
+- **A chart's result is kept one hour, and the setting is finally heard.** `DEVKIT_DATA_CACHE_TTL` was in
+  `.env.example` and read by the configuration, and compose never passed it — nor the metadata cache's, nor the
+  query timeout, which reached gunicorn alone. All four are passed now. The default goes from 60 s to 3600 s:
+  the cache key is the query, so an edited chart is never served stale; only new data behind the same query
+  waits, and « Force refresh » asks again. Checked: asked again, a chart comes back from the cache in 0.07 s,
+  « kept for 3600 s ».
+- **A worker is replaced after 10 000 requests** (`DEVKIT_WORKER_MAX_REQUESTS`, with jitter), so memory gathered
+  over days is given back. A precaution: nothing measured asked for it.
+- **Optional: HTTPS with HTTP/2 in front of Superset** — `COMPOSE_PROFILES=tls` and `DEVKIT_BEHIND_PROXY=true`.
+  nginx on `https://localhost:3443` beside the plain port, **which does not move: 3002**. A self-signed
+  certificate is made on first start and kept in a volume; `DEVKIT_TLS_DIR` takes your own. The nginx image
+  travels in every bundle. 3443 and not 8443: the SharpSight platform's own edge publishes 8443 on the laptops
+  this kit is for, and the first start failed on it. Checked: a browser is offered `h2`, a sign-in and a chart
+  go through it, responses are compressed. **Not measured: what it gains on a dashboard** — that needs a
+  browser's network panel.
+- Checked on the rebuilt kit, as its admin, before and after these changes: sign-in, French interface, the five
+  engines offered, SQL Lab on every connection, all 246 charts of the 10 dashboards (none failed, median
+  0.13–0.17 s), the engine and its seven menu pages.
 
 ## 20261002
 

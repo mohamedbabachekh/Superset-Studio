@@ -16,7 +16,9 @@ OUT="${OUT:-$HERE/dist}"
 VERSION="${VERSION:-$(date +%Y%m%d)}"
 NAME="sharpsight-superset-devkit-$VERSION"
 IMAGE="sharpsight-superset-devkit:1.0.0"
-DEPS=(postgres:16.4 redis:7-alpine)
+# nginx is the optional HTTPS entry (compose profile « tls »). It travels in every bundle: a target with no
+# internet cannot fetch it on the day somebody turns the profile on.
+DEPS=(postgres:16.4 redis:7-alpine nginx:1.27-alpine)
 
 echo "═══ 1/4  building $IMAGE"
 docker build --build-arg "WITH_JDBC=${DEVKIT_WITH_JDBC:-1}" -t "$IMAGE" "$HERE"
@@ -40,6 +42,8 @@ echo "═══ 4/4  sealing"
 [ "${INCLUDE_CEM:-0}" = "1" ] && [ -s "$HERE/cem.env" ] && INCLUDE_CEM_SECRET=yes || INCLUDE_CEM_SECRET=no
 cp "$HERE/docker-compose.yaml" "$HERE/.env.example" "$HERE/README.md" "$HERE/install.sh"    "$HERE/cem.env.example" "$HERE/import-into-devkit.sh" "$HERE/export-for-devkit.sh" "$stage/"
 cp -r "$HERE/initdb" "$stage/"
+# the HTTPS entry's configuration: compose mounts this FILE, and Docker makes a directory of a file that is missing
+mkdir -p "$stage/nginx" && cp "$HERE/nginx/default.conf.template" "$stage/nginx/"
 mkdir -p "$stage/driver-jars" "$stage/exports" "$stage/krb5"
 
 # INCLUDE_CEM=1 makes the bundle self-contained for the CEM: the Yacht driver, and cem.env if you have written
