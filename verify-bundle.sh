@@ -68,6 +68,26 @@ printf '%s\n' "$listing" | grep -qE "\.(dump|tgz)$" \
   && no "a dump or archive is inside — customer data does not travel in a bundle" \
   || ok "no mart dump inside"
 
+# ── the kit, and nothing else ─────────────────────────────────────────────────────────────────────────────────
+# The SharpSight menu and its AI BI engine are an overlay of the source checkout. A bundle that is deployed must
+# not carry them (owner, 2026-10-05) — not their compose file, not their code, not their image — and « it never
+# has » is a habit of the build script, not a guarantee. This is the guarantee.
+engine_parts="$(printf '%s\n' "$listing" | grep -E "^$NAME/(docker-compose\.ai-bi\.yaml|ai-bi\.sh|superset-addon/|superset-extension/|registry/|dbt/|services/)" | head -3 || true)"
+[ -z "$engine_parts" ] \
+  && ok "no SharpSight menu, no AI BI engine: none of the overlay's files is inside" \
+  || no "the AI BI engine's files are inside ($(printf '%s' "$engine_parts" | tr '\n' ' ')) — this bundle is the kit only"
+if grep -qiE 'sharpsight-ai-bi|superset_config_ai_bi|sharpsight_bi' "$R/docker-compose.yaml" "$R/install.sh" 2>/dev/null; then
+  no "docker-compose.yaml or install.sh inside names the AI BI engine — a deployed kit must start without it"
+else
+  ok "the compose file and the installer inside start Superset without the engine"
+fi
+grep -qiE 'AIBI_|ai-bi' "$R/.env.example" "$R/README.md" 2>/dev/null \
+  && no "the .env.example or the README inside still names the AI BI engine — install.sh would write its settings into a deployed .env" \
+  || ok "neither the settings template nor the README inside mentions the engine"
+grep -qiE '^(image|dependencies)=.*ai-bi' "$R/MANIFEST.txt" \
+  && no "the manifest lists the engine's image" \
+  || ok "the manifest lists no engine image ($(sed -n 's/^bi_engine=//p' "$R/MANIFEST.txt" | head -1 | sed 's/^$/bi_engine line absent/'))"
+
 # ── line endings ──────────────────────────────────────────────────────────────────────────────────────────────
 # One grep, not a shell per file: the per-file form forks hundreds of times and Git Bash gives up on it.
 # `|| true` is not decoration: grep finding NOTHING exits 1, and under `set -e` with `pipefail` that ends the

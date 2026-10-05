@@ -86,6 +86,34 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## 20261005b
+
+- **An upgrade keeps what you made, and says so.** Unpack the bundle in a NEW folder and run `bash install.sh`:
+  it finds the kit already on the machine (compose records the folder on each container), brings its `.env` —
+  the key every saved connection is encrypted with — `cem.env`, the driver, krb5 and the exports, backs
+  Superset's own database up into `backups/`, lets Superset migrate it, and counts connections, dashboards,
+  charts, datasets and saved queries before and after; fewer after is an error that names the backup and the
+  command to put it back. The start-up job says whether every connection is still readable with this kit's
+  key. `--from <folder>` when the old folder cannot be found. Until now a new folder stopped at « its .env is
+  gone », and the installer recreated the containers — running the migrations — before anything was backed up.
+- **An older `.env` is brought up to date once** (`DEVKIT_SETTINGS_VERSION`): the inert `DEVKIT_DATA_CACHE_TTL=60`
+  becomes 3600, a value somebody chose is left alone, and the settings this version adds are appended with
+  their defaults.
+- **No SharpSight menu and no AI BI engine in a bundle — guaranteed, not habitual.** The bundle's
+  `.env.example` and README no longer carry the engine's section, `verify-bundle.sh` fails a bundle that holds
+  any of the overlay's files, settings or image, and an upgrade from a bundle removes the engine's containers
+  from a kit that ran them. What the engine made inside Superset (its dashboards, its two connections) is
+  content and stays.
+- **Rehearsed, end to end**, as a second compose project beside the kit in use: the bundle of 3 October
+  installed by its own installer; a connection with a saved password, a dataset, a chart, a dashboard and a
+  saved query made in it; then this bundle from a new folder, nothing copied by hand. 2 connections, 1
+  dashboard, 1 chart, 1 dataset, 1 saved query before and after; a query THROUGH the saved connection still
+  answers (165); cache 3600 s inside Superset; the port unchanged; Oracle reaches the network; a second
+  `bash install.sh` takes no second backup. The first rehearsal found two faults of this very change — the
+  cache stayed at 60 s, and seven `AIBI_` settings were written into the upgraded `.env` — both fixed and the
+  whole rehearsal run again. **Not rehearsed:** an upgrade of a kit that runs the engine, and one across a
+  Superset version change (both bundles are 6.1.0, so « nothing to migrate » is what was seen).
+
 ## 20261005
 
 - **Oracle connects.** Every Oracle connection failed with « cx_Oracle version 5.2 and above are supported »,

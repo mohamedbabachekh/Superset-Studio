@@ -40,7 +40,17 @@ echo "  wrote $(du -h "$stage/images/devkit-images.tar.gz" | cut -f1)"
 echo "═══ 4/4  sealing"
 # -s, not -f: an EMPTY cem.env is not a secret, and saying it is teaches people to ignore the warning
 [ "${INCLUDE_CEM:-0}" = "1" ] && [ -s "$HERE/cem.env" ] && INCLUDE_CEM_SECRET=yes || INCLUDE_CEM_SECRET=no
-cp "$HERE/docker-compose.yaml" "$HERE/.env.example" "$HERE/README.md" "$HERE/install.sh"    "$HERE/cem.env.example" "$HERE/import-into-devkit.sh" "$HERE/export-for-devkit.sh" "$stage/"
+cp "$HERE/docker-compose.yaml" "$HERE/install.sh"    "$HERE/cem.env.example" "$HERE/import-into-devkit.sh" "$HERE/export-for-devkit.sh" "$stage/"
+# THE KIT, AND NOTHING OF THE AI BI ENGINE — its settings and its documentation included. The engine is an overlay
+# of this checkout and is not shipped (owner, 2026-10-05). Its section of .env.example travelled all the same,
+# and install.sh adds to an upgraded .env every setting the bundle's .env.example knows: the first rehearsal of
+# an upgrade wrote seven AIBI_ lines into a kit that has no engine. So the bundle's copy ends that section
+# where the next one begins, and its README loses the rows that point at files which are not in the bundle.
+awk '/^# ── SharpSight AI BI/ {skip=1; next} skip && /^# ── / {skip=0} !skip' "$HERE/.env.example" > "$stage/.env.example"
+grep -v -i -E 'ai-bi|superset-addon/|superset-extension/' "$HERE/README.md" > "$stage/README.md"
+if grep -q -i -E 'AIBI_|ai-bi' "$stage/.env.example" "$stage/README.md"; then
+  echo "the bundle's .env.example or README still names the AI BI engine — its section moved or was renamed" >&2; exit 1
+fi
 cp -r "$HERE/initdb" "$stage/"
 # the HTTPS entry's configuration: compose mounts this FILE, and Docker makes a directory of a file that is missing
 mkdir -p "$stage/nginx" && cp "$HERE/nginx/default.conf.template" "$stage/nginx/"
@@ -76,6 +86,8 @@ image=$IMAGE
 dependencies=${DEPS[*]}
 superset=6.1.0 (same pinned digest as the SharpSight product image)
 drivers=postgresql, mssql (pymssql AND pyodbc+FreeTDS), oracle (python-oracledb, thin), hive/spark (PyHive), JDBC bridge (JayDeBeApi + Java 17)
+bi_engine=no — the SharpSight menu and the AI BI engine are not in this bundle
+upgrade=bash install.sh in this folder finds the kit already installed, brings its settings, backs up, migrates, and counts what it kept
 contains_secrets=${INCLUDE_CEM_SECRET:-no}
 TXT
 

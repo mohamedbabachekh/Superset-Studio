@@ -67,6 +67,7 @@ with a password in it.
 | HTTPS, optional | `COMPOSE_PROFILES=tls` and `DEVKIT_BEHIND_PROXY=true` in `.env`, then `bash install.sh`: also at `https://localhost:3443`, over HTTP/2, with a self-signed certificate made on first start (your own: `DEVKIT_TLS_DIR`) |
 | Sign in | the admin printed on first run, also in `.env` |
 | Stop / start | `bash install.sh --stop` · `bash install.sh` |
+| Upgrade | unpack the new bundle in a **new** folder and run `bash install.sh` there. It finds the kit already on the machine, brings its `.env` (the key your connections are encrypted with), `cem.env`, driver and exports, backs Superset's database up into `backups/`, migrates it, and counts connections, dashboards, charts, datasets and saved queries before and after. `--from <old folder>` if it cannot find the old one |
 | Erase it | `bash install.sh --erase` — deletes **only** this kit's two volumes |
 
 It costs about **1.2 GB of memory**. On a laptop that already runs the SharpSight platform, run one or the other.

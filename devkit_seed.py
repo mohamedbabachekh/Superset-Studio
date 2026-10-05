@@ -119,6 +119,25 @@ def seed() -> int:
     else:
         print("  nothing to seed: the sources are already there"
               + ("" if _cem_configured() else " (cem.env names no CEM, so « CEM live » was not created)"))
+
+    # CAN THE CONNECTIONS STILL BE READ? Every saved connection keeps its password encrypted with
+    # SUPERSET_SECRET_KEY — the DEVKIT_SECRET_KEY of .env. A kit started with another .env opens, lists its
+    # connections, and fails each of them at the first query with « Invalid decryption key »: nothing on the
+    # way says so. Said here at every start, and read back by install.sh after an upgrade. One at a time, by
+    # id: loading a row decrypts it, so a single list of them would fail whole on the first unreadable one.
+    unreadable: list[str] = []
+    rows = db.session.query(Database.id, Database.database_name).order_by(Database.id).all()
+    for database_id, name in rows:
+        try:
+            db.session.get(Database, database_id).sqlalchemy_uri_decrypted  # noqa: B018 — read to decrypt
+        except Exception:                       # noqa: BLE001 — the key is wrong for this row, whatever is raised
+            db.session.rollback()
+            unreadable.append(name)
+    if unreadable:
+        print("  connections: %d, of which NOT READABLE with this .env's key: %s — the .env is not the one "
+              "these were saved under" % (len(rows), ", ".join(unreadable)))
+    else:
+        print("  connections: %d, all readable with this kit's key" % len(rows))
     return 0
 
 

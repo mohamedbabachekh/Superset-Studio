@@ -156,6 +156,16 @@ it lasted. → all four are in `x-devkit-env`. When adding a setting, check it I
 and its first start failed: « Bind for 0.0.0.0:8443 failed: port is already allocated » — the SharpSight
 platform's own edge. → 3443, beside 3002 and 3003. The plain port never moved.
 
+**An upgrade is proved by upgrading.** The installer's upgrade path was written, read twice and looked right.
+Rehearsed — the bundle of 3 October installed as a second compose project (`DEVKIT_PROJECT`, another port), a
+connection and a dashboard made in it, then the new bundle from a new folder — it kept everything AND showed
+two faults nothing else would have: an empty variable made `[ "" -lt 2 ]` fail quietly, so the one settings
+change the upgrade existed for was skipped; and the bundle's `.env.example` still carried the AI BI engine's
+section, so « add the settings this version knows » wrote seven `AIBI_` lines into a kit with no engine.
+→ `rehearse-upgrade.sh <old bundle> <new bundle>` is the test for any change to `install.sh`: old bundle, real content, new bundle, then
+ask for the content THROUGH Superset (a query through the saved connection proves its password still decrypts;
+a row count does not).
+
 **Measure what the page sends, not what a probe finds convenient.** A check that asked each chart without the
 dashboard's « first item by default » filter measured the same four tables at 3–4 s: the query over all 78
 days, which no reader ever sends. The request the page really made is in the `logs` table (`json`, the
