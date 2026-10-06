@@ -53,6 +53,18 @@ click-through, no Microsoft repository to reach) and the `/etc/odbcinst.ini` ent
 
 ## The CEM, through its JDBC driver
 
+**JayDeBeApi starts the JVM with no lock, and a dashboard is twenty first connections at once.** Its
+`connect()` does `if not jpype.isJVMStarted(): jpype.startJVM(...)`. On the first CEM dashboard opened after a
+start, every chart's thread found « not started » and each called `startJVM`: « UnsatisfiedLinkError: Native
+Library …_jpype…so already loaded in another classloader », and beside it « …JPypeReferenceNative
+.removeHostReference(long, long) ». The worker did not recover — the half-started JVM still answers « not
+started », so each later connection tried again and failed again until Superset was restarted (production,
+2026-10-06, dashboard `qoe-reseau-5g`; every traceback ends inside `jpype.startJVM`). SQL Lab, one query at a
+time, never showed it. → `YachtDialect.connect` makes a worker's first connection under a lock. Until a kit
+carries it: restart Superset and open ONE CEM chart or query before a dashboard.
+*And do not try to reproduce this with real JVMs on a laptop: twelve starting at once in an uncapped
+container took Docker Desktop down with every stack on it.*
+
 **The Yacht driver has no SQLAlchemy dialect**, so Superset cannot dial it — which is why `yacht_dialect.py`
 exists. JayDeBeApi is a DB-API 2.0 module, so only the dialect was missing: how to open a connection, and what
 schemas, tables and columns exist.

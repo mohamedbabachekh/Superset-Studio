@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 
 from sqlalchemy import pool
 from sqlalchemy import types as sqltypes
@@ -36,6 +37,8 @@ from sqlalchemy.engine import default, reflection
 from sqlalchemy.sql import compiler
 
 CEM_FILE = "/run/cem/cem.env"
+# Held only while a worker's FIRST connection starts the Java VM (YachtDialect.connect says why).
+_JVM_START = threading.Lock()
 
 # Spark's type names, as `describe` prints them, to what SQLAlchemy shows in Superset.
 _TYPES = [
@@ -159,6 +162,31 @@ class YachtDialect(default.DefaultDialect):
             raise RuntimeError(f"the JDBC driver is not where it is named: {', '.join(missing)}")
         props = {k: v for k, v in (("user", user), ("password", password)) if v}
         return (driver, jdbc_url), {"driver_args": props, "jars": paths}
+
+    # ── ONE thread starts the JVM; the others wait for it ─────────────────────────────────────────────────────
+    def connect(self, *cargs, **cparams):
+        """Open a connection, letting exactly one thread per worker start the Java VM.
+
+        JayDeBeApi starts the JVM on the first connection: `if not jpype.isJVMStarted(): jpype.startJVM(...)`,
+        with no lock. A Superset worker serves twenty threads, and a dashboard sends its charts together — so
+        on the first dashboard opened after a start, several threads found « not started » at once and each
+        called startJVM. The JVM loads JPype's native library once per classloader, and the second caller got
+        « UnsatisfiedLinkError: Native Library …_jpype…so already loaded in another classloader ». Worse, the
+        worker never recovered: the half-started JVM still answers « not started », so EVERY later connection
+        tried again and failed the same way until Superset was restarted (production, 2026-10-06: dashboard
+        qoe-reseau-5g, every traceback inside jpype.startJVM at 09:18:31, and still at 09:19:11).
+
+        So the first connection of a worker is made under a lock. It is JayDeBeApi's own start, with the
+        arguments it has always used; the threads behind it wait a few seconds, once, and then find the JVM
+        started and connect without touching the lock again.
+        """
+        import jpype
+
+        if not jpype.isJVMStarted():
+            with _JVM_START:
+                if not jpype.isJVMStarted():
+                    return self.dbapi.connect(*cargs, **cparams)
+        return self.dbapi.connect(*cargs, **cparams)
 
     # ── there is no transaction on the cluster ────────────────────────────────────────────────────────────────
     def do_rollback(self, dbapi_connection):

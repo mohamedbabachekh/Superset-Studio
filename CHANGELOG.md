@@ -86,6 +86,15 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## Not in a bundle yet — the CEM dashboards after a start (2026-10-06)
+
+- **A CEM dashboard opened first thing no longer breaks the worker.** Several charts starting the Java VM at
+  once failed with « Native Library … already loaded in another classloader », and every CEM query in that
+  worker then failed until Superset was restarted (seen on the deployed kit, 20261005b). `yacht_dialect.py`
+  now lets one thread make a worker's first connection while the others wait. Checked with a stand-in for the
+  JVM, in the kit's container: twenty threads at once, one start, twenty connections (twenty starts without
+  the lock). **Not checked with a real JVM and a real cluster** — that is the deployed kit's to show.
+
 ## 20261005b
 
 - **An upgrade keeps what you made, and says so.** Unpack the bundle in a NEW folder and run `bash install.sh`:
