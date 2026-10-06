@@ -86,7 +86,10 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
-## Not in a bundle yet — the CEM dashboards after a start (2026-10-06)
+## 20261006
+
+- Upgrade rehearsed from 20261005b with `rehearse-upgrade.sh`: every check passes, 2/1/1/1/1 before and after,
+  nothing to migrate, no settings change (the `.env` was already at settings version 2).
 
 - **A CEM dashboard opened first thing no longer breaks the worker.** Several charts starting the Java VM at
   once failed with « Native Library … already loaded in another classloader », and every CEM query in that
