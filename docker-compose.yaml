@@ -64,15 +64,20 @@ services:
         # and took 1.1–1.6 s when the four ran at once on one CPU, 2.7 s at ten at once — the « slow dataset »
         # of the first measurement was this limit, not the query. With four: 0.4–0.5 s and 1.6–2.0 s. It is a
         # limit, not a reservation: it costs no memory, and an idle database uses none of it.
-        limits: { cpus: "${DEVKIT_DB_CPUS:-4.0}", memory: 512m }
+        limits: { cpus: "${DEVKIT_DB_CPUS:-4.0}", memory: "${DEVKIT_DB_MEMORY:-1g}" }
 
   devkit-redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+    # THE CACHE. 96 MB until 2026-10-15: a CEM chart's result is often megabytes, and allkeys-lru throws out the
+    # oldest entries to make room — a dashboard's charts pushed one another out and the next visit asked the
+    # cluster again. Size it to the charts you keep (DEVKIT_REDIS_MAXMEMORY); the container's limit sits above it,
+    # because Redis needs room beside its data. Nothing is written to disk: the refresh fills it after a restart.
+    command: ["redis-server", "--save", "", "--appendonly", "no",
+              "--maxmemory", "${DEVKIT_REDIS_MAXMEMORY:-1gb}", "--maxmemory-policy", "allkeys-lru"]
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 128m }
+        limits: { cpus: "1.0", memory: "${DEVKIT_REDIS_LIMIT:-1280m}" }
 
   # One-shot: schema, then the admin account, then Superset's own examples-free init. Exits 0 and stays exited.
   devkit-init:
@@ -97,6 +102,12 @@ services:
         superset fab create-admin --username "$$DEVKIT_ADMIN_USER" --firstname Dev --lastname Kit \
           --email "$$DEVKIT_ADMIN_EMAIL" --password "$$DEVKIT_ADMIN_PASSWORD" || true
         superset init
+        # the scheduled refresh's own account (devkit_refresh.py): an admin, so it can read every dashboard, with
+        # a password derived from DEVKIT_SECRET_KEY and set again at every start — written nowhere, and not the
+        # human admin's, whose password may be changed in Superset without stopping the refresh
+        pw="$$(python -c 'import os, devkit_refresh as r; print(r.refresh_password(os.environ["SUPERSET_SECRET_KEY"]))')"
+        superset fab create-admin --username devkit-refresh --firstname Scheduled --lastname refresh           --email devkit-refresh@sharpsight.local --password "$$pw" >/dev/null 2>&1 || true
+        superset fab reset-password --username devkit-refresh --password "$$pw" >/dev/null
         python /app/pythonpath/devkit_seed.py
         echo "dev kit ready — sign in as $$DEVKIT_ADMIN_USER"
     depends_on:
@@ -193,7 +204,44 @@ services:
     stop_grace_period: 20s
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 1024m }
+        # LIMITS, NOT RESERVATIONS: nothing is set aside while it is idle. What actually takes memory is the
+        # number of workers (DEVKIT_WORKERS), each with its own JVM once it has touched the CEM — about 500 MB
+        # each with pandas frames in flight; keep DEVKIT_MEMORY above workers × 600 MB. It was 2 CPUs and 1 GB
+        # until 2026-10-15.
+        limits: { cpus: "${DEVKIT_CPUS:-4.0}", memory: "${DEVKIT_MEMORY:-4g}" }
+
+  # ── THE SCHEDULED REFRESH ────────────────────────────────────────────────────────────────────────────────────
+  # Asks again, on a schedule, every chart request a dashboard made in the last DEVKIT_REFRESH_KEEP_DAYS days,
+  # so the next person to open it reads the cache instead of waiting for the database (devkit_refresh.py).
+  #   DEVKIT_REFRESH_EVERY_MIN=60        the data is never older than this (0 = no refresh)
+  #   DEVKIT_REFRESH_AT=06:30,13:00      OR at these times of day instead (DEVKIT_TZ), e.g. after the nightly load
+  # Either way an entry is also refreshed before it expires, so the cache never empties between two refreshes.
+  # Its log says what it did:  docker compose -p sharpsight-superset-devkit logs -f devkit-refresh
+  # Refresh everything now:    docker compose -p sharpsight-superset-devkit restart devkit-refresh
+  devkit-refresh:
+    image: sharpsight-superset-devkit:1.0.0
+    entrypoint: ["python", "/app/pythonpath/devkit_refresh.py"]
+    environment:
+      SUPERSET_SECRET_KEY: "${DEVKIT_SECRET_KEY}"
+      SUPERSET_REDIS_URL: "redis://devkit-redis:6379/0"
+      DEVKIT_SUPERSET_URL: "http://superset-devkit:8088"
+      DEVKIT_REFRESH_EVERY_MIN: "${DEVKIT_REFRESH_EVERY_MIN:-60}"
+      DEVKIT_REFRESH_AT: "${DEVKIT_REFRESH_AT:-}"
+      DEVKIT_REFRESH_KEEP_DAYS: "${DEVKIT_REFRESH_KEEP_DAYS:-7}"
+      DEVKIT_REFRESH_PARALLEL: "${DEVKIT_REFRESH_PARALLEL:-2}"
+      DEVKIT_SQLLAB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+      TZ: "${DEVKIT_TZ:-Africa/Casablanca}"
+    volumes:
+      # the list of recorded requests is copied here after every pass, and put back when Redis restarts empty
+      - devkit-home:/app/superset_home
+    depends_on:
+      superset-devkit:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256m }
 
   # ── OPTIONAL: an HTTPS entry with HTTP/2 in front of Superset (profile « tls ») ───────────────────────────────
   #

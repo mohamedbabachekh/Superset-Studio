@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends unixodbc odbcin
       echo 'Setup = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so'; \
       echo 'FileUsage = 1'; } > /etc/odbcinst.ini
 
-COPY --chown=superset:superset superset_config.py devkit_drivers.py devkit_forms.py yacht_dialect.py devkit_seed.py /app/pythonpath/
+COPY --chown=superset:superset superset_config.py devkit_drivers.py devkit_forms.py yacht_dialect.py devkit_seed.py devkit_refresh.py /app/pythonpath/
 # The sign-in page: FAB looks templates up by path, so ours only has to come FIRST in the search order
 # (superset_config.py puts this folder ahead of the stock one).
 COPY --chown=superset:superset templates/ /app/pythonpath/templates/

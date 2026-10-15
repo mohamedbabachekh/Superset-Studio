@@ -149,6 +149,23 @@ if [ "$level" -lt 2 ]; then
   fi
   if grep -qE '^DEVKIT_SETTINGS_VERSION=' .env; then edit_env 's/^DEVKIT_SETTINGS_VERSION=.*/DEVKIT_SETTINGS_VERSION=2/'
   else printf '\n# which of the kit'"'"'s settings changes this file has been through (install.sh)\nDEVKIT_SETTINGS_VERSION=2\n' >> .env; fi
+  level=2
+fi
+#      · settings version 3 (2026-10-15): two workers was every .env's default, sized for a laptop. On a machine
+#        with at least 4 CPUs and 8 GB of memory a DEVKIT_WORKERS=2 that is still the old default becomes 4; on a
+#        smaller one it stays, and says so. Any other value was chosen and is not touched.
+if [ "$level" -lt 3 ]; then
+  cpus="$(nproc 2>/dev/null || echo 1)"
+  mem_gb="$(awk '/^MemTotal:/ {print int($2/1048576)}' /proc/meminfo 2>/dev/null || echo 0)"
+  if grep -qE '^DEVKIT_WORKERS=2[[:space:]]*$' .env; then
+    if [ "${cpus:-1}" -ge 4 ] && [ "${mem_gb:-0}" -ge 8 ]; then
+      edit_env 's/^DEVKIT_WORKERS=2[[:space:]]*$/DEVKIT_WORKERS=4/'
+      echo "settings — Superset gets 4 workers instead of 2 (this machine: $cpus CPUs, ${mem_gb} GB)"
+    else
+      echo "settings — Superset keeps 2 workers: this machine has $cpus CPUs and ${mem_gb} GB (4 workers want 4 CPUs and 8 GB)"
+    fi
+  fi
+  edit_env 's/^DEVKIT_SETTINGS_VERSION=.*/DEVKIT_SETTINGS_VERSION=3/'
 fi
 if [ -f .env.example ]; then
   added=""

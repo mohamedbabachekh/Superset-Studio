@@ -311,8 +311,50 @@ to move. Treat it as you would the mart itself.
    build script whose output is reproducible, reviewable and installable by the platform's offline bundle.
 
 The kit sets the flags a dashboard author needs — cross-filters, drill to detail, drill by, Jinja in SQL,
-query-cost estimation, full CSV export, versioned export, tags — and a **60-second** data cache, so a chart shows
-the query you just changed. Raise `DEVKIT_DATA_CACHE_TTL` when you switch from drawing to demonstrating.
+query-cost estimation, full CSV export, versioned export, tags — and a one-hour data cache
+(`DEVKIT_DATA_CACHE_TTL`). Changing a chart changes its query, and so its cache entry: you always see the query
+you just edited. Only new data behind the same query waits for the refresh below, or for « Force refresh ».
+
+### Dashboards open on cached data: the scheduled refresh
+
+The `devkit-refresh` container keeps the cache full, so a dashboard opens on data already read instead of
+waiting for the database, the CEM's included. It writes down every chart request a dashboard sends, as the page
+sends it, and asks it again on a schedule. A visitor then reads the very cache entry it wrote.
+
+| `.env` | default | |
+|---|---|---|
+| `DEVKIT_REFRESH_EVERY_MIN` | `60` | the data is never older than this; `0` turns the refresh off |
+| `DEVKIT_REFRESH_AT` | *(empty)* | OR at these times of day instead, e.g. `06:30,13:00` after the nightly load |
+| `DEVKIT_TZ` | `Africa/Casablanca` | the zone of those times |
+| `DEVKIT_REFRESH_KEEP_DAYS` | `7` | a dashboard nobody opened for this long is no longer refreshed |
+| `DEVKIT_REFRESH_PARALLEL` | `2` | queries sent at once (the cluster is shared) |
+
+- Between two refreshes, an entry is also refreshed **before it expires**. A dataset with a cache timeout of its
+  own, shorter than the schedule (Edit dataset → Settings → Cache timeout), is therefore asked again at its own
+  pace. Empty that field to let the dataset follow the kit.
+- After a restart the cache is empty. The list of requests is kept in the kit's volume, and the refresh asks
+  them all again within a minute.
+- A dashboard is refreshed only once somebody has opened it. The very first visit asks the database.
+- A user with a row-level-security rule has a cache entry of their own, which the refresh cannot warm.
+
+```bash
+docker compose -p sharpsight-superset-devkit logs -f devkit-refresh     # what it did, pass by pass
+docker compose -p sharpsight-superset-devkit restart devkit-refresh     # look at everything again now
+```
+
+### Size
+
+CPU and memory are limits, not reservations: nothing is set aside while the kit is idle. What uses memory is the
+number of Superset workers, each with its own JVM once it has touched the CEM.
+
+| `.env` | default | |
+|---|---|---|
+| `DEVKIT_WORKERS` | `4` | Superset processes (2 on a laptop); each about 500 MB at work |
+| `DEVKIT_CPUS` / `DEVKIT_MEMORY` | `4.0` / `4g` | Superset's limits; keep memory above workers × 600 MB |
+| `DEVKIT_REDIS_MAXMEMORY` / `DEVKIT_REDIS_LIMIT` | `1gb` / `1280m` | the chart cache, and its container (keep ~25 % above) |
+| `DEVKIT_DB_CPUS` / `DEVKIT_DB_MEMORY` | `4.0` / `1g` | the kit's PostgreSQL |
+
+Change a value in `.env`, then `docker compose -p sharpsight-superset-devkit up -d`.
 
 ---
 

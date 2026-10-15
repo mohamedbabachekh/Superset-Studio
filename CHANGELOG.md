@@ -86,6 +86,26 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## 20261015
+
+- **Dashboards open on cached data: a scheduled refresh.** A new container, `devkit-refresh`, writes down every
+  chart request a dashboard sends (the body as the page sends it, so that a replay fills the same cache entry)
+  and asks it again every `DEVKIT_REFRESH_EVERY_MIN` minutes (60), or at the times of `DEVKIT_REFRESH_AT`.
+  Every entry is also refreshed before it expires, and after a restart the whole list is asked again. It signs in
+  with its own account, `devkit-refresh`, whose password is derived from `DEVKIT_SECRET_KEY` and written
+  nowhere. Checked on the laptop's kit: six legacy charts and one `chart/data` chart recorded. Their cache
+  entries were deleted, then refreshed at the next pass, then read by a new visit **from the cache, under the
+  same keys**. Redis was restarted empty: the 7 requests were put back and refreshed in 4 s.
+- **The cache is 1 GB, not 96 MB** (`DEVKIT_REDIS_MAXMEMORY`). A CEM result can weigh megabytes, and a full
+  cache throws out its oldest entries: one dashboard's charts pushed out another's.
+- **More room, as settings**: Superset 4 CPUs / 4 GB (`DEVKIT_CPUS`, `DEVKIT_MEMORY`, was 2 / 1 GB), its
+  database 1 GB (`DEVKIT_DB_MEMORY`), and 4 workers by default. On an upgrade (settings version 3), a `.env`
+  still on the old default of 2 workers gets 4 if the machine has at least 4 CPUs and 8 GB; otherwise it keeps 2,
+  and the installer says why.
+- Found on the way: the product's imported datasets carry a cache timeout of **900 s** of their own, which
+  overrides the kit's hour. The refresh keeps such entries alive at their own pace; empty the field to follow
+  the kit.
+
 ## 20261006
 
 - Upgrade rehearsed from 20261005b with `rehearse-upgrade.sh`: every check passes, 2/1/1/1/1 before and after,

@@ -39,6 +39,12 @@ def FLASK_APP_MUTATOR(app):  # noqa: N802  (Superset calls this hook with the bu
     for line in devkit_forms.install():
         app.logger.info("devkit: %s", line)
 
+    # The scheduled refresh records what a dashboard asks for, so that devkit-refresh can ask it again before
+    # anyone opens the page (devkit_refresh.py says how, and why Superset's own warm-up warms the wrong entries).
+    import devkit_refresh
+
+    devkit_refresh.install(app)
+
     # NO OUTBOUND BEACON. SCARF_ANALYTICS = False removes Apache's telemetry pixel from the page Superset
     # renders, but the FRONTEND BUNDLE adds one of its own at runtime (found in 8085.*.entry.js), so a kit
     # that is meant to run on an air-gapped machine still announced itself whenever it could reach the

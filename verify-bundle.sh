@@ -88,6 +88,10 @@ grep -qiE '^(image|dependencies)=.*ai-bi' "$R/MANIFEST.txt" \
   && no "the manifest lists the engine's image" \
   || ok "the manifest lists no engine image ($(sed -n 's/^bi_engine=//p' "$R/MANIFEST.txt" | head -1 | sed 's/^$/bi_engine line absent/'))"
 
+# ── the scheduled refresh (2026-10-15): without it a dashboard waits for the database at every first visit ──────
+grep -qE '^  devkit-refresh:' "$R/docker-compose.yaml"   && ok "the scheduled refresh (devkit-refresh) is in docker-compose.yaml"   || no "docker-compose.yaml has no devkit-refresh — dashboards would open on an empty cache"
+grep -qE '^DEVKIT_REFRESH_EVERY_MIN=' "$R/.env.example"   && ok "the refresh schedule is in .env.example ($(sed -n 's/^DEVKIT_REFRESH_EVERY_MIN=//p' "$R/.env.example") min)"   || no ".env.example has no DEVKIT_REFRESH_EVERY_MIN — an upgrade would not add the setting"
+
 # ── line endings ──────────────────────────────────────────────────────────────────────────────────────────────
 # One grep, not a shell per file: the per-file form forks hundreds of times and Git Bash gives up on it.
 # `|| true` is not decoration: grep finding NOTHING exits 1, and under `set -e` with `pipefail` that ends the
