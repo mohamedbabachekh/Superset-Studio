@@ -88,6 +88,10 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
 
 ## 20261015
 
+- Upgrade rehearsed from 20261006 with `rehearse-upgrade.sh`: every check passes, 2/1/1/1/1 before and after,
+  nothing to migrate; settings version 3 gave the rehearsal 4 workers (14 CPUs, 15 GB) and added the new settings.
+  Bundle verified 24/24.
+
 - **Dashboards open on cached data: a scheduled refresh.** A new container, `devkit-refresh`, writes down every
   chart request a dashboard sends (the body as the page sends it, so that a replay fills the same cache entry)
   and asks it again every `DEVKIT_REFRESH_EVERY_MIN` minutes (60), or at the times of `DEVKIT_REFRESH_AT`.
