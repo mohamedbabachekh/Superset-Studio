@@ -211,13 +211,14 @@ services:
         limits: { cpus: "${DEVKIT_CPUS:-4.0}", memory: "${DEVKIT_MEMORY:-4g}" }
 
   # ── THE SCHEDULED REFRESH ────────────────────────────────────────────────────────────────────────────────────
-  # Asks again, on a schedule, every chart request a dashboard made in the last DEVKIT_REFRESH_KEEP_DAYS days,
-  # so the next person to open it reads the cache instead of waiting for the database (devkit_refresh.py).
-  #   DEVKIT_REFRESH_EVERY_MIN=60        the data is never older than this (0 = no refresh)
-  #   DEVKIT_REFRESH_AT=06:30,13:00      OR at these times of day instead (DEVKIT_TZ), e.g. after the nightly load
-  # Either way an entry is also refreshed before it expires, so the cache never empties between two refreshes.
-  # Its log says what it did:  docker compose -p sharpsight-superset-devkit logs -f devkit-refresh
-  # Refresh everything now:    docker compose -p sharpsight-superset-devkit restart devkit-refresh
+  # A dashboard opens on data already in the cache; the database is asked at the times YOU set, and in between
+  # the cached result is kept (devkit_refresh.py). Each dashboard's schedule is a TAG on it, in Superset:
+  #   refresh:06:30   every day at 06:30 (one tag per time)    refresh:30m / refresh:2h   every 30 min / 2 hours
+  #   refresh:off     never on a schedule
+  # A dashboard with no such tag follows DEVKIT_REFRESH_EVERY_MIN / DEVKIT_REFRESH_AT from .env.
+  #   status:        docker compose -p sharpsight-superset-devkit exec devkit-refresh python /app/pythonpath/devkit_refresh.py --status
+  #   re-query now:  docker compose -p sharpsight-superset-devkit exec devkit-refresh python /app/pythonpath/devkit_refresh.py --now <id|all>
+  #   its log:       docker compose -p sharpsight-superset-devkit logs -f devkit-refresh
   devkit-refresh:
     image: sharpsight-superset-devkit:1.0.0
     entrypoint: ["python", "/app/pythonpath/devkit_refresh.py"]
@@ -228,6 +229,7 @@ services:
       DEVKIT_REFRESH_EVERY_MIN: "${DEVKIT_REFRESH_EVERY_MIN:-60}"
       DEVKIT_REFRESH_AT: "${DEVKIT_REFRESH_AT:-}"
       DEVKIT_REFRESH_KEEP_DAYS: "${DEVKIT_REFRESH_KEEP_DAYS:-7}"
+      DEVKIT_REFRESH_KEEP_DAYS_SCHEDULED: "${DEVKIT_REFRESH_KEEP_DAYS_SCHEDULED:-30}"
       DEVKIT_REFRESH_PARALLEL: "${DEVKIT_REFRESH_PARALLEL:-2}"
       DEVKIT_SQLLAB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
       TZ: "${DEVKIT_TZ:-Africa/Casablanca}"

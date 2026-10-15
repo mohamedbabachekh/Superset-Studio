@@ -86,6 +86,21 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## 20261015b
+
+- **Each dashboard has its own refresh schedule, set in Superset as a tag**: `refresh:06:30` (every day at
+  06:30, one tag per time), `refresh:30m` / `refresh:2h`, `refresh:off`. Untagged dashboards follow `.env`.
+- **Between two refreshes the database is not asked.** 20261015 re-queried an entry before it expired, so a
+  dataset with a 900 s timeout of its own hit the cluster every ~13 minutes. Now the refresh stretches the cached
+  entry's life to the next scheduled refresh (seen: 37 550 s for a 06:30 schedule at 20:19).
+- `--status` (each dashboard: schedule, charts kept warm, age of the data, next refresh) and `--now <id|all>`.
+- Only requests sent by a **dashboard** are recorded (not a chart being edited in Explore). Each request is
+  attached to its dashboard through the address or, for filters, the form data: 11 of 11 on Roaming Outbound,
+  where only 5 carried the dashboard in the address.
+- Measured in a headless browser on the laptop, Roaming Outbound (6 filters + 5 charts): last chart's data at
+  20.1 s with an empty cache; with the refresh, 11 of 11 requests from the cache in 0.3–0.7 s each, the page
+  complete at 6.8 s (Superset draws the filters before it asks for the charts).
+
 ## 20261015
 
 - Upgrade rehearsed from 20261006 with `rehearse-upgrade.sh`: every check passes, 2/1/1/1/1 before and after,

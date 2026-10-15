@@ -317,30 +317,45 @@ you just edited. Only new data behind the same query waits for the refresh below
 
 ### Dashboards open on cached data: the scheduled refresh
 
-The `devkit-refresh` container keeps the cache full, so a dashboard opens on data already read instead of
-waiting for the database, the CEM's included. It writes down every chart request a dashboard sends, as the page
-sends it, and asks it again on a schedule. A visitor then reads the very cache entry it wrote.
+A dashboard opens on data already in the cache. The database is queried **at the times you set for that
+dashboard**, and never in between. The `devkit-refresh` container does it: it writes down every chart request a
+dashboard sends, as the page sends it, and asks it again on the dashboard's schedule. Between two refreshes it
+keeps the cached result alive, even when a dataset's own cache timeout is shorter.
 
-| `.env` | default | |
-|---|---|---|
-| `DEVKIT_REFRESH_EVERY_MIN` | `60` | the data is never older than this; `0` turns the refresh off |
-| `DEVKIT_REFRESH_AT` | *(empty)* | OR at these times of day instead, e.g. `06:30,13:00` after the nightly load |
-| `DEVKIT_TZ` | `Africa/Casablanca` | the zone of those times |
-| `DEVKIT_REFRESH_KEEP_DAYS` | `7` | a dashboard nobody opened for this long is no longer refreshed |
-| `DEVKIT_REFRESH_PARALLEL` | `2` | queries sent at once (the cluster is shared) |
+**Each dashboard's schedule is a tag, set in Superset**: open the dashboard → ⋯ → *Edit properties* → *Tags*.
 
-- Between two refreshes, an entry is also refreshed **before it expires**. A dataset with a cache timeout of its
-  own, shorter than the schedule (Edit dataset → Settings → Cache timeout), is therefore asked again at its own
-  pace. Empty that field to let the dataset follow the kit.
-- After a restart the cache is empty. The list of requests is kept in the kit's volume, and the refresh asks
-  them all again within a minute.
-- A dashboard is refreshed only once somebody has opened it. The very first visit asks the database.
-- A user with a row-level-security rule has a cache entry of their own, which the refresh cannot warm.
+| tag | the database is queried |
+|---|---|
+| `refresh:06:30` | every day at 06:30 (add `refresh:13:00` for a second time; `06h30` works too) |
+| `refresh:30m`, `refresh:2h` | every 30 minutes, every 2 hours |
+| `refresh:off` | never on a schedule (the cache's own timeout applies) |
+| *(no tag)* | the default in `.env`: `DEVKIT_REFRESH_EVERY_MIN=60`, or `DEVKIT_REFRESH_AT=06:30,13:00` |
+
+The refresh reads the tags every 2 minutes, so there is nothing to restart. Times are in `DEVKIT_TZ`
+(`Africa/Casablanca`). To refresh only the dashboards you tagged, set `DEVKIT_REFRESH_EVERY_MIN=0`.
 
 ```bash
-docker compose -p sharpsight-superset-devkit logs -f devkit-refresh     # what it did, pass by pass
-docker compose -p sharpsight-superset-devkit restart devkit-refresh     # look at everything again now
+# each dashboard: its schedule, how many charts are kept warm, the age of their data, the next refresh
+docker compose -p sharpsight-superset-devkit exec devkit-refresh python /app/pythonpath/devkit_refresh.py --status
+# re-query one dashboard now (or « all »), e.g. right after the cluster has loaded new data
+docker compose -p sharpsight-superset-devkit exec devkit-refresh python /app/pythonpath/devkit_refresh.py --now 12
+# what it did, pass by pass
+docker compose -p sharpsight-superset-devkit logs -f devkit-refresh
 ```
+
+What to know:
+
+- **Open a newly scheduled dashboard once, and each of its tabs.** What a page asks is learnt by watching it ask.
+  A tab's charts are asked only when the tab is shown, so a tab nobody opened is not warm yet. `--status` says
+  « open it once » for a dashboard it has not seen.
+- **What still takes time is the page itself.** Measured on the laptop (Roaming Outbound, 6 filters + 5 charts):
+  before, the last chart had its data after **20 s**; with the refresh, every request came from the cache, each
+  in 0.3–0.7 s. The page was complete at 6.8 s in a headless browser limited to 2 CPUs: Superset draws the
+  filters first, then asks for the charts. A normal desktop browser is faster.
+- After a restart the cache is empty. The list of requests is kept in the kit's volume, and the refresh asks them
+  all again within a minute.
+- A dashboard nobody opens for 7 days (30 for a tagged one) stops being refreshed.
+- A user with a row-level-security rule has a cache entry of their own, which the refresh cannot warm.
 
 ### Size
 
