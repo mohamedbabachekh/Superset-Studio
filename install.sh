@@ -9,7 +9,7 @@
 # AN UPGRADE: unpack the new bundle in a NEW folder and run this. It finds the kit already installed, brings its
 # settings here (.env — which holds the key your connections' passwords are encrypted with — cem.env, the driver,
 # krb5, your exports), backs Superset's own database up, lets Superset migrate it, and then says what it kept:
-# connections, dashboards, charts, datasets, saved queries, counted before and after. Nothing you made is touched.
+# connections, dashboards, charts, datasets, saved queries, users, roles, tags and row rules, counted before and after. Nothing you made is touched.
 #
 # It installs nothing outside its own compose project: its containers, its network, its volumes. It cannot
 # see, reach or modify a SharpSight platform running beside it.
@@ -237,7 +237,7 @@ fi
 #      and counted again afterwards, and the whole of Superset's database is dumped where it can be put back.
 #      Only then: an ordinary start changes no code, and a backup at every start would bury the one that matters.
 metadata() { compose exec -T devkit-db psql -X -q -At -U devkit -d superset -c "$1" 2>/dev/null | tr -d '\r'; }
-COUNTS="select (select count(*) from dbs)||' '||(select count(*) from dashboards)||' '||(select count(*) from slices)||' '||(select count(*) from tables)||' '||(select count(*) from saved_query)"
+COUNTS="select (select count(*) from dbs)||' '||(select count(*) from dashboards)||' '||(select count(*) from slices)||' '||(select count(*) from tables)||' '||(select count(*) from saved_query)||' '||(select count(*) from ab_user)||' '||(select count(*) from ab_role)||' '||(select count(*) from tagged_object)||' '||(select count(*) from row_level_security_filters)"
 upgrading=0; kept_before=""; schema_before=""; backup=""
 case " ${up_flags[*]:-} " in *" --force-recreate "*)
   kept_before="$(metadata "$COUNTS" | tail -1 || true)"
@@ -285,7 +285,7 @@ if [ "$upgrading" = 1 ]; then
   schema_after="$(metadata 'select version_num from alembic_version' | head -1 || true)"
   echo "upgrade — what was there before this version started, and what is there now:"
   lost=0; i=0
-  for name in connections dashboards charts datasets "saved queries"; do
+  for name in connections dashboards charts datasets "saved queries" users roles tags "row rules"; do
     i=$((i + 1))
     b="$(printf '%s' "$kept_before" | cut -d' ' -f"$i")"; a="$(printf '%s' "$kept_after" | cut -d' ' -f"$i")"
     printf '    %-14s %5s  ->  %-5s %s\n' "$name" "${b:-?}" "${a:-?}" "$([ "${a:-0}" -lt "${b:-0}" ] 2>/dev/null && echo '  <-- FEWER THAN BEFORE')"

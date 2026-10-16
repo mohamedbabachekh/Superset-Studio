@@ -105,9 +105,13 @@ services:
         # the scheduled refresh's own account (devkit_refresh.py): an admin, so it can read every dashboard, with
         # a password derived from DEVKIT_SECRET_KEY and set again at every start — written nowhere, and not the
         # human admin's, whose password may be changed in Superset without stopping the refresh
-        pw="$$(python -c 'import os, devkit_refresh as r; print(r.refresh_password(os.environ["SUPERSET_SECRET_KEY"]))')"
-        superset fab create-admin --username devkit-refresh --firstname Scheduled --lastname refresh           --email devkit-refresh@sharpsight.local --password "$$pw" >/dev/null 2>&1 || true
-        superset fab reset-password --username devkit-refresh --password "$$pw" >/dev/null
+        # — and NOTHING HERE MAY STOP SUPERSET FROM STARTING: on an upgrade this job runs on someone's existing work,
+        # and a refresh that cannot sign in costs a slow first visit, while a failed job keeps every dashboard shut
+        pw="$$(python -c 'import os, devkit_refresh as r; print(r.refresh_password(os.environ["SUPERSET_SECRET_KEY"]))' 2>/dev/null)" || pw=""
+        if [ -n "$$pw" ]; then
+          superset fab create-admin --username devkit-refresh --firstname Scheduled --lastname refresh             --email devkit-refresh@sharpsight.local --password "$$pw" >/dev/null 2>&1 || true
+          superset fab reset-password --username devkit-refresh --password "$$pw" >/dev/null 2>&1             || echo "WARNING: the scheduled refresh's account could not be set — Superset starts, the refresh will not"
+        fi
         python /app/pythonpath/devkit_seed.py
         echo "dev kit ready — sign in as $$DEVKIT_ADMIN_USER"
     depends_on:

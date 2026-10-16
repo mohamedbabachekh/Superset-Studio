@@ -86,6 +86,25 @@ An optional overlay: the kit starts without it, and its `docker-compose.yaml` is
   Not built: the portal, Keycloak, Airflow, separate UAT/PROD environments, the `TelecomQoEChart` plugin, and
   the offline bundle does not carry the engine's image.
 
+## 20261016
+
+What 20261015b does, made safe to install over existing work. Bundle verified 24/24.
+
+- **Upgrade rehearsed on REAL content**, from 20261006 (the version deployed on the server): a copy of the
+  laptop kit's whole database server (Superset's metadata, the `roaming` mart, the kit's store), with its key.
+  Before and after, through Superset: 4 of 4 connections answer, 246 of 246 charts return **the same data**
+  (rows fingerprinted), 10 of 10 dashboards answer. In a browser, all 10 dashboards draw the same 72 charts on
+  their first tab, with none in error. Counted by the installer, nothing fewer: 4 connections, 10 dashboards,
+  246 charts, 53 datasets, 10 users, 12 roles, 680 tags, 2 row rules. The scheduled refresh signed in.
+- Rehearsed again from a kit that never had the refresh account: devkit-init created it (users 1 → 2), and the
+  refresh signed in and read every dashboard's schedule.
+- **Nothing in the refresh account's set-up can stop Superset from starting.** If it fails, `devkit-init`
+  prints a warning and Superset starts all the same, without the refresh.
+- The installer now also counts users, roles, tags and row-level-security rules before and after an upgrade.
+- `rehearse-upgrade.sh` takes `REAL_CONTENT_FROM=<kit project> REAL_CONTENT_ENV=<its .env>` to rehearse on a
+  copy of a real kit, and opens every dashboard in a browser before and after (`rehearse_dashboards.mjs`).
+  Charts saved without a query (most imported ones) are drawn only by a browser; the API half asks their dataset.
+
 ## 20261015b
 
 - **Each dashboard has its own refresh schedule, set in Superset as a tag**: `refresh:06:30` (every day at
