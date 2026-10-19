@@ -3,9 +3,43 @@
 Versions are the date a bundle was built (`sharpsight-superset-devkit-<version>.tar.gz`). Everything below was
 built and verified on a running kit before it was written down.
 
+## Not in a bundle yet — SharpSight Studio (2026-10-19)
+
+The visual builder of the brief's sections 46 to 60, as a page of Superset's own — not an extension panel:
+6.1.0 contributes to SQL Lab and nowhere else. The engine is 0.3.0, the extension 0.2.0. Read
+[docs/superset-studio.md](docs/superset-studio.md) for what was built and what is owed, and
+[docs/ai-bi.md](docs/ai-bi.md) §3 for what it does.
+
+- **A workspace, at `/sharpsight/studio/<project>/`.** Superset's own top bar, session and theme; the project,
+  its environment, its version and its gate; an explorer with the project's outline and the governed datasets
+  and metrics; a canvas; an inspector; a validation drawer. No build step and no second React on the page: the
+  Studio is plain DOM, served as it is in the repository, so the kit still needs no Node.
+- **The layout stops belonging to the template.** A specification may carry its own — in the template's shape,
+  which is Superset's: rows of charts with a width in twelfths and a height in grid units. A chart moved or
+  resized on the canvas is what the next build draws, and a commit keeps it. A specification that carries none
+  is laid out by its template, so every version stored before today restores exactly as it was.
+- **What a canvas may do is a rule, not a hope**: the rows reorder, a chart moves on its row, widths take from
+  a neighbour and never go below the template's minimum, a row changes height — and a chart does not leave the
+  section it is accountable to. Each is checked in the engine before Superset is called, and said in words a
+  person can act on.
+- **A draft is the third state**: what a person is editing, kept with the project, saved a moment after each
+  change, with a token so two people with the page open cannot overwrite each other silently. It changes
+  nothing in Superset by existing, and it becomes a version through the pipeline every other commit goes
+  through — ten quality gates, visual QA, git, a package.
+- **A tile is a photograph of the real chart**, cut out of one picture of the real dashboard taken in the
+  engine's own browser; *Preview* opens Superset's own dashboard for the live thing. There is no second chart
+  renderer anywhere, which is the brief's own first rule.
+- **The AI panel is there and answers nothing**, on purpose: no language model has been chosen. It says what
+  it will do when one is — a proposal with a diff, and Preview / Apply / Reject.
+- **Looked at without Superset**: `python studio/preview.py` serves the workspace against a stand-in engine,
+  and `--check` drives it in a browser and holds it to thirteen promises. The engine's own rules are held by
+  24 new tests against the real registry (194 in all).
+- Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in
+  [docs/superset-studio.md](docs/superset-studio.md) §11.
+
 ## Not in a bundle yet — the AI BI engine (2026-10-03)
 
-An optional overlay: the kit starts without it, and its `docker-compose.yaml` is not edited. The engine is 0.2.0. One thing of the kit's own did change with it, on 2026-10-04: its theme and sign-in page are SharpSight blue, in the same image tag. See [docs/ai-bi.md](docs/ai-bi.md).
+An optional overlay: the kit starts without it, and its `docker-compose.yaml` is not edited. The engine is 0.3.0. One thing of the kit's own did change with it, on 2026-10-04: its theme and sign-in page are SharpSight blue, in the same image tag. See [docs/ai-bi.md](docs/ai-bi.md).
 
 - **A request becomes a dashboard awaiting review.** `bash ai-bi.sh demo` takes the POC's own sentence through
   twenty-two steps: certified datasets and metrics found, the one missing column (the map's region code)

@@ -592,3 +592,40 @@ engine's own routes which ones that token opens. Found by a second reader, the s
 otherwise by a mixin; the `@api` it gives an extension is not. The panel sent the token and nothing checked it:
 a POST with a developer's session cookie and no token started a commit — measured. → `csrf_exempt = False`, a
 test that the source says so, and the forged request sent by `check-adapter` every time.
+
+---
+
+## The Studio (2026-10-19)
+
+**Superset's dashboard layout is rows, not coordinates.** The brief's specification (§50.1) places each
+component at `x, y, w, h`, as a design tool would. What Superset stores is a tree: `GRID` → `ROW` → `CHART`,
+where a chart carries a width in twelfths and the row carries a height in grid units (read from
+`position_json`, and written by `dashboard_agent.layout` since the first dashboard). There is nothing to put a
+`y` in. → the specification carries a layout in the TEMPLATE's own shape — rows of slots with widths — and
+what is written for Superset and read back is the same layout, which a test asserts
+(`test_studio_layout.py::test_a_layout_written_for_superset_and_read_back_is_the_same_layout`). A canvas that
+offered free coordinates would be offering what cannot be saved.
+
+**Every section of every template today is exactly one row.** So the rule that a chart may not leave its
+section — a section has an owner and filters of its own — means, with the templates as they stand, that a
+chart cannot be dragged to another row at all. Measured by reading the six templates, not by guessing. → the
+canvas refuses that drag and says why, instead of appearing broken; a template with a two-row section would
+make the move possible, and the rule is already tested against one built in the test.
+
+**A drag that changes the specification at every pixel is forty things to undo.** The first resize moved the
+width on every `pointermove`, each one a step in the history and a redraw of the canvas under the pointer. →
+the drag moves two tiles in the PAGE and changes the specification once, on release. A canvas is the one
+place where the cheap thing (re-render on every change) is the wrong thing.
+
+**A page of ours that writes needs Superset's CSRF token, and an extension's helper is not there to give it.**
+`window.superset.authentication.getCSRFToken()` is what the SQL Lab panel uses; it exists because the
+extension host put it there, and a page of ours is not an extension. → the token is rendered into the page by
+Flask's own `csrf_token()`, with Superset's `/api/v1/security/csrf_token/` as the fallback, because the
+extension's API refuses a write without it (`csrf_exempt = False`, the lesson above).
+
+**A workspace can be looked at without starting Superset.** `python studio/preview.py` serves the same page
+against a stand-in for the extension's API; `--check` drives it in a browser and holds it to thirteen
+promises — the moves it offers, the minimum widths, the section a chart may not leave, the draft it saves,
+undo. Thirteen checks in nine seconds, against a kit that takes a minute to start and real data to be
+meaningful. It proves no rule of the engine's: those are tested against the real registry, and the whole
+thing is run by `bash ai-bi.sh demo`.

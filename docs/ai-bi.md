@@ -321,17 +321,46 @@ is granted with it.
   `shown_in_superset.extension` — `ai-bi.sh` says so at start when it is not, and `ai-bi.sh check-adapter`
   proves the API still answers.
 
+### The Studio — `/sharpsight/studio/<project>/`
+
+The visual builder of the brief's sections 46 to 60, added 2026-10-19. Superset 6.1.0 contributes a panel in
+SQL Lab and nowhere else, so the Studio is **a page of Superset's own**: its page template, its application —
+which draws the top bar — its session, its theme, and the workspace below. No fork, no second application, no
+second React on the page (`studio/studio.js` is plain DOM).
+
+What it edits is a **specification**, not a dashboard. That is what keeps the brief's first five rules: there
+is no second renderer, no second chart editor, no second SQL Lab here.
+
+| | |
+|---|---|
+| the canvas | the rows in force, each tile a photograph of that chart — cut out of one picture of the real dashboard (`aibi/picture.py`), because Superset's own screenshot endpoints cannot work in this image. *Preview* opens the live dashboard, with its filters and its tooltips |
+| what may be moved | the rows, in order; a chart's place on its row; a chart's width, taking from its neighbour, never below the template's minimum; a row's height. A chart may not leave its section — it has an owner and filters of its own — and with every template today being one row per section, that means it stays on its row |
+| the inspector | what a specification carries for that chart (a title, what it is for, a top N, a time grain, an order, a number format) and its governance: the metric, its definition, its owner, whether it is certified; the dataset, its owner, its domain, its grain; the slot's purpose and what it accepts |
+| the draft | the third state (§50.2): what a person is editing, kept with the project, saved a moment after each change, carrying a token so that two people with the page open cannot overwrite each other silently (§50.3) |
+| validate | the engine's own Level 1 report on the draft, in the drawer — the layout, the slots, the visualizations, the metrics, the datasets, this person's clearance for each. It touches nothing in Superset |
+| commit | the draft becomes a version **through the pipeline every other commit goes through**: the ten quality gates, Superset, visual QA, git, a package. Nothing here approves, and nothing here promotes |
+| the AI panel | present, and wired to nothing, on purpose: no language model has been chosen (`aibi/llm.py`). It says so, and says what it will do when one is — a proposal with a diff, and Preview / Apply / Reject |
+
+The layout a person places is **kept**: it is carried in the specification, in the template's own shape (rows
+of slots with a width in twelfths), it is what the next build draws, and a commit no longer sets it back.
+That is the first of the three decisions this chapter used to leave to the owner — the Studio takes it,
+because a canvas whose work the next build undoes is a lie. What a template still owns is everything else:
+which slots exist, what each accepts, what is mandatory, the minimum widths, the grid, the sections.
+
+Looked at without Superset: `python studio/preview.py` (the same page, against a stand-in for the extension's
+API) and `python studio/preview.py --check`, which drives it in a browser and holds it to thirteen promises.
+
 ### Where the brief's proof-of-concept list stands
 
 Its section 38 lists fourteen things for one `sharpsight-bi.supx`. On Superset 6.1.0, with no fork:
 
 | | The brief's item | Here |
 |---|---|---|
-| 1 | Project / environment context bar | in the SQL Lab panel: project, environment, gate. On a dashboard: its tags. No bar on dashboards or in Explore — no place for one |
+| 1 | Project / environment context bar | **done, in the Studio** — project, environment, version, gate, draft state, and the commands beside them; and in the SQL Lab panel. On a dashboard and in Explore there is still no place for one |
 | 2 | SharpSight menu entries | **done** — Superset's top bar, shown by `rbac.yaml` |
-| 3 | Governance drawer | not as a drawer. Certified badges and tags in Superset's lists; *Data Quality* |
-| 4 | Asset Library panel | not as a panel. Superset's own dataset and chart lists, tagged by project and domain, certified |
-| 5 | AI chat panel | **not built**: 6.1.0 has no chat contribution, and no language model was chosen |
+| 3 | Governance drawer | **in the Studio's inspector**, per chart: metric, definition, owner, certification, dataset, domain, grain. Elsewhere: certified badges and tags in Superset's lists; *Data Quality* |
+| 4 | Asset Library panel | **in the Studio's explorer**: the project's outline, and the governed datasets and metrics this person may use. Adding a chart is still a request to the engine, not a drag from the list |
+| 5 | AI chat panel | the panel is **in the Studio** and answers nothing: no language model was chosen (and 6.1.0 has no chat contribution, which is moot on a page of ours) |
 | 6 | Validate command | **done** — panel, command, command line |
 | 7 | Commit command | **done** — panel, command, command line |
 | 8 | dbt status panel | as a dashboard: *Data Quality* (models, every test); dbt's own documentation under the menu |
@@ -727,9 +756,9 @@ platform that was not touched:
 | **A language model** | **Left open on purpose** (2026-10-03). The planner is deterministic; `aibi/llm.py` is the seam, and a model plugs in by producing the same `Requirement` structure. Everything downstream is unchanged, which also means the deterministic run already exercises every guard a model will meet |
 | **The extension, what it does not do** | it approves nothing, on purpose. It has no « ask for a dashboard » box: no language model was chosen, and a request is made on the command line. Its panel is in SQL Lab because Superset 6.1.0 takes a panel nowhere else. Its words are English under a French interface. The bundle is checked against a recorded checksum — not signed. The panel is built with Node on a developer's machine and its build is committed: the kit cannot rebuild it (`build.py --check-frontend` says, where there is Node, whether the build in the repository is what the sources give). No MCP tool, no chat, no semantic-layer extension, no custom visualization (chapter 3's list) |
 | **Exact versions under one tag** | the kit's image is still `sharpsight-superset-devkit:1.0.0` though its theme changed on 2026-10-04; the engine's went from 0.1.0 to 0.2.0 only at the end of that day's work. A version's package now says what it was built with (`built_with` in its manifest: this service's version, Superset's) |
-| **A context bar, an outline, a governance drawer, an AI chat on dashboards and in Explore** | Superset 6.1.0 has no extension point there, and a fork was not chosen (chapter 3). What stands in their place is Superset's own: tags, badges, the SharpSight menu, five dashboards |
-| **What a commit does not take from Superset** | only what a specification carries, of the charts it has a place for: kind, metric, dimension, dataset, top N, order, time grain, bins, title. The rest of what Explore offers — number formats, colours, a legend, a chart's own filters, ECharts options — is named per chart and set back. On the dashboard itself, a chart added by hand, a row moved in Superset's dashboard editor, a filter changed there are named, and undone: the layout is the template's and is applied again at every build. So Superset's dashboard editor is open, and what is done in it does not last. And a dashboard built from nothing in Superset is not adopted as a project: a project starts with a request |
-| **Three decisions that are the owner's**, put to them, not taken here | whether a layout made by hand in Superset's dashboard editor should be kept (versioned from the export, the template no longer re-applied once a person changed it) or the editor closed on a project's dashboard and said so; and how a project that stands in UAT or PROD gets a next version in a kit that has one Superset — today neither a request nor a commit is accepted on it; and whether a developer may QUERY in SQL Lab — their account opens its page, where the panel is, and is given no database there: granting the governed schemas would need Superset's row-level rules applied in SQL Lab too |
+| **A context bar, an outline, a governance drawer on dashboards and in Explore** | they are in the Studio, which is a page of its own (chapter 3). ON a dashboard and IN Explore there is still no extension point, and a fork was not chosen: what stands there is Superset's own — tags, badges, the SharpSight menu, five dashboards |
+| **What a commit does not take from Superset** | only what a specification carries, of the charts it has a place for: kind, metric, dimension, dataset, top N, order, time grain, bins, title — and, since the Studio, the layout, which a specification now carries and a commit keeps. The rest of what Explore offers — number formats, colours, a legend, a chart's own filters, ECharts options — is named per chart and set back. On the dashboard itself, a chart added by hand, a row moved in Superset's dashboard editor, a filter changed there are named, and undone: the layout is the template's and is applied again at every build. So Superset's dashboard editor is open, and what is done in it does not last. And a dashboard built from nothing in Superset is not adopted as a project: a project starts with a request |
+| **Two decisions that are the owner's**, put to them, not taken here | (the first of three is now taken: a layout placed IN THE STUDIO is kept, carried in the specification — what is still open is the layout a person moves in Superset's OWN dashboard editor, which is still named and undone; `aibi/layout.py::from_positions` is the reading it would need to be adopted instead.) How a project that stands in UAT or PROD gets a next version in a kit that has one Superset — today neither a request nor a commit is accepted on it; and whether a developer may QUERY in SQL Lab — their account opens its page, where the panel is, and is given no database there: granting the governed schemas would need Superset's row-level rules applied in SQL Lab too |
 | **The records' dashboards, per workspace** | this kit has one workspace, so no row-level rule is set on `bi_factory`; every row carries its tenant for the day there are several |
 | **Branding, the parts not done** | SharpSight's colours lead the interface and the dashboards (2026-10-04). Not done: the five system dashboards have English titles under a French menu; the application is still named « SharpSight Superset — atelier », where the brief says « SharpSight BI Studio powered by Apache Superset »; a client's brand changes a dashboard's accent and series, not Superset's page around it (6.1 can give one dashboard a theme of its own — not used); the brand values are written in three places kept alike by hand (`superset_config.py`, `registry/design/tokens.yaml`, the sign-in page's template) |
 | **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file, and people reach Superset through a command an administrator runs |

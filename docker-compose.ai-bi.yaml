@@ -177,19 +177,23 @@ services:
       # The extension's backend runs inside Superset and asks the engine, for the person signed in to Superset.
       # That makes Superset a gateway (accepted on 2026-10-04, for validate and commit only). It holds a token of
       # its OWN, not the one the command line uses: the engine accepts it for four calls — the projects, a
-      # validation, a commit, a run — and refuses it everywhere else, approvals first (aibi/main.py, SUPERSET_MAY).
+      # validation, a commit, a run, and what the Studio does — and refuses it everywhere else, approvals first
+      # (aibi/main.py, SUPERSET_MAY).
       SHARPSIGHT_ENGINE_URL: "http://sharpsight-ai-bi:8080"
       SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
       # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
-      SHARPSIGHT_EXTENSION_SHA256: "4342c5fa3ff51777552a6dbbbf74aa1ef0e50b2f92d871ffcada3949cf394472"
+      SHARPSIGHT_EXTENSION_SHA256: "cdc9f08487746db8e82556ee487127dc794a1a1338e8b3fa3e9b46ab8a268506"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
+      # the Studio's own stylesheet and script, read as they are in the repository: no build step, no Node
+      SHARPSIGHT_STUDIO_DIR: /app/sharpsight/studio
     volumes:
       # Superset's own extension system: the built bundle and its recorded checksum, read-only
       - ./superset-extension/bundle:/app/sharpsight/extensions:ro
       - ./superset-addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
       - ./superset-addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
       - ./superset-addon/templates:/app/sharpsight/templates:ro
+      - ./studio:/app/sharpsight/studio:ro
       - aibi-dbt-docs:/app/sharpsight/dbt-docs:ro
       # who may see which entry of the SharpSight menu, and read dbt's documentation: the same file the engine reads
       - ./registry/security/rbac.yaml:/app/sharpsight/rbac.yaml:ro

@@ -56,7 +56,7 @@
         const table = document.createElement('table');
         table.style.cssText = 'border-collapse:collapse;width:100%;background:#fff;border:1px solid #E3E6EC;border-radius:10px';
         const head = table.insertRow();
-        ['Project', 'Version', 'Gate', 'Environment'].forEach(function (name) {
+        ['Project', 'Version', 'Gate', 'Environment', ''].forEach(function (name) {
           const cell = document.createElement('th');
           cell.textContent = name; cell.style.cssText = 'text-align:left;padding:10px 14px;border-bottom:1px solid #E3E6EC;color:#5B6472;font-weight:600';
           head.appendChild(cell);
@@ -70,6 +70,13 @@
               cell.appendChild(link);
             } else { cell.textContent = value; }
           });
+          // into the Studio: the workspace for that one project (studio/studio.js)
+          const open = row.insertCell();
+          open.style.cssText = 'padding:10px 14px;border-bottom:1px solid #F0F2F5;text-align:right';
+          const studio = document.createElement('a');
+          studio.href = '/sharpsight/studio/' + encodeURIComponent(project.project_id) + '/';
+          studio.textContent = 'Open in Studio →'; studio.style.color = primary;
+          open.appendChild(studio);
         });
         out.appendChild(table);
         out.dataset.rows = said.result.length;

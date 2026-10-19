@@ -4,4 +4,4 @@ Superset draws, dbt transforms, git remembers. This package decides what may be 
 came back, and keeps the record.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

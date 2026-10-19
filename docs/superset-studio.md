@@ -5,6 +5,12 @@
 from what [`docs/ai-bi.md`](ai-bi.md) and [`docs/lessons.md`](lessons.md) already measured. Every claim that
 still needs a command to settle it is marked **spike**.
 
+**Since 2026-10-19 this document has a second half in the repository.** Stages 0 to 2 of §10 are built: the
+Studio is a page of Superset's own at `/sharpsight/studio/<project>/`, the layout belongs to the
+specification, and a draft is saved, validated and committed through the pipeline every other commit goes
+through. §11 below says exactly what was built, what was measured, and what was left. Everything in §1 to §9
+is the reading it was built from, unchanged.
+
 ---
 
 ## 1 · What V3 adds
@@ -216,9 +222,9 @@ done, each stage ending in something that can be run and looked at — the repos
 
 | | Stage | Done when |
 |---|---|---|
-| **0** | **The host, proved.** The three spikes of §3; one picture of one chart from the engine, timed; `position_json` written by the canvas's shape and read back unchanged (a round trip, asserted) | a report saying which of the three mounting choices is taken, with the measurement behind it |
-| **1** | **The workspace, read-only.** `/sharpsight/studio/<project>`: explorer, canvas drawn from the *committed* specification, inspector showing governance, validation drawer showing the last report. Nothing editable | a developer opens a project and sees its dashboard as the specification describes it, with every tile a true picture |
-| **2** | **Layout becomes data.** The owner's decision taken; `layout` in `DashboardSpec`; the template reduced to a starting layout and constraints; Level 1 validation of a layout; drag, resize, undo/redo, autosaved draft; a commit that keeps it | a chart moved on the canvas is still there after a commit, a build and a reload — and `rehearse-upgrade.sh` still says every chart returns the same data |
+| **0** | **The host, proved.** The three spikes of §3; one picture of one chart from the engine, timed; `position_json` written by the canvas's shape and read back unchanged (a round trip, asserted) | **done, except the timing** (§11): the round trip is asserted in a test, and the mounting question was answered by removing it — no second React |
+| **1** | **The workspace, read-only.** `/sharpsight/studio/<project>`: explorer, canvas drawn from the *committed* specification, inspector showing governance, validation drawer showing the last report. Nothing editable | **done** (§11) |
+| **2** | **Layout becomes data.** The owner's decision taken; `layout` in `DashboardSpec`; the template reduced to a starting layout and constraints; Level 1 validation of a layout; drag, resize, undo/redo, autosaved draft; a commit that keeps it | **built, not yet run against a kit** (§11): a chart moved on the canvas must still be there after a commit, a build and a reload, and `rehearse-upgrade.sh` must still say every chart returns the same data |
 | **3** | **The inspector, and the manual path.** Title, metric, dimension, dataset, top N, order, time grain, bins — each field widening what a commit takes, each with its test. Add a chart from the gallery without AI. « Open in native Superset editor » for the rest | an analyst builds a chart and places it without touching the command line or Explore (V3 §48.3: « do not force users to use AI ») |
 | **4** | **The copilot.** Proposals with diffs, Preview / Apply / Reject, revert the last applied change, chat history per project, streaming and cancel — on the deterministic planner first, exactly as the engine was built | « add a 30-day QoE trend » produces a reviewable diff that applies, and rejecting it leaves the draft untouched |
 | **5** | **The model.** Behind `llm.py`, once the owner has chosen where it runs. Clarifying questions; refusals for an uncertain metric | the same requests as stage 4, with a model, and no new guard needed downstream |
@@ -259,6 +265,52 @@ Four questions. The first blocks stage 2; the others block stages 3, 5 and 6.
    is answered, stage 4 stands on the deterministic planner — which is not a loss: it exercises every guard.
 4. **How does a project standing in UAT or PROD get a next version**, in a kit with one Superset? Today
    neither a request nor a commit is accepted on it.
+
+---
+
+## 11 · What was built, 2026-10-19
+
+One sitting, on this branch. Everything below was run; nothing was run against a Superset, because this
+session has no Docker daemon — what that leaves owed is the last table.
+
+### The engine
+
+| | |
+|---|---|
+| `aibi/layout.py` | the layout in force (the specification's, or the template's), what a canvas may change and what it may not, and `from_positions` — reading a layout back out of what Superset holds |
+| `aibi/models.py` | `DashboardSpec.layout`, in the template's own shape. Empty means « the template's », so every version stored before today restores exactly as it was |
+| `aibi/dashboard_agent.py` | builds `position_json` from the layout in force; Level 1 validation of it |
+| `aibi/picture.py` | the canvas's tiles: one picture of the dashboard in the engine's own browser, cut per slot |
+| `aibi/main.py` | `/projects/{id}/studio`, the draft (`PUT`, `DELETE`, `/validate`, `/commit`), `/pictures`, `/picture/{slot}` — and `SUPERSET_MAY` widened to exactly those, plus the governed lists the explorer shows |
+| the extension (`0.2.0`) | the same routes, as the gateway inside Superset: the person signed in, carried to the engine, which decides. Nothing that approves, promotes or restores — a test reads the source, and a second test asks the engine which routes that token opens |
+
+### Inside Superset
+
+`superset-addon/sharpsight_bi.py` serves `/sharpsight/studio/<project>/` from Superset's own page template,
+and the Studio's two files as they are in the repository — **no build step, so the kit still needs no Node**.
+A *Projects* entry joins the SharpSight menu (the projects page was reachable by typing its address only),
+and each project there opens in the Studio.
+
+### Proof
+
+| | |
+|---|---|
+| `services/ai-bi/tests/` | 194 pass, of which 24 are new: the layout's rules against the real registry and the real templates, the round trip, and the draft — its token, its refusals, what the workspace is given |
+| `python studio/preview.py --check` | the workspace driven in a browser against a stand-in engine: 13 promises, no console errors |
+| `python studio/preview.py` | the same page to look at, and `--shot` to photograph it |
+
+### What is owed before this can be called done
+
+- **Run it.** The three spikes of §3 against a real Superset: the page under the bar with a workspace on it,
+  the bar's own navigation with unsaved work, and `csrf_token()` in that template. Then one picture of one
+  chart, timed, on real hardware.
+- **The round trip on a real kit**: move a chart, commit, build, reload — and `rehearse-upgrade.sh` still
+  green on real content.
+- **The owner's first question is now answered in code** (a layout placed in the Studio is kept). The half
+  that is still open: a layout moved in Superset's *own* dashboard editor is still named and undone.
+  `from_positions` is the reading it would take to adopt it instead.
+- Stage 3 onwards unchanged: the manual path for adding a chart, the copilot, the model, the release
+  workspace.
 
 ---
 

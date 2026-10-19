@@ -395,6 +395,11 @@ class DashboardSpec(Strict):
     # A dashboard is a composition of sections. A specification that names none is laid out as rows only,
     # as every specification was before sections existed — so an older version restores as it was.
     sections: list[SectionSpec] = Field(default_factory=list)
+    # Where its charts sit, when a person placed them in the Studio: the TEMPLATE's own shape, because that
+    # shape is Superset's — rows of charts, a width in twelfths, a height in grid units. Empty means « the
+    # template's layout », which is what every specification stored before the Studio means. What a canvas
+    # may change about it, and what it may not, is aibi/layout.py.
+    layout: list[LayoutRow] = Field(default_factory=list)
 
     def component(self, slot: str) -> Optional[ComponentSpec]:
         return next((c for c in self.components if c.slot == slot), None)

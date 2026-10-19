@@ -33,6 +33,7 @@ calls Superset makes for its own menu — so a Superset upgrade does not have to
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -42,8 +43,12 @@ ROLE_PREFIX = "sharpsight_"                       # aibi/people.py: an rbac.yaml
 FACTORY = ("bi.generate", "bi.approve_uat", "bi.approve_prod")
 TRAIL = ("audit.read",)
 DBT_DOCS = "Data models (dbt)"
+# The entry into the Studio: the projects of SharpSight, each opening its own workspace. A page of ours,
+# not a dashboard — so its audience is stated here and nowhere else.
+PROJECTS = "Projects"
 # name, French label, where it leads, the capabilities it is for (None: the documentation's own rule)
 LINKS = (
+    (PROJECTS, "Projets", "/sharpsight/projects/", FACTORY),
     ("BI Factory", "Fabrique BI", "/superset/dashboard/sharpsight-bi-factory/", FACTORY),
     ("Data Quality", "Qualité des données", "/superset/dashboard/sharpsight-data-quality/", FACTORY),
     ("Impact Analysis", "Analyse d’impact", "/superset/dashboard/sharpsight-impact-analysis/", FACTORY),
@@ -158,7 +163,8 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
                     "build (bash ai-bi.sh).", 404, {"Content-Type": "text/plain; charset=utf-8"})
         return send_from_directory(docs_dir, name, max_age=0)
 
-    # SPIKE (2026-10-04, not committed): one page of ours under Superset's own top bar — does it hold?
+    # A page of ours under Superset's own top bar. 6.1.0 takes an extension panel in SQL Lab and nowhere
+    # else, so the Studio is this: Superset's own page template, its application, its session, its theme.
     import jinja2
     from flask import render_template
 
@@ -169,6 +175,8 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
     def projects_page():  # noqa: ANN202
         if not current_user.is_authenticated:
             return redirect(f"{appbuilder.get_url_for_login}?next={request.path}")
+        if not may(PROJECTS):
+            abort(403)
         from superset.views.base import get_spa_template_context
 
         context = get_spa_template_context(os.environ.get("SHARPSIGHT_PAGE_ENTRY", "spa"), None)
@@ -176,6 +184,42 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         return render_template("sharpsight/page.html", **context, appbuilder=appbuilder, sharpsight_page="projects",
                                sharpsight_user=current_user.username, sharpsight_title="Projects",
                                sharpsight_lead="A page of SharpSight's, inside Superset: its top bar, its session, its theme.")
+
+    studio_dir = Path(os.environ.get("SHARPSIGHT_STUDIO_DIR", "/app/sharpsight/studio"))
+
+    @pages.route("/studio/<project_id>/")
+    def studio_page(project_id: str):  # noqa: ANN202
+        """The Studio: the visual builder, for one BI project (studio/studio.js).
+
+        Everything it shows it asks of the extension's own API with the person's Superset session, and the
+        engine answers for that person — so this route decides nothing about who may see what. It renders a
+        page for a project id it has not checked exists: the workspace says so itself, in the engine's own
+        words, rather than this route holding a second copy of the rule."""
+        if not current_user.is_authenticated:
+            return redirect(f"{appbuilder.get_url_for_login}?next={request.path}")
+        if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", project_id or ""):
+            abort(404)
+        if not may(PROJECTS):
+            abort(403)
+        from superset.views.base import get_spa_template_context
+
+        context = get_spa_template_context(os.environ.get("SHARPSIGHT_PAGE_ENTRY", "spa"), None)
+        return render_template("sharpsight/studio.html", **context, appbuilder=appbuilder,
+                               sharpsight_user=current_user.username, sharpsight_project=project_id,
+                               sharpsight_assets="/sharpsight/studio-assets")
+
+    @pages.route("/studio-assets/<name>")
+    def studio_assets(name: str):  # noqa: ANN202
+        """The Studio's own stylesheet and script. No build step: they are read as they are in the repository
+        (studio/), which is why the kit needs no Node to ship a workspace."""
+        if not current_user.is_authenticated:
+            abort(403)
+        if name not in ("studio.js", "studio.css"):
+            abort(404)
+        if not (studio_dir / name).is_file():
+            return ("the Studio's files are not mounted: ./studio is bind-mounted at /app/sharpsight/studio "
+                    "by docker-compose.ai-bi.yaml", 404, {"Content-Type": "text/plain; charset=utf-8"})
+        return send_from_directory(studio_dir, name, max_age=0)
 
     app.register_blueprint(pages)
     app.logger.info("sharpsight: %d menu entries under « %s », dbt documentation from %s, audiences of %d roles",

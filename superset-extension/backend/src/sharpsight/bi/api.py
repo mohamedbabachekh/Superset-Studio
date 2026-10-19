@@ -33,7 +33,12 @@ _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")        # a project id, 
 class SharpSightBiApi(RestApi):
     openapi_spec_tag = "SharpSight BI"
     class_permission_name = VIEW
-    method_permission_name = {"projects": "read", "changes": "read", "run": "read", "commit": "write"}
+    method_permission_name = {"projects": "read", "changes": "read", "run": "read", "commit": "write",
+                              # the Studio: what it draws is a read; the draft it keeps is a write
+                              "studio": "read", "datasets": "read", "metrics": "read",
+                              "templates": "read", "check_draft": "read", "picture": "read",
+                              "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
+                              "pictures": "write"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
     # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
@@ -58,6 +63,23 @@ class SharpSightBiApi(RestApi):
             said = body.get("error") or body.get("detail") or body if isinstance(body, dict) else body
             return self.response(answer.status_code, message=str(said)[:800])
         return self.response(answer.status_code, result=body)
+
+    def _engine_png(self, method: str, path: str) -> Response:
+        """A tile of the Studio's canvas: bytes, not JSON. Everything else about the call is the same —
+        the engine's token, the name of the person signed in to Superset, and the engine's own refusals."""
+        base = os.environ.get("SHARPSIGHT_ENGINE_URL", "").rstrip("/")
+        token = os.environ.get("SHARPSIGHT_ENGINE_TOKEN", "")
+        if not base or not token:
+            return self.response(503, message="Superset was not told where the SharpSight engine is")
+        try:
+            answer = requests.request(method, base + path, timeout=120, headers={
+                "Authorization": f"Bearer {token}", "X-SharpSight-User": g.user.username})
+        except requests.RequestException as error:
+            return self.response(502, message=f"the SharpSight engine did not answer ({type(error).__name__})")
+        if answer.status_code != 200 or answer.headers.get("Content-Type") != "image/png":
+            return self.response(answer.status_code if answer.status_code >= 400 else 502,
+                                 message="no picture of that chart was given")
+        return Response(answer.content, mimetype="image/png", headers={"Cache-Control": "no-cache"})
 
     @expose("/projects", methods=("GET",))
     @protect()
@@ -129,3 +151,192 @@ class SharpSightBiApi(RestApi):
         if not _NAME.match(run_id):
             return self.response(400, message="that is not a run's name")
         return self._engine("GET", f"/runs/{run_id}")
+
+    # ── the Studio ──────────────────────────────────────────────────────────────────────────────────────────
+    # The workspace of the brief's sections 46–60, served as a page of Superset's own (sharpsight_bi.py). The
+    # gateway's part is unchanged: it carries the question to the engine with the name of the person signed in,
+    # and the engine answers for that person. A draft is kept there, not here — an extension holds no state
+    # that could not be recovered outside Superset.
+
+    @expose("/projects/<project_id>/studio", methods=("GET",))
+    @protect()
+    @safe
+    def studio(self, project_id: str) -> Response:
+        """Everything the workspace draws: the project, its gate, the template's constraints, the layout in
+        force, each chart with its governance, the draft, and when the tiles were cut.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The workspace
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("GET", f"/projects/{project_id}/studio")
+
+    @expose("/projects/<project_id>/draft", methods=("PUT",))
+    @protect()
+    @safe
+    def save_draft(self, project_id: str) -> Response:
+        """Keep what a person is editing. It changes nothing in Superset and commits nothing.
+        ---
+        put:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The draft's new token
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        body = request.get_json(silent=True) or {}
+        if len(request.get_data() or b"") > 256 * 1024:
+            return self.response(413, message="a specification is not that large")
+        return self._engine("PUT", f"/projects/{project_id}/draft",
+                            json={"spec": body.get("spec") or {}, "token": str(body.get("token") or "none")[:32]})
+
+    @expose("/projects/<project_id>/draft", methods=("DELETE",))
+    @protect()
+    @safe
+    def drop_draft(self, project_id: str) -> Response:
+        """Throw the draft away. The committed version, and what Superset holds, are untouched.
+        ---
+        delete:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: Whether there was one
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("DELETE", f"/projects/{project_id}/draft")
+
+    @expose("/projects/<project_id>/draft/validate", methods=("POST",))
+    @protect()
+    @safe
+    def check_draft(self, project_id: str) -> Response:
+        """Validate the draft: its layout, its slots, its visualizations, its metrics and datasets, and this
+        person's clearance for each — without touching Superset.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The report
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("POST", f"/projects/{project_id}/draft/validate")
+
+    @expose("/projects/<project_id>/draft/commit", methods=("POST",))
+    @protect()
+    @safe
+    def commit_draft(self, project_id: str) -> Response:
+        """Make the draft a version — through the same road as any other commit: the engine's ten gates,
+        visual QA, git, a package.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            202:
+              description: The run that was started
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        comment = str((request.get_json(silent=True) or {}).get("comment") or "")[:500]
+        return self._engine("POST", f"/projects/{project_id}/draft/commit", json={"comment": comment})
+
+    @expose("/projects/<project_id>/pictures", methods=("POST",))
+    @protect()
+    @safe
+    def pictures(self, project_id: str) -> Response:
+        """Take the canvas's tiles again: one picture of the dashboard, cut per slot.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: When they were taken, and of what
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("POST", f"/projects/{project_id}/pictures")
+
+    @expose("/projects/<project_id>/picture/<slot>", methods=("GET",))
+    @protect()
+    @safe
+    def picture(self, project_id: str, slot: str) -> Response:
+        """One tile: the chart as the dashboard drew it when the pictures were last taken.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          - in: path
+            name: slot
+            schema: {type: string}
+          responses:
+            200:
+              description: A PNG
+        """
+        if not _NAME.match(project_id) or not _NAME.match(slot):
+            return self.response(400, message="that is not a project's name and a slot")
+        return self._engine_png("GET", f"/projects/{project_id}/picture/{slot}")
+
+    @expose("/datasets", methods=("GET",))
+    @protect()
+    @safe
+    def datasets(self) -> Response:
+        """The governed datasets this person may read — the explorer's own list.
+        ---
+        get:
+          responses:
+            200:
+              description: The datasets
+        """
+        return self._engine("GET", "/datasets")
+
+    @expose("/metrics", methods=("GET",))
+    @protect()
+    @safe
+    def metrics(self) -> Response:
+        """The registered metrics, certified or not, this person may use.
+        ---
+        get:
+          responses:
+            200:
+              description: The metrics
+        """
+        return self._engine("GET", "/metrics")
+
+    @expose("/templates", methods=("GET",))
+    @protect()
+    @safe
+    def templates(self) -> Response:
+        """The dashboard templates: where things may go, and what may go there.
+        ---
+        get:
+          responses:
+            200:
+              description: The templates
+        """
+        return self._engine("GET", "/templates")
