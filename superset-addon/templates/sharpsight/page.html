@@ -1,0 +1,81 @@
+{#
+  A SharpSight page INSIDE Superset: Superset's own page template and Superset's own application, which draws
+  its top bar — and, for an address it has no screen for, nothing else. The page of ours is below the bar.
+  Same address, same session, same theme: nothing opens another application.
+
+  How (read from Superset 6.1.0, then tried): superset/spa.html has a `body` and a `tail_js` block. Its
+  frontend also has an entry named « menu », meant to draw the bar alone — which fails in 6.1.0 (« useThemeContext
+  must be used within a ThemeProvider »), so the whole application is loaded instead (`spa`). Two things follow:
+    · the application's root takes the whole height of the window: it is told to take only what the bar needs;
+    · the bar's own links are followed by the application WITHOUT loading a page: when the address leaves
+      /sharpsight/, this page takes itself away and gives the root its height back.
+#}
+{% extends "superset/spa.html" %}
+
+{% block body %}
+  <style id="sharpsight-page-style">
+    html, body { height: auto !important; }
+    #app, #app > div, #app > div > div { height: auto !important; min-height: 0 !important; flex: none !important; }
+  </style>
+  <div id="app" data-bootstrap="{{ bootstrap_data }}"></div>
+  <main id="sharpsight-page" data-page="{{ sharpsight_page }}" data-user="{{ sharpsight_user }}"
+        style="max-width: 1200px; margin: 0 auto; padding: 24px 24px 64px;
+               font-family: {{ theme_tokens.fontFamily | default('Inter, sans-serif') }};">
+    <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 4px;">{{ sharpsight_title }}</h1>
+    <p style="color: #5B6472; margin: 0 0 20px;">{{ sharpsight_lead }}</p>
+    <div id="sharpsight-content">…</div>
+  </main>
+{% endblock %}
+
+{% block tail_js %}
+  {{ super() }}
+  <script nonce="{{ macros.get_nonce() }}">
+    // Leaving by one of the bar's own links: Superset's application changes the address without loading a page.
+    (function () {
+      function leave() {
+        if (location.pathname.indexOf('/sharpsight/') === 0) return;
+        ['sharpsight-page', 'sharpsight-page-style'].forEach(function (id) { var el = document.getElementById(id); if (el) el.remove(); });
+      }
+      ['pushState', 'replaceState'].forEach(function (name) {
+        var original = history[name];
+        history[name] = function () { var done = original.apply(this, arguments); leave(); return done; };
+      });
+      window.addEventListener('popstate', leave);
+    })();
+  </script>
+  <script nonce="{{ macros.get_nonce() }}">
+    // The spike's whole page: ask the extension's own API, with the person's Superset session, and say what came back.
+    (async function () {
+      const out = document.getElementById('sharpsight-content');
+      const primary = "{{ theme_tokens.colorPrimary | default('#0972BC') }}";
+      try {
+        const answer = await fetch('/extensions/sharpsight/bi/projects', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const said = await answer.json();
+        if (!answer.ok) throw new Error(said.message || 'refused (' + answer.status + ')');
+        out.textContent = '';
+        const table = document.createElement('table');
+        table.style.cssText = 'border-collapse:collapse;width:100%;background:#fff;border:1px solid #E3E6EC;border-radius:10px';
+        const head = table.insertRow();
+        ['Project', 'Version', 'Gate', 'Environment'].forEach(function (name) {
+          const cell = document.createElement('th');
+          cell.textContent = name; cell.style.cssText = 'text-align:left;padding:10px 14px;border-bottom:1px solid #E3E6EC;color:#5B6472;font-weight:600';
+          head.appendChild(cell);
+        });
+        said.result.forEach(function (project) {
+          const row = table.insertRow();
+          [project.project_id, project.version || '—', project.status || '—', project.environment].forEach(function (value, n) {
+            const cell = row.insertCell(); cell.style.cssText = 'padding:10px 14px;border-bottom:1px solid #F0F2F5';
+            if (n === 0 && project.dashboard) {
+              const link = document.createElement('a'); link.href = new URL(project.dashboard).pathname; link.textContent = value; link.style.color = primary;
+              cell.appendChild(link);
+            } else { cell.textContent = value; }
+          });
+        });
+        out.appendChild(table);
+        out.dataset.rows = said.result.length;
+      } catch (error) {
+        out.textContent = error.message; out.dataset.problem = '1';
+      }
+    })();
+  </script>
+{% endblock %}

@@ -189,6 +189,7 @@ services:
       - ./superset-extension/bundle:/app/sharpsight/extensions:ro
       - ./superset-addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
       - ./superset-addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
+      - ./superset-addon/templates:/app/sharpsight/templates:ro
       - aibi-dbt-docs:/app/sharpsight/dbt-docs:ro
       # who may see which entry of the SharpSight menu, and read dbt's documentation: the same file the engine reads
       - ./registry/security/rbac.yaml:/app/sharpsight/rbac.yaml:ro

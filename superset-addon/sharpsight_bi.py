@@ -158,6 +158,25 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
                     "build (bash ai-bi.sh).", 404, {"Content-Type": "text/plain; charset=utf-8"})
         return send_from_directory(docs_dir, name, max_age=0)
 
+    # SPIKE (2026-10-04, not committed): one page of ours under Superset's own top bar — does it hold?
+    import jinja2
+    from flask import render_template
+
+    templates = os.environ.get("SHARPSIGHT_TEMPLATES_DIR", "/app/sharpsight/templates")
+    app.jinja_loader = jinja2.ChoiceLoader([app.jinja_loader, jinja2.FileSystemLoader(templates)])
+
+    @pages.route("/projects/")
+    def projects_page():  # noqa: ANN202
+        if not current_user.is_authenticated:
+            return redirect(f"{appbuilder.get_url_for_login}?next={request.path}")
+        from superset.views.base import get_spa_template_context
+
+        context = get_spa_template_context(os.environ.get("SHARPSIGHT_PAGE_ENTRY", "spa"), None)
+        # Superset's template asks for `appbuilder`: Flask-AppBuilder's own views put it in every context
+        return render_template("sharpsight/page.html", **context, appbuilder=appbuilder, sharpsight_page="projects",
+                               sharpsight_user=current_user.username, sharpsight_title="Projects",
+                               sharpsight_lead="A page of SharpSight's, inside Superset: its top bar, its session, its theme.")
+
     app.register_blueprint(pages)
     app.logger.info("sharpsight: %d menu entries under « %s », dbt documentation from %s, audiences of %d roles",
                     len(LINKS), CATEGORY, docs_dir, len(set().union(*allowed.values())))
