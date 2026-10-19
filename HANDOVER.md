@@ -122,6 +122,7 @@ layer the overlay mounts.
 | [`docs/connecting-sharpsight.md`](docs/connecting-sharpsight.md) | 119 | you need the platform's dashboards and mart |
 | [`docs/cem.md`](docs/cem.md) | 77 | you are pointing it at the cluster |
 | [`docs/ai-bi.md`](docs/ai-bi.md) | **747** | you are touching the engine; §9 is everything not built |
+| [`docs/superset-studio.md`](docs/superset-studio.md) | 267 | you are planning the next expansion — the AI Visual Builder of the V3 brief, read against this kit |
 | [`CHANGELOG.md`](CHANGELOG.md) | 270 | what each bundle changed, 20260927 → 20261016 |
 | `SharpSight_BI_Studio_Spec_Updated.md` | — | the owner's brief the engine implements (sections 18–32 are the factory) |
 
