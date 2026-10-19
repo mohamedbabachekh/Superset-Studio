@@ -168,8 +168,12 @@ def test_superset_and_the_engine_state_the_same_rule_of_who_sees_what(registry, 
         pytest.skip("superset-addon/ is not beside this checkout")
     shown = addon.audiences(registry_copy / "security" / "rbac.yaml")
     view = SupersetView(registry, Store(tmp_path / "s.sqlite"), AuditLog(tmp_path / "a"), None, tmp_path, "", ("", ""))
-    leads_to = {name: href.strip("/").split("/")[-1] for name, _, href, capabilities in addon.LINKS if capabilities}
+    leads_to = {name: href.strip("/").split("/")[-1] for name, _, href, capabilities in addon.LINKS
+                if capabilities and "/superset/dashboard/" in href}
     assert set(leads_to.values()) == set(DASHBOARDS)
+    # the entries that are pages of SharpSight's own, not dashboards: their audience is the add-on's to state
+    assert sorted(shown[addon.PROJECTS]) == ["sharpsight_bi_developer", "sharpsight_bi_release_manager",
+                                             "sharpsight_bi_reviewer"]
     for entry, slug in leads_to.items():
         assert sorted(shown[entry]) == view.audience(slug), entry
     # the documentation: a role granted a dataset, or one of the audiences above — and not a role granted none

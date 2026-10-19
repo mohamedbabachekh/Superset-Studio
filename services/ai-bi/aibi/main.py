@@ -14,7 +14,10 @@ The machine-readable description is at /openapi.json.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
+import re
 import subprocess
 import threading
 import time
@@ -32,10 +35,14 @@ from .config import Settings, get_settings
 from .data_gateway import DataGateway
 from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
+from .layout import problems as layout_problems
+from .layout import resolve as layout_in_force
+from .layout import source as layout_source
 from .lifecycle import Lifecycle, LifecycleError
 from .llm import get_parser
 from .people import People
-from .models import HELD, ComponentSpec, DashboardSpec, RunRecord
+from .models import HELD, ComponentSpec, DashboardSpec, RunRecord, utcnow
+from .picture import PictureError, Pictures
 from .pipeline import Pipeline
 from .planner import new_steps
 from .policy_engine import Identity, PolicyEngine, PolicyError
@@ -69,6 +76,8 @@ class Service:
             bi_database_uri=settings.superset_database_uri, superset_public_url=settings.superset_public_url,
             dbt_dev_schema=settings.dbt_dev_schema)
         self.lifecycle = Lifecycle(self.tools, settings.exports_dir)
+        # the Studio's tiles: one picture of the dashboard, cut per slot (aibi/picture.py)
+        self.pictures = Pictures(self.tools.visual, state)
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
@@ -157,8 +166,20 @@ async def _superset(_, exc: SupersetError):
 # every other, whoever is named. So « nothing in Superset approves » does not rest on the extension's source: a
 # fault in it, another extension, Superset itself — none of them can approve, restore or read the audit trail
 # with the only secret Superset has. The rule that PROD needs a second person is the engine's to hold.
-SUPERSET_MAY = frozenset({("GET", "/projects"), ("GET", "/projects/{project_id}/changes"),
-                          ("POST", "/projects/{project_id}/commit"), ("GET", "/runs/{run_id}")})
+# What the gateway's own token may ask for — the token the extension inside Superset carries, for the person
+# signed in there. Everything a developer DOES in the Studio is here; nothing that approves, promotes,
+# rejects or restores is, so the rule that PROD needs a second person cannot be gone round from Superset.
+SUPERSET_MAY = frozenset({
+    ("GET", "/projects"), ("GET", "/projects/{project_id}/changes"),
+    ("POST", "/projects/{project_id}/commit"), ("GET", "/runs/{run_id}"),
+    # the Studio: what it draws, the draft it keeps, and the tiles it shows
+    ("GET", "/projects/{project_id}/studio"), ("PUT", "/projects/{project_id}/draft"),
+    ("DELETE", "/projects/{project_id}/draft"), ("POST", "/projects/{project_id}/draft/validate"),
+    ("POST", "/projects/{project_id}/draft/commit"), ("POST", "/projects/{project_id}/pictures"),
+    ("GET", "/projects/{project_id}/picture/{slot}"),
+    # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
+    ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
+})
 
 
 def superset_may(method: str, route: str) -> bool:
@@ -178,8 +199,9 @@ def caller(request: Request, authorization: str = Header(default=""),
         route = getattr(request.scope.get("route"), "path", "")
         if not superset_may(request.method, route):
             raise HTTPException(status_code=403, detail=(
-                "this token is Superset's: with it the engine answers for the projects, a validation, a commit "
-                "and a run, and for nothing else — this is asked from the command line, with the gateway's own token"))
+                "this token is Superset's: with it the engine answers for the projects, the Studio, a validation, "
+                "a commit and a run, and for nothing else — this is asked from the command line, with the "
+                "gateway's own token"))
         return service.policy.identify(x_sharpsight_user)
     raise HTTPException(status_code=401, detail="this API is called by the SharpSight gateway, with its token")
 
@@ -429,6 +451,238 @@ def project_commit(project_id: str, body: Commit, response: Response, identity: 
     response.status_code = 202
     return {"run_id": run.id, "request_id": run.request_id, "status": "running", "taken": sorted(taken),
             "set_back": found["would_set_back"], "undone_on_the_dashboard": found["on_the_dashboard"]}
+
+
+# ── the Studio ──────────────────────────────────────────────────────────────────────────────────────────────
+# The workspace of the brief's section 47, served to a page inside Superset (superset-addon/sharpsight_bi.py).
+# It adds one state to this service: a DRAFT — the specification a person is editing, which is neither the
+# committed version nor what Superset holds (§50.2). A draft is kept with its project, carries a token so two
+# people cannot overwrite each other silently (§50.3), and becomes a version through the SAME road as every
+# other commit: the pipeline, its ten gates, visual QA, git, a package.
+
+
+def _token(draft: Optional[dict[str, Any]]) -> str:
+    """What a save must present to be accepted: a fingerprint of the draft it is a change to."""
+    if not draft:
+        return "none"
+    return hashlib.sha256(json.dumps(draft.get("spec"), sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _studio_spec(project: dict[str, Any]) -> tuple[DashboardSpec, bool]:
+    """What the Studio shows: the draft when there is one, the project's own specification otherwise."""
+    draft = project.get("draft")
+    if draft:
+        return DashboardSpec(**draft["spec"]), True
+    return DashboardSpec(**project["spec"]), False
+
+
+def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, Any]:
+    spec, from_draft = _studio_spec(project)
+    template = service.registry.template(spec.dashboard.template)
+    latest = service.store.latest_version(project["project_id"])
+    engine = project.get("engine") or {}
+    charts = {slot: chart for slot, chart in (engine.get("charts") or {}).items() if chart.get("id")}
+    rows = layout_in_force(spec, template)
+    governed = []
+    for component in spec.components:
+        metric = service.registry.metrics.get(component.metric)
+        dataset = service.registry.datasets.get(component.dataset or "")
+        slot = template.slots.get(component.slot)
+        governed.append({
+            "slot": component.slot, "type": component.type, "metric": component.metric,
+            "dimension": component.dimension, "dataset": component.dataset, "title": component.title,
+            "description": component.description, "options": component.options.model_dump(exclude_none=True),
+            "section": template.section_of(component.slot),
+            "purpose": slot.purpose if slot else None, "accepts": slot.accepts if slot else [],
+            "mandatory": bool(slot and slot.mandatory),
+            "chart_id": (charts.get(component.slot) or {}).get("id"),
+            # what the governance drawer of the brief's section 19 shows, for this chart
+            "governance": {
+                "metric_certified": bool(metric and metric.certified),
+                "metric_version": metric.version if metric else None,
+                "metric_owner": metric.owner if metric else None,
+                "metric_definition": metric.documentation if metric else None,
+                "dataset_certified": bool(dataset and dataset.certified),
+                "dataset_owner": dataset.owner if dataset else None,
+                "dataset_domain": dataset.domain if dataset else None,
+                "dataset_grain": dataset.grain if dataset else None,
+            }})
+    return {
+        "project": {"project_id": project["project_id"], "title": project.get("title"),
+                    "template": spec.dashboard.template, "created_by": project.get("created_by"),
+                    "dashboard_title": spec.dashboard.title, "description": spec.dashboard.description,
+                    "owner": spec.dashboard.owner,
+                    "version": latest.version if latest else None,
+                    "gate": latest.status if latest else (project.get("attempt") or {}).get("status"),
+                    "environment": latest.state if latest else "DEV",
+                    "held": bool(latest and latest.status in HELD),
+                    "dashboard": (engine.get("dashboard") or {}).get("url"),
+                    "may_edit": "bi.generate" in identity.capabilities},
+        # the template's constraints, which are what the canvas is allowed to rearrange
+        "template": {"id": template.id, "version": template.version, "name": template.template.name,
+                     "grid": template.grid.model_dump(), "rows": [r.model_dump() for r in template.layout],
+                     "slots": {name: body.model_dump() for name, body in template.slots.items()},
+                     "sections": [s.model_dump() for s in template.section_list()],
+                     "min_slot_width": template.responsive.min_slot_width,
+                     "viewports": [v.model_dump() for v in template.responsive.viewports],
+                     "filters": template.filters.model_dump()},
+        # the specification itself: what the workspace edits and sends back as a draft. Everything below is
+        # read from it, and is here so the page does not have to derive what the engine already knows.
+        "spec": spec.model_dump(exclude_none=True),
+        "layout": [r.model_dump() for r in rows],
+        "layout_of": layout_source(spec),
+        "components": governed,
+        "filters": spec.filters,
+        "sections": [s.model_dump(exclude_none=True) for s in spec.sections],
+        "theme": spec.theme.model_dump(exclude_none=True),
+        "editing": "draft" if from_draft else "version",
+        "draft": {k: project["draft"][k] for k in ("saved_at", "saved_by")} if project.get("draft") else None,
+        "token": _token(project.get("draft")),
+        "problems": layout_problems(spec, template),
+        "pictures": service.pictures.taken(project["project_id"]),
+    }
+
+
+@app.get("/projects/{project_id}/studio")
+def studio(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """Everything the workspace draws, in one call: the project, its gate, the template's constraints, the
+    layout in force, each chart with its governance, the draft if there is one, and when the tiles were cut."""
+    project = _project(project_id, identity)
+    if not project.get("spec"):
+        raise LifecycleError(f"{project_id} has no specification yet: a project starts with a request")
+    return _studio_payload(project, identity)
+
+
+class Draft(BaseModel):
+    spec: dict[str, Any]
+    # the token the page was given: a save against an older draft is refused, not merged silently
+    token: str = Field(default="none", max_length=32)
+
+
+@app.put("/projects/{project_id}/draft")
+def save_draft(project_id: str, body: Draft, identity: Identity = Depends(caller)) -> Any:
+    """Keep what a person is editing. It changes nothing in Superset and commits nothing."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    held = _token(project.get("draft"))
+    if body.token != held:
+        raise HTTPException(status_code=409, detail=(
+            "this draft was saved by someone else since the page was opened: reload it, or compare the two. "
+            f"The page has {body.token}, the project has {held}."))
+    try:
+        spec = DashboardSpec(**body.spec)
+    except Exception as exc:  # noqa: BLE001 — a malformed draft is an answer, not a crash
+        raise HTTPException(status_code=422, detail=f"this is not a specification: {str(exc)[:500]}") from exc
+    template = service.registry.template(spec.dashboard.template)
+    if spec.dashboard.id != DashboardSpec(**project["spec"]).dashboard.id:
+        raise HTTPException(status_code=422, detail="a draft is a change to this project's dashboard, not another")
+    project["draft"] = {"spec": spec.model_dump(exclude_none=True), "saved_at": utcnow(), "saved_by": identity.user}
+    service.store.save_project(project_id, project, utcnow())
+    service.audit.record(action="draft:save", user=identity.user, request_id=str(uuid.uuid4()), actor="human",
+                         project_id=project_id, metrics=spec.metrics(),
+                         detail={"layout_of": layout_source(spec), "rows": len(spec.layout),
+                                 "components": len(spec.components)})
+    return {"token": _token(project["draft"]), "saved_at": project["draft"]["saved_at"],
+            "problems": layout_problems(spec, template), "layout_of": layout_source(spec)}
+
+
+@app.delete("/projects/{project_id}/draft")
+def discard_draft(project_id: str, identity: Identity = Depends(caller)) -> Any:
+    """Throw the draft away. The committed version and what Superset holds are untouched."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    had = project.pop("draft", None)
+    if had:
+        service.store.save_project(project_id, project, utcnow())
+        service.audit.record(action="draft:discard", user=identity.user, request_id=str(uuid.uuid4()),
+                             actor="human", project_id=project_id, detail={"saved_at": had.get("saved_at")})
+    return {"discarded": bool(had), "token": "none"}
+
+
+@app.post("/projects/{project_id}/draft/validate")
+def validate_draft(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """Level 1 of the brief's validation (§53.1), on the draft, without touching Superset: the layout, the
+    slots, the visualizations, the metrics, the datasets, this person's clearance for each."""
+    project = _project(project_id, identity)
+    spec, from_draft = _studio_spec(project)
+    report = service.tools.dashboards.validate(spec, identity)
+    return {"of": "draft" if from_draft else "version", "summary": report.summary(),
+            "checks": [c.model_dump(exclude_none=True) for c in report.checks],
+            "problems": layout_problems(spec, service.registry.template(spec.dashboard.template))}
+
+
+@app.post("/projects/{project_id}/draft/commit")
+def commit_draft(project_id: str, body: Commit, response: Response, identity: Identity = Depends(caller)) -> Any:
+    """Make the draft a version — through the same road as any other commit: the pipeline's ten gates, the
+    BI engine, visual QA, git, a package. Nothing here is a shortcut past them."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    if not project.get("draft"):
+        raise LifecycleError(f"{project_id} has no draft to commit")
+    spec = DashboardSpec(**project["draft"]["spec"])
+    template = service.registry.template(spec.dashboard.template)
+    placing = layout_problems(spec, template)
+    if placing:
+        raise LifecycleError("the draft's layout is not one the template allows: " + "; ".join(placing))
+    latest = service.store.latest_version(project_id)
+    if latest and latest.status in HELD:
+        raise LifecycleError(f"{project_id} v{latest.version} is {latest.status}: this kit has one BI engine, so a "
+                             "commit would rewrite the promoted dashboard in place")
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
+    run = RunRecord(id=uuid.uuid4().hex[:12], request_id=str(uuid.uuid4()), user=identity.user, project_id=project_id,
+                    prompt=(f"Commit of the Studio draft of {project_id}"
+                            + (f": {body.comment}" if body.comment else "")),
+                    ai_model=service.parser.name, steps=new_steps())
+    service.store.save_run(run)
+    service.audit.record(action="commit:studio_draft", user=identity.user, request_id=run.request_id, actor="human",
+                         project_id=project_id, metrics=spec.metrics(),
+                         detail={"comment": body.comment, "from_version": latest.version if latest else None,
+                                 "layout_of": layout_source(spec), "saved_at": project["draft"]["saved_at"],
+                                 "saved_by": project["draft"]["saved_by"]})
+
+    def work() -> None:
+        try:
+            done = service.pipeline.execute(run, identity, edited=(project_id, spec))
+            if done.status == "succeeded":
+                # the draft became the version: what is left to edit is the version itself
+                body_now = service.store.get_project(project_id) or {}
+                if body_now.pop("draft", None) is not None:
+                    service.store.save_project(project_id, body_now, utcnow())
+        finally:
+            service.busy.release()
+
+    threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
+    response.status_code = 202
+    return {"run_id": run.id, "request_id": run.request_id, "status": "running", "layout_of": layout_source(spec)}
+
+
+@app.post("/projects/{project_id}/pictures")
+def take_pictures(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """Cut this project's tiles out of one picture of its dashboard (aibi/picture.py). Expensive on purpose:
+    it is a browser, a page load and every chart's own query."""
+    project = _project(project_id, identity)
+    engine = project.get("engine") or {}
+    dashboard = (engine.get("dashboard") or {}).get("id")
+    charts = {slot: chart for slot, chart in (engine.get("charts") or {}).items() if chart.get("id")}
+    if not dashboard or not charts:
+        raise LifecycleError(f"{project_id} has no dashboard in Superset to photograph")
+    try:
+        return service.pictures.cut(project_id, int(dashboard), charts)
+    except PictureError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/picture/{slot}")
+def picture(project_id: str, slot: str, identity: Identity = Depends(reader)) -> Any:
+    """One tile: the chart as the dashboard drew it when the pictures were last taken."""
+    _project(project_id, identity)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slot):
+        raise HTTPException(status_code=404, detail="no such slot")
+    path = service.pictures.tile(project_id, slot)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"no picture of {slot} has been taken")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 # ── projects and versions ───────────────────────────────────────────────────────────────────────────────────

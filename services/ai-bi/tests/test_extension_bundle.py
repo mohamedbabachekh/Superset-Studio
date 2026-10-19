@@ -66,7 +66,15 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
     api = backend["backend/src/sharpsight/bi/api.py"]
     exposed = re.findall(r'@expose\("([^"]+)", methods=\("(\w+)",\)\)', api)
     assert exposed == [("/projects", "GET"), ("/projects/<project_id>/changes", "GET"),
-                       ("/projects/<project_id>/commit", "POST"), ("/runs/<run_id>", "GET")]
+                       ("/projects/<project_id>/commit", "POST"), ("/runs/<run_id>", "GET"),
+                       # the Studio (the brief's sections 46–60): what it draws, the draft it keeps, its tiles
+                       ("/projects/<project_id>/studio", "GET"), ("/projects/<project_id>/draft", "PUT"),
+                       ("/projects/<project_id>/draft", "DELETE"),
+                       ("/projects/<project_id>/draft/validate", "POST"),
+                       ("/projects/<project_id>/draft/commit", "POST"),
+                       ("/projects/<project_id>/pictures", "POST"),
+                       ("/projects/<project_id>/picture/<slot>", "GET"),
+                       ("/datasets", "GET"), ("/metrics", "GET"), ("/templates", "GET")]
     assert not re.search(r"approve|reject|restore|discard|/audit|/people", api.split('"""', 2)[2])
     # a POST is refused without Superset's CSRF token: Flask-AppBuilder exempts an API unless told otherwise
     assert "    csrf_exempt = False\n" in api
@@ -74,18 +82,28 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
     assert '"X-SharpSight-User": g.user.username' in api and "request.headers" not in api
 
 
-def test_the_engine_answers_superset_s_token_for_four_calls_and_no_other():
+def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_other():
     """Superset holds a token of its own. « The extension approves nothing » must not rest on the extension's
-    source: with that token the engine itself refuses everything but the projects, a validation, a commit and
-    a run — so nothing inside Superset can approve, restore or read the audit trail."""
+    source: with that token the engine itself refuses everything but what a developer DOES — the projects,
+    the Studio and its draft, a validation, a commit, a run, and the governed lists the explorer shows — so
+    nothing inside Superset can approve, promote, restore or read the audit trail."""
     from aibi.main import SUPERSET_MAY, app, superset_may
 
     routes = {(method, route.path) for route in app.routes for method in getattr(route, "methods", None) or ()
               if method not in ("HEAD", "OPTIONS")}
     assert SUPERSET_MAY <= routes, "a call Superset may make is not a route of the engine"
     allowed = sorted(pair for pair in routes if superset_may(*pair))
-    assert allowed == [("GET", "/projects"), ("GET", "/projects/{project_id}/changes"), ("GET", "/runs/{run_id}"),
-                       ("POST", "/projects/{project_id}/commit")]
+    assert allowed == [("DELETE", "/projects/{project_id}/draft"),
+                       ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/projects"),
+                       ("GET", "/projects/{project_id}/changes"),
+                       ("GET", "/projects/{project_id}/picture/{slot}"),
+                       ("GET", "/projects/{project_id}/studio"), ("GET", "/runs/{run_id}"),
+                       ("GET", "/templates"),
+                       ("POST", "/projects/{project_id}/commit"),
+                       ("POST", "/projects/{project_id}/draft/commit"),
+                       ("POST", "/projects/{project_id}/draft/validate"),
+                       ("POST", "/projects/{project_id}/pictures"),
+                       ("PUT", "/projects/{project_id}/draft")]
     for refused in (("POST", "/projects/{project_id}/approve"), ("POST", "/projects/{project_id}/reject"),
                     ("POST", "/projects/{project_id}/restore"), ("POST", "/projects/{project_id}/discard"),
                     ("POST", "/projects/generate"), ("GET", "/audit"), ("POST", "/people/sync"),
@@ -93,5 +111,5 @@ def test_the_engine_answers_superset_s_token_for_four_calls_and_no_other():
         assert refused in routes and not superset_may(*refused), refused
     # and what the extension's backend asks is exactly what the engine answers it for
     api = (_folder() / "backend" / "src" / "sharpsight" / "bi" / "api.py").read_text(encoding="utf-8")
-    asked = set(re.findall(r'self\._engine\("(GET|POST)", f?"([^"]+)"', api))
+    asked = set(re.findall(r'self\._engine(?:_png)?\("(GET|POST|PUT|DELETE)", f?"([^"]+)"', api))
     assert asked == set(SUPERSET_MAY)

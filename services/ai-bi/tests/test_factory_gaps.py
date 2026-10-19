@@ -476,12 +476,13 @@ def test_the_matrix_covers_a_version_by_its_prefix(registry):
     assert not compatibility.covers("6.1", "6.10.0") and not compatibility.covers("6.1", "6.2.0")
     running = {"superset": "6.1.0", "dbt_core": "1.12.5", "dbt_postgres": "1.11.0", "python": "3.12.11",
                "postgresql": "16.4", "playwright": "1.63.0", "sqlglot": "27.29.0",
-               "superset_extensions": "6.1.0"}
-    good = compatibility.report(registry.compatibility, "0.2.0", running)
+               "superset_extensions": "6.1.0", "superset_studio": "6.1.0"}
+    good = compatibility.report(registry.compatibility, "0.3.0", running)
     assert good["ok"] and good["untested"] == []
     assert good["components"]["superset"]["verdict"] == "tested"
     assert good["components"]["airflow"]["status"] == "not_used" and "running" not in good["components"]["airflow"]
     assert good["connectors"]["postgresql"]["status"] == "tested"
-    newer = compatibility.report(registry.compatibility, "0.2.0", {**running, "superset": "6.2.0", "postgresql": None})
+    newer = compatibility.report(registry.compatibility, "0.3.0",
+                                 {**running, "superset": "6.2.0", "postgresql": None})
     assert not newer["ok"] and newer["components"]["superset"]["verdict"] == "untested"
     assert newer["untested"] == ["superset 6.2.0, tested with 6.1", "postgresql (not detected), tested with 16"]

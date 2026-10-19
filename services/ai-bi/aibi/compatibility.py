@@ -25,7 +25,10 @@ def running(superset: Optional[str], postgresql: Optional[str]) -> dict[str, Opt
             "sqlglot": _package("sqlglot"),
             # Superset's extension system has no version of its own to ask for: it is the one that came inside
             # that Superset (apache-superset-core 0.1.0rc3 in 6.1.0), so it stands or falls with it
-            "superset_extensions": superset}
+            "superset_extensions": superset,
+            # the Studio is a page of Superset's own, on Superset's own template: same thing — it has no
+            # version to ask for, and it stands or falls with the Superset it is served by
+            "superset_studio": superset}
 
 
 def covers(tested: str, version: str) -> bool:

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .dataset_agent import Need
+from .layout import problems as layout_problems
+from .layout import resolve as layout_in_force
 from .models import (RESTRICTED_CLASSIFICATIONS, ComponentOptions, ComponentSpec, DashboardHeader, DashboardSpec,
                      MetricDef, Requirement, SectionSpec, TemplateDef, ValidationReport)
 from .planner import slugify
@@ -236,6 +238,13 @@ class DashboardAgent:
         slots = [c.slot for c in spec.components]
         duplicated = sorted({s for s in slots if slots.count(s) > 1})
         add("one component per slot", not duplicated, detail=", ".join(duplicated))
+        # Level 1 of the brief's validation (§53.1): a layout a person made in the Studio is the template's
+        # rows, rearranged within what the template allows — or it is not applied at all.
+        placing = layout_problems(spec, template)
+        add("layout is the template's, or a change of it the template allows", not placing,
+            subject=f"{len(spec.layout)} rows, placed in the specification" if spec.layout
+                    else f"{template.id}'s own rows",
+            detail="; ".join(placing))
         missing = [s for s, body in template.slots.items() if body.mandatory and s not in slots]
         add("mandatory slots filled", not missing, detail=", ".join(missing))
 
@@ -392,7 +401,8 @@ class DashboardAgent:
         return [w + share + (1 if i < extra else 0) for i, w in enumerate(widths)]
 
     def layout(self, spec: DashboardSpec, template: TemplateDef, charts: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        """The engine's grid for this specification: rows and widths from the template, nothing else."""
+        """The engine's grid for this specification: the rows and widths in force — the specification's own
+        when a person placed them in the Studio, the template's otherwise (aibi/layout.py)."""
         position: dict[str, Any] = {
             "DASHBOARD_VERSION_KEY": "v2",
             "ROOT_ID": {"type": "ROOT", "id": "ROOT_ID", "children": ["GRID_ID"]},
@@ -403,7 +413,7 @@ class DashboardAgent:
         # row. A specification that names no section is rows only — as every dashboard was before sections.
         section_of_row = {name: section for section in self.sections(spec, template) for name in section["rows"]}
         announced: set[str] = set()
-        for row in template.layout:
+        for row in layout_in_force(spec, template):
             placed = [p for p in row.slots if p.id in charts]
             if not placed:
                 continue

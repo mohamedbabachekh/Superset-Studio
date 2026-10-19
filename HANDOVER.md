@@ -109,7 +109,9 @@ tokens, the lexicon, the compatibility matrix, the approved visualizations. `dbt
 project — staging, intermediate, marts, seeds, macros, tests — with a branch for AI-generated models.
 `superset-extension/` (14 files) is `sharpsight-bi.supx`: a panel in SQL Lab, its backend API, and a build whose
 checksum is recorded and verified before Superset is allowed to load it. `superset-addon/` is the configuration
-layer the overlay mounts.
+layer the overlay mounts — and, since 2026-10-19, the two pages SharpSight serves inside Superset: the
+projects, and the **Studio** (`studio/`, ~900 lines of plain JavaScript and CSS, no build step), the visual
+builder of the revised brief's sections 46 to 60.
 
 ### The documents
 
@@ -122,6 +124,7 @@ layer the overlay mounts.
 | [`docs/connecting-sharpsight.md`](docs/connecting-sharpsight.md) | 119 | you need the platform's dashboards and mart |
 | [`docs/cem.md`](docs/cem.md) | 77 | you are pointing it at the cluster |
 | [`docs/ai-bi.md`](docs/ai-bi.md) | **747** | you are touching the engine; §9 is everything not built |
+| [`docs/superset-studio.md`](docs/superset-studio.md) | 319 | the AI Visual Builder of the V3 brief, read against this kit — and, §11, what of it is built |
 | [`CHANGELOG.md`](CHANGELOG.md) | 270 | what each bundle changed, 20260927 → 20261016 |
 | `SharpSight_BI_Studio_Spec_Updated.md` | — | the owner's brief the engine implements (sections 18–32 are the factory) |
 
