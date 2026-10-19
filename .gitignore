@@ -1,6 +1,33 @@
 # Secrets. .env holds this kit's own passwords, cem.env the customer's CEM account.
 .env
 cem.env
+# …and any other environment file, key, certificate, keystore or keytab dropped beside them. The examples are kept.
+.env.*
+*.env
+!.env.example
+!cem.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.keytab
+id_rsa*
+id_ed25519*
+*.secret
+secrets/
+credentials*.json
+service-account*.json
+.npmrc
+.pypirc
+.netrc
+
+# Local working notes and assistant settings: not part of the kit.
+SharpSight_BI_Studio_Spec_Updated.md
+.claude/
+*.log
 
 # The customer's JDBC driver, and anything else dropped in to be mounted.
 driver-jars/*.jar
