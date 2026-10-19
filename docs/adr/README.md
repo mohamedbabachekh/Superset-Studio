@@ -27,3 +27,7 @@ rather than repeated. Where it is the owner's and not ours, it says so and is li
 | [0015](0015-a-section-owns-whole-rows.md) | A section owns whole rows, and a chart does not leave its section | accepted |
 | [0016](0016-postgresql-only-for-governed-data.md) | Governed data is PostgreSQL only, and the matrix says so | accepted |
 | [0017](0017-one-superset-so-promotion-is-a-gate.md) | One Superset, so promotion is a gate and a package | accepted |
+| [0018](0018-a-modular-monolith-with-named-domains.md) | A modular monolith with named domains, not microservices | accepted |
+| [0019](0019-a-backend-for-the-frontend-not-superset-s-credentials.md) | The Studio talks to a backend for the frontend, never to credentials | accepted |
+| [0020](0020-adapters-at-every-boundary.md) | Every external system is reached through an adapter | accepted |
+| [0021](0021-the-control-plane-and-the-execution-plane.md) | SharpSight is the control plane; Superset and dbt execute | accepted |

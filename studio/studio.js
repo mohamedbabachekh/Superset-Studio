@@ -22,7 +22,7 @@
 import { client } from './api.js';
 import * as act from './state.js';
 import { state } from './state.js';
-import { close, isOpen, node, shortcuts, toast } from './ui.js';
+import { close, isOpen, node, palette, shortcuts, theme, themeNow, toast } from './ui.js';
 import * as view from './view.js';
 
 const el = document.getElementById('sharpsight-studio');
@@ -137,6 +137,69 @@ const commands = {
     commands.redraw();
   },
 
+  /** Everything the workspace can do, by name. It offers no command the panes do not, and none that is
+   *  refused elsewhere: a disabled action is left out, with the same reason the bar gives. */
+  palette() {
+    const free = state.payload.free_slots || [];
+    const versions = state.payload.versions || [];
+    const entries = [
+      { where: 'Do', label: 'Add a chart', keys: 'a', run: () => commands.gallery(),
+        when: act.editable() && free.length },
+      { where: 'Do', label: 'Validate the draft', keys: 'v', run: commands.validate, when: true },
+      { where: 'Do', label: 'Save the draft', keys: '⌘S', run: act.save, when: state.dirty && act.editable() },
+      { where: 'Do', label: 'Commit a version', run: commands.commit,
+        when: act.editable() && state.savedAt && !state.dirty },
+      { where: 'Do', label: 'Take the tiles again', run: commands.tiles, when: true },
+      { where: 'Do', label: 'Preview the live dashboard', run: () =>
+        window.open(state.payload.project.dashboard, '_blank', 'noopener'),
+      when: Boolean(state.payload.project.dashboard) },
+      { where: 'Do', label: 'Export the latest package (.ssbi)', run: commands.export_,
+        when: versions.some(version => version.package) },
+      { where: 'Do', label: 'Throw the draft away', run: commands.discard, when: Boolean(state.savedAt) },
+      { where: 'View', label: 'Dark or light', run: () => { theme(themeNow() === 'dark' ? 'light' : 'dark');
+        commands.redraw(); }, when: true },
+      { where: 'View', label: 'The explorer', run: () => { state.explorer = !state.explorer;
+        commands.redraw(); }, when: true },
+      { where: 'View', label: 'The copilot', run: () => { state.copilot = !state.copilot;
+        commands.redraw(); }, when: true },
+      { where: 'View', label: 'Keyboard shortcuts', keys: '?', run: commands.help, when: true },
+      ...['validation', 'changes', 'report', 'releases', 'about'].map(tab => ({
+        where: 'Drawer', label: tab === 'about' ? 'What this workspace is' : `Show ${tab}`,
+        run: () => { state.tab = tab; commands.redraw(); }, when: true })),
+      ...act.rows().flatMap(row => row.slots.map(place => ({
+        where: 'Chart', label: act.title(place.id), run: () => commands.select(place.id), when: true }))),
+      ...free.map(slot => ({ where: 'Free slot', label: `Add a ${slot.purpose} on ${slot.slot}`,
+        run: () => commands.gallery(slot.slot), when: act.editable() })),
+    ];
+    palette(entries.filter(entry => entry.when));
+  },
+
+  export_() {
+    const versions = (state.payload.versions || []).filter(version => version.package);
+    const latest = versions[versions.length - 1];
+    if (!latest) {
+      toast('No version of this project has a package yet.', { kind: 'bad' });
+      return;
+    }
+    window.open(api.packageUrl(latest.version), '_blank', 'noopener');
+    toast(`Downloading ${latest.package} — the immutable package of version ${latest.version}. `
+      + 'Importing it elsewhere is the deployment service\u2019s, and PROD still needs a second person.',
+    { seconds: 9 });
+  },
+
+  async discard() {
+    if (!window.confirm('Throw this draft away? The committed version and what Superset holds are untouched.')) {
+      return;
+    }
+    try {
+      await api.drop();
+      toast('The draft is gone.', { kind: 'good' });
+      await load();
+    } catch (problem) {
+      toast(problem.message, { kind: 'bad', seconds: 0 });
+    }
+  },
+
   async lineage(dataset) {
     try {
       state.lineage[dataset] = await api.lineage(dataset);
@@ -176,6 +239,8 @@ function neighbour(by) {
 }
 
 shortcuts({
+  'mod+k': () => commands.palette(),
+  'mod+K': () => commands.palette(),
   '?': () => view.help(),
   'mod+s': () => act.save(),
   'mod+z': () => act.undo('undo'),
@@ -214,7 +279,14 @@ async function load() {
 }
 
 async function start() {
+  theme();
   act.wire(api, commands.redraw);
+  // On a narrow screen the side panes are drawers, closed to begin with: a canvas squeezed into a third of
+  // a laptop's width is worse than no canvas at all (§47.1).
+  if (window.innerWidth < 1240) {
+    state.explorer = false;
+    state.copilot = false;
+  }
   commands.redraw();
   try {
     await load();
@@ -230,6 +302,17 @@ async function start() {
   try { state.metrics = await api.metrics(); } catch (problem) { state.metrics = []; }
   commands.redraw();
 }
+
+// the bar wraps differently as the window changes, and the drawers start below it
+let wide = window.innerWidth >= 1240;
+window.addEventListener('resize', () => {
+  const now = window.innerWidth >= 1240;
+  if (now !== wide) {
+    wide = now;
+    if (!now) { state.explorer = false; state.copilot = false; }
+  }
+  if (state.payload) commands.redraw();
+});
 
 window.addEventListener('beforeunload', event => {
   if (state.dirty) { event.preventDefault(); event.returnValue = ''; }

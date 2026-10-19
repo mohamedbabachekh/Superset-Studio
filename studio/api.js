@@ -61,6 +61,9 @@ export function client(el) {
     metrics: () => ask('GET', '/metrics'),
     lineage: dataset => ask('GET', `/datasets/${slot(dataset)}/lineage`),
     picture: (slotId, taken) => `${BASE}/projects/${slot(project)}/picture/${slot(slotId)}?v=${slot(taken || '0')}`,
+    // the immutable package a version was cut as. Reading it is not promoting it: a promotion is approved
+    // by a second person, on the command line.
+    packageUrl: version => `${BASE}/projects/${slot(project)}/versions/${slot(version)}/package`,
     project,
   };
 }

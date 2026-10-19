@@ -8,10 +8,14 @@
 export const node = (tag, attrs = {}, ...children) => {
   const made = document.createElement(tag);
   Object.entries(attrs).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === false) return;
+    // `aria-pressed="false"` is not the same as no aria-pressed: the first says « a toggle, and it is off »,
+    // the second says nothing at all. So a false is kept for aria, and dropped everywhere else.
+    const aria = key.startsWith('aria-');
+    if (value === undefined || value === null || (value === false && !aria)) return;
     if (key === 'on') Object.entries(value).forEach(([event, handler]) => made.addEventListener(event, handler));
     else if (key === 'text') made.textContent = value;
     else if (key === 'style') made.setAttribute('style', value);
+    else if (aria) made.setAttribute(key, String(Boolean(value) === value ? value : value));
     else made.setAttribute(key, value === true ? '' : String(value));
   });
   children.flat().forEach(child => child === null || child === undefined || child === false ? null
@@ -64,7 +68,9 @@ export function modal({ title, body, footer }) {
       footer && node('footer', {}, footer)));
   document.body.appendChild(scrim);
   open = scrim;
-  const first = scrim.querySelector('input, select, textarea, button');
+  // what a person came to type into, before the button that closes it
+  const first = scrim.querySelector('.ss-body input, .ss-body select, .ss-body textarea')
+    || scrim.querySelector('.ss-body button') || scrim.querySelector('button');
   if (first) first.focus();
   return scrim;
 }
@@ -75,6 +81,73 @@ export function close() {
 }
 
 export const isOpen = () => Boolean(open);
+
+/* ── the theme: light by default, dark by choice ─────────────────────────────────────────────────────────
+ * Light is the default because this is a page for reading data and Superset's own shell around it is light.
+ * The choice is kept in the browser, per person, and the page is drawn from tokens so the two themes are one
+ * stylesheet. Storage can throw (a private window, blocked site data), so every touch of it is guarded and
+ * the page renders without it.
+ */
+const THEME = 'sharpsight-studio-theme';
+
+export function theme(wanted) {
+  if (wanted) {
+    document.documentElement.setAttribute('data-ss-theme', wanted);
+    try { window.localStorage.setItem(THEME, wanted); } catch (error) { /* a page without storage still draws */ }
+    return wanted;
+  }
+  let kept = null;
+  try { kept = window.localStorage.getItem(THEME); } catch (error) { kept = null; }
+  const now = kept || 'light';
+  document.documentElement.setAttribute('data-ss-theme', now);
+  return now;
+}
+
+export const themeNow = () => document.documentElement.getAttribute('data-ss-theme') || 'light';
+
+/* ── the command palette: everything the workspace can do, by name ───────────────────────────────────────
+ * Linear's idea, and the reason it is here: a workspace with three panes, a drawer and thirty actions is
+ * faster to drive by name than by hunting. It lists the same commands the bar and the panes offer — it adds
+ * no power a person does not already have, and no command that is refused elsewhere is offered here.
+ */
+export function palette(entries) {
+  const box = node('input', { class: 'ss-search', placeholder: 'Type a command, or a chart…',
+    'aria-label': 'Command palette' });
+  const list = node('div', { class: 'ss-palette', role: 'listbox' });
+  let shown = entries;
+  let at = 0;
+
+  const run = entry => { close(); entry.run(); };
+  const paint = () => {
+    list.textContent = '';
+    if (!shown.length) {
+      list.appendChild(node('div', { class: 'ss-note', style: 'padding: 10px 2px', text: 'nothing by that name' }));
+      return;
+    }
+    shown.forEach((entry, n) => list.appendChild(node('button', {
+      class: 'ss-palette-row', type: 'button', role: 'option', 'aria-selected': n === at,
+      on: { click: () => run(entry), mousemove: () => { if (at !== n) { at = n; paint(); } } },
+    }, node('span', { class: 'ss-where', text: entry.where }), node('span', { text: entry.label }),
+      entry.keys ? node('span', { class: 'ss-key', text: entry.keys }) : null)));
+    const chosen = list.children[at];
+    if (chosen && chosen.scrollIntoView) chosen.scrollIntoView({ block: 'nearest' });
+  };
+
+  box.addEventListener('input', () => {
+    const wanted = box.value.trim().toLowerCase();
+    shown = !wanted ? entries : entries.filter(entry =>
+      `${entry.where} ${entry.label}`.toLowerCase().includes(wanted));
+    at = 0;
+    paint();
+  });
+  box.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown') { at = Math.min(at + 1, shown.length - 1); paint(); event.preventDefault(); }
+    else if (event.key === 'ArrowUp') { at = Math.max(at - 1, 0); paint(); event.preventDefault(); }
+    else if (event.key === 'Enter' && shown[at]) { run(shown[at]); event.preventDefault(); }
+  });
+  paint();
+  modal({ title: 'Commands', body: node('div', {}, box, list) });
+}
 
 /* ── the keyboard: every move the mouse can make, and a card that lists them ─────────────────────────────── */
 export function shortcuts(map) {
@@ -90,6 +163,7 @@ export function shortcuts(map) {
 }
 
 export const KEYS = [
+  ['mod+k', 'the command palette'],
   ['?', 'this card'],
   ['mod+s', 'save the draft'],
   ['mod+z / mod+shift+z', 'undo / redo'],

@@ -44,10 +44,19 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
 - **Looked at without Superset**: `python studio/preview.py` serves the workspace against a stand-in engine,
   and `--check` drives it in a browser and holds it to thirteen promises. The engine's own rules are held by
   24 new tests against the real registry (194 in all).
-- **Seventeen architecture decision records** ([docs/adr/](docs/adr/)) — everything this architecture rests
-  on, including the decisions taken before the Studio — and the brief read section by section, each marked
-  built, partly or not here, with its reason
-  ([docs/spec-v3-coverage.md](docs/spec-v3-coverage.md)).
+- **A design system, written down** ([docs/design-system.md](docs/design-system.md)): one source for the
+  values (`registry/design/tokens.yaml`), six component groups, ten rules, and where the workspace departs
+  from the references it was drawn against. Every colour in the stylesheet is a token, which is what made the
+  rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
+  palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
+  become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **Export .ssbi from the bar** — the immutable package of the latest version, through the same gateway with
+  the same identity. Reading a package is not promoting it: PROD still needs a second person.
+- **Twenty-one architecture decision records** ([docs/adr/](docs/adr/)) — everything this architecture rests
+  on, including the decisions taken before the Studio and the platform patterns underneath it (a modular
+  monolith with named domains, a backend for the frontend, an adapter at every boundary, a control plane and
+  an execution plane) — and the brief read section by section, each marked built, partly or not here, with
+  its reason ([docs/spec-v3-coverage.md](docs/spec-v3-coverage.md)).
 - Proof: 212 engine tests, and `python studio/preview.py --check` driving the workspace in a browser against
   a stand-in engine — thirty promises, no console error.
 - Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in

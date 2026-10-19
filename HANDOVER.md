@@ -126,7 +126,8 @@ builder of the revised brief's sections 46 to 60.
 | [`docs/ai-bi.md`](docs/ai-bi.md) | **747** | you are touching the engine; §9 is everything not built |
 | [`docs/superset-studio.md`](docs/superset-studio.md) | 337 | the AI Visual Builder of the V3 brief, read against this kit — and, §11, what of it is built |
 | [`docs/spec-v3-coverage.md`](docs/spec-v3-coverage.md) | 168 | **what of the brief is built and what is not** — all sixty sections, each with its reason |
-| [`docs/adr/`](docs/adr/) | 17 files | every decision this architecture rests on: what was true, what was decided, what follows |
+| [`docs/adr/`](docs/adr/) | 21 files | every decision this architecture rests on: what was true, what was decided, what follows |
+| [`docs/design-system.md`](docs/design-system.md) | 121 | the Studio's tokens, components and rules — and where it departs from the references it was drawn against |
 | [`CHANGELOG.md`](CHANGELOG.md) | 270 | what each bundle changed, 20260927 → 20261016 |
 | `SharpSight_BI_Studio_Spec_Updated.md` | — | the owner's brief the engine implements (sections 18–32 are the factory) |
 

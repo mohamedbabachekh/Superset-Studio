@@ -7,7 +7,7 @@
  */
 import * as act from './state.js';
 import { state } from './state.js';
-import { KEYS, button, close, field, modal, node, pair, select, tag, toast } from './ui.js';
+import { KEYS, button, close, field, modal, node, pair, select, tag, theme, themeNow, toast } from './ui.js';
 
 export function draw(el, client, commands) {
   const where = window.scrollY;
@@ -16,7 +16,10 @@ export function draw(el, client, commands) {
     el.appendChild(skeleton());
     return;
   }
-  el.appendChild(bar(commands));
+  const barNode = bar(commands);
+  el.appendChild(barNode);
+  // the drawers of a narrow screen start below the bar, whose height depends on how far it wraps
+  document.documentElement.style.setProperty('--ss-bar-h', `${barNode.offsetHeight || 56}px`);
   banners(el, commands);
   const panes = node('div', { class: 'ss-panes', 'data-explorer': state.explorer ? 'open' : 'closed',
     'data-copilot': state.copilot ? 'open' : 'closed' });
@@ -76,16 +79,26 @@ function bar(commands) {
       button('Validate', commands.validate, { title: 'Check the draft against the registry and the template (v)' }),
       button('Save draft', act.save, { disabled: !state.dirty || !act.editable(),
         title: state.dirty ? 'Save now (⌘S)' : 'Nothing has changed since the last save' }),
+      button('Export .ssbi', commands.export_, {
+        disabled: !(state.payload.versions || []).some(version => version.package),
+        title: (state.payload.versions || []).some(version => version.package)
+          ? 'The immutable package of the latest version — what a deployment service imports elsewhere'
+          : 'No version of this project has a package yet' }),
       button('Commit version', commands.commit, { 'data-weight': 'primary',
         disabled: !act.editable() || !state.savedAt || state.dirty,
         title: !act.editable() ? 'This project is read-only here'
           : state.dirty ? 'Save the draft first' : !state.savedAt ? 'There is no draft to commit'
             : 'Make this draft a version, through the engine’s ten gates' })),
     node('div', { class: 'ss-group' },
+      button('⌘K', commands.palette, { 'data-weight': 'quiet', title: 'Every command, by name (⌘K)',
+        'aria-label': 'Command palette' }),
       button('◧', () => { state.explorer = !state.explorer; commands.redraw(); },
         { 'data-weight': 'quiet', 'aria-pressed': state.explorer, 'aria-label': 'The explorer', title: 'The explorer' }),
       button('◨', () => { state.copilot = !state.copilot; commands.redraw(); },
         { 'data-weight': 'quiet', 'aria-pressed': state.copilot, 'aria-label': 'The copilot', title: 'The copilot' }),
+      button('◐', () => { theme(themeNow() === 'dark' ? 'light' : 'dark'); commands.redraw(); },
+        { 'data-weight': 'quiet', 'aria-pressed': themeNow() === 'dark', 'aria-label': 'Dark or light',
+          title: 'Dark or light — kept in this browser' }),
       button('?', commands.help, { 'data-weight': 'quiet', title: 'Keyboard shortcuts (?)' })));
 }
 

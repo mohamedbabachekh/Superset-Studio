@@ -39,7 +39,7 @@ class SharpSightBiApi(RestApi):
                               "templates": "read", "check_draft": "read", "picture": "read",
                               "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
                               "pictures": "write", "propose": "write", "compose": "write",
-                              "report": "read", "lineage": "read"}
+                              "report": "read", "lineage": "read", "package": "read"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
     # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
@@ -65,9 +65,10 @@ class SharpSightBiApi(RestApi):
             return self.response(answer.status_code, message=str(said)[:800])
         return self.response(answer.status_code, result=body)
 
-    def _engine_png(self, method: str, path: str) -> Response:
-        """A tile of the Studio's canvas: bytes, not JSON. Everything else about the call is the same —
-        the engine's token, the name of the person signed in to Superset, and the engine's own refusals."""
+    def _engine_file(self, method: str, path: str, kind: str, name: str = "") -> Response:
+        """Bytes, not JSON — a tile of the canvas, or the package a version was cut as. Everything else about
+        the call is the same: the engine's token, the name of the person signed in to Superset, and the
+        engine's own refusals."""
         base = os.environ.get("SHARPSIGHT_ENGINE_URL", "").rstrip("/")
         token = os.environ.get("SHARPSIGHT_ENGINE_TOKEN", "")
         if not base or not token:
@@ -77,10 +78,13 @@ class SharpSightBiApi(RestApi):
                 "Authorization": f"Bearer {token}", "X-SharpSight-User": g.user.username})
         except requests.RequestException as error:
             return self.response(502, message=f"the SharpSight engine did not answer ({type(error).__name__})")
-        if answer.status_code != 200 or answer.headers.get("Content-Type") != "image/png":
+        if answer.status_code != 200 or not (answer.headers.get("Content-Type") or "").startswith(kind):
             return self.response(answer.status_code if answer.status_code >= 400 else 502,
-                                 message="no picture of that chart was given")
-        return Response(answer.content, mimetype="image/png", headers={"Cache-Control": "no-cache"})
+                                 message="the engine gave no file for that")
+        headers = {"Cache-Control": "no-cache"}
+        if name:
+            headers["Content-Disposition"] = f'attachment; filename="{name}"'
+        return Response(answer.content, mimetype=answer.headers.get("Content-Type"), headers=headers)
 
     @expose("/projects", methods=("GET",))
     @protect()
@@ -301,7 +305,7 @@ class SharpSightBiApi(RestApi):
         """
         if not _NAME.match(project_id) or not _NAME.match(slot):
             return self.response(400, message="that is not a project's name and a slot")
-        return self._engine_png("GET", f"/projects/{project_id}/picture/{slot}")
+        return self._engine_file("GET", f"/projects/{project_id}/picture/{slot}", "image/png")
 
     @expose("/datasets", methods=("GET",))
     @protect()
@@ -422,3 +426,27 @@ class SharpSightBiApi(RestApi):
         if not _NAME.match(dataset_id):
             return self.response(400, message="that is not a dataset's name")
         return self._engine("GET", f"/datasets/{dataset_id}/lineage")
+
+    @expose("/projects/<project_id>/versions/<version>/package", methods=("GET",))
+    @protect()
+    @safe
+    def package(self, project_id: str, version: str) -> Response:
+        """The immutable package a version was cut as — what a deployment service imports elsewhere. Reading
+        it is not promoting it: who may promote, and where, is the engine's and the command line's.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          - in: path
+            name: version
+            schema: {type: string}
+          responses:
+            200:
+              description: The .ssbi package
+        """
+        if not _NAME.match(project_id) or not re.fullmatch(r"\d+(\.\d+){0,2}", version or ""):
+            return self.response(400, message="that is not a project and a version")
+        return self._engine_file("GET", f"/projects/{project_id}/versions/{version}/package",
+                                 "application/zip", f"{project_id}-{version}.ssbi")

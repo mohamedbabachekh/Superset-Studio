@@ -1,0 +1,121 @@
+# The Studio's design system
+
+What the workspace is built from, and the rules it obeys. It is small on purpose: a design system for one
+workspace inside someone else's application is a liability when it grows past what that workspace needs.
+
+The references it was drawn against — **Linear** for navigation and the keyboard, **Figma** for the shape of
+the editor (asset tree, canvas, contextual properties), **Retool** for how a component is wired to governed
+data, and an **AI that lives in the editor** rather than beside it — are references, not interfaces to copy.
+Where this departs from them, §6 says so and why.
+
+---
+
+## 1 · One source for the values
+
+Every colour comes from `registry/design/tokens.yaml`, which is also what the generated dashboards and
+Superset's own theme wear. The stylesheet restates them as CSS custom properties and **never writes a colour
+anywhere else** — which is what makes a second theme possible at all.
+
+| Token | Light | Dark | What it is for |
+|---|---|---|---|
+| `--ss-primary` | `#0972BC` | `#4AA3E0` | the action colour: a primary button, a selection, a focus ring |
+| `--ss-primary-wash` / `-line` | `#EAF4FC` / `#BFDDF4` | `#11283E` / `#2A4D6B` | the quiet ground and border of anything selected |
+| `--ss-success` / `-wash` / `-ink` | `#37A15E` | `#4CB97A` | passed, certified, committed |
+| `--ss-warning` / `-wash` / `-ink` | `#F2B72D` | `#E8B64A` | not certified, unsaved, « review needed » |
+| `--ss-error` / `-wash` / `-ink` | `#D64545` | `#E46A6A` | failed, refused, destructive |
+| `--ss-text` / `-muted` / `-faint` | `#1F2430` / `#5B6472` / `#8A94A6` | `#E6E9EF` / `#A4ADBD` / `#788296` | three weights of type, and no more |
+| `--ss-surface` / `-sunken` / `-raised` | `#FFFFFF` / `#F5F6F9` / `#FCFDFE` | `#151A24` / `#0F131B` / `#1A2130` | a card, the ground it sits on, a header inside it |
+| `--ss-border` / `-line` | `#E3E6EC` / `#F0F2F5` | `#2A3040` / `#1E2430` | a card's edge, and a divider inside one |
+| `--ss-radius` / `-sm` / `-gap` | `10px` / `7px` / `16px` | — | one corner, one smaller corner, one gap |
+| `--ss-shadow` / `-lg` | two steps | two steps | a card, and something floating over it |
+
+**Naming.** The brief's own names map onto these: *Midnight* is `--ss-text` (and the dark theme's ground),
+*Action* is `--ss-primary`, *Canvas* is `--ss-sunken`, and *Success / Warning / Error* keep their names. The
+tokens are not renamed in code, because the file they come from is shared with the dashboards and with
+Superset's theme: one source matters more than one vocabulary.
+
+**Type** is Inter at 13px/1.55, with 11px for labels and 10px for the small upper-case headings. Three sizes,
+three weights, no more. **Spacing** is a 4px scale, used through `--ss-gap` and the handful of paddings below.
+
+**Light is the default**; dark is one button in the bar (`◐`), kept per person in their browser. The page is
+drawn from the tokens, so the two themes are one stylesheet and nothing is themed twice.
+
+## 2 · The components
+
+The six groups the direction names, and what each is in this codebase. Everything is a class on plain DOM —
+there is no component framework ([ADR 0014](adr/0014-no-build-step-and-no-second-react.md)).
+
+| Group | Here | Where |
+|---|---|---|
+| **Navigation** | the command bar (`.ss-bar`, `.ss-crumb`, `.ss-group`), the command palette (`.ss-palette`), the explorer tree (`.ss-tree`), tabs (`.ss-tabs`) | `view.js` · `ui.js::palette` |
+| **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the lineage panel | the gallery, the explorer, the inspector's *Data & dbt* |
+| **Builder** | the canvas (`.ss-canvas`, `.ss-row`), a chart tile (`.ss-tile`, `.ss-shot`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), the inspector (`.ss-field`, `.ss-two`) | `view.js` |
+| **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`) | `view.js::copilot` |
+| **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the inspector, the drawer |
+| **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action | the bar, the drawer's *Releases* |
+
+Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()`, `tag()`, `toast()`,
+`modal()`, `palette()`, `shortcuts()` — all of `ui.js`, 174 lines.
+
+## 3 · The rules
+
+1. **Strong colour is reserved** for an action, a selection, an error, and a state that changed. Everything
+   else is surface, border and three weights of grey.
+2. **Nothing is only colour.** A certified metric has a mark as well as a colour; a failing check has the word
+   *fail*; a disabled control has a `title` saying why.
+3. **Every control that is disabled says why**, in its tooltip — « save the draft first », « every slot
+   already holds a chart », « this project is read-only here ».
+4. **Every move the mouse can make, the keyboard can make**: thirteen shortcuts, a card at `?`, a palette at
+   `⌘K`, and arrow keys over the canvas. Focus is always visible (`:focus-visible`, 2px, the action colour).
+5. **Destructive and irreversible are different.** Taking a chart off the dashboard is one undo away and says
+   so in a toast; throwing a draft away asks first; committing a version asks what changed.
+6. **Loading, empty, error and refused are states of the design, not edge cases**: a skeleton while the
+   payload is in flight, a named empty state for a dashboard with no charts and for a search that matches
+   nothing, a reason when a project cannot be opened, and a banner when the registry says this person may read
+   and not change.
+7. **Configuration is contextual**: the inspector shows the selected chart and nothing else, with governance
+   behind its own tab rather than spread over the page.
+8. **The canvas never claims more than it supports.** What it cannot do, Superset's own editor does, and the
+   drawer says so in plain words.
+9. **Motion is 120ms or nothing**, and `prefers-reduced-motion` turns it off.
+10. **A toast is not a log.** It says what happened and offers the one action that answers it (*Undo*,
+    *Reload*); anything longer belongs in the drawer.
+
+## 4 · The layout
+
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ command bar · project / dashboard · env · version · gate · draft state · actions│
+├──────────────┬────────────────────────────────────────┬────────────────────────┤
+│ explorer     │ canvas                                  │ inspector              │
+│ outline      │ sections, rows, tiles, free slots       │ content / chart /      │
+│ free slots   │                                         │ governance / data      │
+│ parked       │                                         ├────────────────────────┤
+│ datasets     │                                         │ copilot                │
+│ metrics      │                                         │ chips · proposal       │
+├──────────────┴────────────────────────────────────────┴────────────────────────┤
+│ drawer · validation · changes · last run · releases · what this is              │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+268px / flexible / 380px, each side pane collapsible. **Under 1240px the side panes become drawers over the
+canvas** rather than columns squeezed beside it, and they start closed: a canvas in a third of a laptop's
+width is worse than no canvas.
+
+## 5 · What to build against
+
+- `studio/studio.css` — the tokens and every class above, 310 lines, one file on purpose.
+- `studio/ui.js` — the primitives. If a pane needs something new, it goes here, not into the pane.
+- `studio/preview.py --check` — the workspace driven in a browser against a stand-in engine. A new component
+  with a behaviour gets a promise there; it is nine seconds, and it is what caught a rule for text fields
+  stretching radio buttons and a focus handler cancelling its own click.
+
+## 6 · Where this departs from the references
+
+| | |
+|---|---|
+| **The canvas is not Figma's** | it edits a specification, not pixels, and it supports what Superset's own dashboard model can store — rows and twelfths, not free coordinates ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)) |
+| **The inspector has little style** | a colour, a legend, an axis has no place in a specification, so the Style tab a design tool would have is a sentence explaining that Explore owns them and a commit sets them back |
+| **The drawer shows no data** | the brief asks for a permission-checked sample; a developer's Superset account is given no database in SQL Lab, and this page is not a way round that decision ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)) — **the owner can overrule this in one tab and one route** |
+| **The AI proposes, never applies** | Retool and Figma edit live; here every AI change is a proposal with a diff and an explicit Apply ([ADR 0012](adr/0012-the-copilot-is-deterministic-and-proposes.md)) |
+| **No component library is published** | these classes serve one workspace. If a second SharpSight surface needs them, that is when they become a package — not before |

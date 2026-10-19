@@ -249,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                      "subject": "ranking_1", "detail": "« Casablanca-Settat » is cut by 3 px"},
                     {"category": "performance", "name": "the dashboard loads under 10 s", "status": "pass",
                      "subject": "4.2 s", "detail": ""}]}}})
+        if path.endswith("/package"):
+            return self._send(200, b"PK\x05\x06" + b"\0" * 18, "application/zip")
         if "/lineage" in path:
             return self._json(200, {"result": {"dataset": "cem.qoe_daily", "model": "mart_cem_qoe_daily",
                                                "built_from": ["stg_cem_qoe", "dim_region"],
@@ -479,6 +481,51 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
            "security" in page.inner_text(".ss-drawer") and "performance" in page.inner_text(".ss-drawer"))
     page.click(".ss-drawer >> text=What this is")
     expect("and says what this workspace is", "not a dashboard" in page.inner_text(".ss-drawer"))
+
+    # ── the command palette: everything the workspace can do, by name ──────────────────────────────────────
+    page.keyboard.press("Control+k")
+    page.wait_for_selector(".ss-palette")
+    expect("the palette lists what can be done, and the charts",
+           "Validate" in page.inner_text(".ss-palette") and "QoE" in page.inner_text(".ss-palette"))
+    page.keyboard.type("releases")
+    time.sleep(0.2)
+    expect("and narrows to what was typed",
+           page.eval_on_selector_all(".ss-palette-row", "n => n.length") == 1)
+    page.keyboard.press("Enter")
+    time.sleep(0.2)
+    expect("and running an entry does what the bar would",
+           "1.0.0" in page.inner_text(".ss-drawer"))
+
+    # ── light and dark ─────────────────────────────────────────────────────────────────────────────────────
+    expect("light is the default", page.evaluate("() => document.documentElement.dataset.ssTheme") == "light")
+    page.click('.ss-bar button[aria-label="Dark or light"]')
+    time.sleep(0.2)
+    expect("and dark is one button away, kept in the browser",
+           page.evaluate("() => document.documentElement.dataset.ssTheme") == "dark"
+           and page.evaluate("() => localStorage.getItem('sharpsight-studio-theme')") == "dark")
+    expect("with every colour coming from the tokens, so the page follows",
+           page.evaluate("() => getComputedStyle(document.querySelector('.ss-card')).backgroundColor")
+           != "rgb(255, 255, 255)")
+    page.click('.ss-bar button[aria-label="Dark or light"]')
+
+    # ── the package a version was cut as ───────────────────────────────────────────────────────────────────
+    expect("the latest version's package can be taken from the bar",
+           page.eval_on_selector('.ss-bar >> text=Export .ssbi', "n => !n.disabled"))
+
+    # ── narrow: the panes become drawers rather than squeezing the canvas ──────────────────────────────────
+    page.set_viewport_size({"width": 900, "height": 900})
+    time.sleep(0.3)
+    expect("on a narrow screen the canvas keeps the width",
+           page.eval_on_selector(".ss-canvas", "n => n.getBoundingClientRect().width") > 700)
+    if page.eval_on_selector('.ss-bar button[aria-label="The explorer"]',
+                             "n => n.getAttribute('aria-pressed') === 'true'"):
+        page.click('.ss-bar button[aria-label="The explorer"]')       # close it, so the next click opens it
+        time.sleep(0.2)
+    page.click('.ss-bar button[aria-label="The explorer"]')
+    time.sleep(0.3)
+    expect("and the explorer opens over it, as a drawer",
+           page.eval_on_selector(".ss-card.ss-pane", "n => getComputedStyle(n).position") == "fixed")
+    page.set_viewport_size({"width": 1600, "height": 1200})
     return said
 
 

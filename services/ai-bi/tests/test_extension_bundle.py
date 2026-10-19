@@ -78,7 +78,8 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
                        # the copilot, the gallery, and what the last run found
                        ("/projects/<project_id>/propose", "POST"), ("/projects/<project_id>/compose", "POST"),
                        ("/projects/<project_id>/report", "GET"),
-                       ("/datasets/<dataset_id>/lineage", "GET")]
+                       ("/datasets/<dataset_id>/lineage", "GET"),
+                       ("/projects/<project_id>/versions/<version>/package", "GET")]
     assert not re.search(r"approve|reject|restore|discard|/audit|/people", api.split('"""', 2)[2])
     # a POST is refused without Superset's CSRF token: Flask-AppBuilder exempts an API unless told otherwise
     assert "    csrf_exempt = False\n" in api
@@ -102,7 +103,9 @@ def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_ot
                        ("GET", "/projects"), ("GET", "/projects/{project_id}/changes"),
                        ("GET", "/projects/{project_id}/picture/{slot}"),
                        ("GET", "/projects/{project_id}/report"),
-                       ("GET", "/projects/{project_id}/studio"), ("GET", "/runs/{run_id}"),
+                       ("GET", "/projects/{project_id}/studio"),
+                       ("GET", "/projects/{project_id}/versions/{version}/package"),
+                       ("GET", "/runs/{run_id}"),
                        ("GET", "/templates"),
                        ("POST", "/projects/{project_id}/commit"),
                        ("POST", "/projects/{project_id}/compose"),
@@ -118,5 +121,5 @@ def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_ot
         assert refused in routes and not superset_may(*refused), refused
     # and what the extension's backend asks is exactly what the engine answers it for
     api = (_folder() / "backend" / "src" / "sharpsight" / "bi" / "api.py").read_text(encoding="utf-8")
-    asked = set(re.findall(r'self\._engine(?:_png)?\("(GET|POST|PUT|DELETE)", f?"([^"]+)"', api))
+    asked = set(re.findall(r'self\._engine(?:_file)?\("(GET|POST|PUT|DELETE)", f?"([^"]+)"', api))
     assert asked == set(SUPERSET_MAY)

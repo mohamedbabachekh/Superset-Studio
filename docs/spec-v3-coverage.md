@@ -97,9 +97,10 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 |---|---|---|
 | §46 | The product decision, the feasibility table | **built** — the staged reading is [`superset-studio.md`](superset-studio.md) |
 | §47.1 | Three panes and a drawer | **built** |
-| §47.2 | The command bar: environment, save state, undo/redo, preview, validate, commit, export, deploy | **partly** — all but export and deploy, which are the command line's ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). Draft / version / package / deployment are never conflated |
+| §47.2 | The command bar: environment, save state, undo/redo, preview, validate, commit, export, deploy | **built, less deploy** — including **Export .ssbi**, the immutable package of the latest version. Deploying is the command line's, because PROD needs a second person ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). Draft / version / package / deployment are never conflated |
 | §47.3 | The project and asset explorer | **partly** — outline, free slots, parked charts, governed datasets and metrics, search. **No drag from the list onto the canvas**: a chart is placed on a slot through a proposal |
 | §47.4 | The canvas | **partly** — grid, drag to another row, resize, reorder rows, row heights, selection, loading and empty states, keyboard equivalents for every mouse move, undo/redo, autosave, « add here » on a free slot. **Not built**: zoom, responsive preview modes, alignment guides, cross-filter preview (that is Preview, in Superset), duplicate |
+| §47.1 | Small screens: collapse the panes into drawers rather than squeezing the canvas | **built** — under 1240px the side panes are drawers over the canvas, closed to begin with |
 | §47.5 | The contextual inspector | **built** — Content, Chart, Governance, Data & dbt. Style is deliberately thin: colour and legend have no place in a specification |
 | §47.6 | The AI copilot | **built, deterministic** — a proposal with its changes, what it touches, its validation, Apply / Reject, history per project, suggestions drawn from the project. **Not built**: streaming, cancel, clarifying questions, « explain this change » beyond the diff |
 | §47.7 | The validation drawer | **partly** — Validation, Changes, Last run (the levels only a run can produce), Releases. **No data preview** ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)); logs and timings are inside the last run's report rather than tabs of their own |
@@ -117,6 +118,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §52 | dbt and semantics in the builder | **partly** — the model, its lineage and its tests are shown; « request a transformation » from the page is not offered |
 | §53 | Validation levels 1–6 | **built** — Level 1 in the Studio without touching Superset; 2 to 6 in the pipeline, shown in « Last run » |
 | §54 | Collaboration | **partly** — ownership, roles, review, version history, changed assets, audit. **No comments** on a dashboard or a component, and no real-time editing (§54 itself says later) |
+| — | *Beyond the brief*: a command palette (⌘K), a dark theme, a design system written down ([`design-system.md`](design-system.md)) | **built** — from the design direction of 2026-10-19 |
 | §55 | The `.ssbi` package and promotion | **built** — with environment mapping left to the deployment service |
 | §56 | API and service contracts | **partly** — the engine's API covers projects, drafts, proposals, validation, commits, packages, deployments-as-gates. The route names are the engine's own, not the brief's `/api/bi/...` |
 | §57 | The implementation plan, phases 0–6 | **phases 0–4 built** — see the roadmap in [`superset-studio.md` §10](superset-studio.md). Phase 5 (a model) waits on a decision; phase 6 (comments, real-time) is not started |
@@ -160,7 +162,8 @@ measurement, or work with a known shape.
     run, not a limitation of the design.
 16. **Canvas refinements** — zoom, responsive preview modes, alignment guides, duplicate; drag from the
     explorer onto the canvas; « compare » and « branch » on a conflicting draft; streaming and clarifying
-    questions in the copilot.
+    questions in the copilot. (Small screens, the command palette, the dark theme and the written design
+    system were done on 2026-10-19.)
 17. **A site-level map** — map tiles come from outside, and this kit calls nobody.
 18. **One source for the brand values** — they are in three files kept alike by hand.
 

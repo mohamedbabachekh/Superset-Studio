@@ -8,15 +8,44 @@
  * The scale is 4px. Everything that moves does so in 120ms, and everything that can be reached by keyboard
  * says so when it is focused.
  */
+/* ── the tokens ──────────────────────────────────────────────────────────────────────────────────────────
+ * Light is the default: this is a page for reading data, and Superset's own shell around it is light. Dark
+ * is a choice a person makes (the bar's ◐), kept in their browser. Everything below is written against the
+ * names, never against a colour, so the two themes are one stylesheet.
+ *
+ * The values are SharpSight's own (registry/design/tokens.yaml). The dark set is derived from them: the same
+ * hues, lifted until each reads against its own surface — #0972BC on a near-black ground does not, so the
+ * action colour is lightened rather than the ground being greyed.
+ */
 :root {
   --ss-primary: #0972BC; --ss-primary-dark: #0A5B96; --ss-primary-wash: #EAF4FC; --ss-primary-line: #BFDDF4;
   --ss-info: #26ABA8; --ss-success: #37A15E; --ss-warning: #F2B72D; --ss-error: #D64545;
   --ss-success-wash: #EDF8F1; --ss-warning-wash: #FEF8EA; --ss-error-wash: #FDF1F1;
+  --ss-success-line: #BFE5CE; --ss-warning-line: #F3DFAE; --ss-error-line: #F5C6C6;
+  --ss-success-ink: #1F6B40; --ss-warning-ink: #6B5200; --ss-error-ink: #8A2B2B;
   --ss-text: #1F2430; --ss-muted: #5B6472; --ss-faint: #8A94A6;
   --ss-border: #E3E6EC; --ss-line: #F0F2F5; --ss-surface: #FFFFFF; --ss-sunken: #F5F6F9;
+  --ss-raised: #FCFDFE; --ss-tile: #FFFFFF; --ss-toast: #1F2430; --ss-toast-ink: #FFFFFF;
   --ss-radius: 10px; --ss-radius-sm: 7px; --ss-gap: 16px;
   --ss-shadow: 0 1px 2px rgba(31, 36, 48, .05), 0 4px 12px rgba(31, 36, 48, .06);
   --ss-shadow-lg: 0 8px 32px rgba(31, 36, 48, .16);
+}
+
+:root[data-ss-theme="dark"] {
+  --ss-primary: #4AA3E0; --ss-primary-dark: #7CC0F0; --ss-primary-wash: #11283E; --ss-primary-line: #2A4D6B;
+  --ss-info: #45C3C0; --ss-success: #4CB97A; --ss-warning: #E8B64A; --ss-error: #E46A6A;
+  --ss-success-wash: #10251A; --ss-warning-wash: #2A2214; --ss-error-wash: #2A1618;
+  --ss-success-line: #2C5B41; --ss-warning-line: #5A4A22; --ss-error-line: #5C2E2E;
+  --ss-success-ink: #8FE0B0; --ss-warning-ink: #F0D79A; --ss-error-ink: #F2AFAF;
+  --ss-text: #E6E9EF; --ss-muted: #A4ADBD; --ss-faint: #788296;
+  --ss-border: #2A3040; --ss-line: #1E2430; --ss-surface: #151A24; --ss-sunken: #0F131B;
+  --ss-raised: #1A2130;
+  /* a tile is a photograph of a light dashboard — the photograph keeps its own white; what is left over
+     around it is the tile's own surface, not a white block */
+  --ss-tile: #151A24;
+  --ss-toast: #2A3040; --ss-toast-ink: #FFFFFF;
+  --ss-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 12px rgba(0, 0, 0, .3);
+  --ss-shadow-lg: 0 8px 32px rgba(0, 0, 0, .5);
 }
 
 #sharpsight-studio { font: 13px/1.55 Inter, -apple-system, system-ui, sans-serif; color: var(--ss-text);
@@ -28,8 +57,9 @@
 
 /* ── the command bar (§47.2) ─────────────────────────────────────────────────────────────────────────────── */
 .ss-bar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--ss-surface);
-  border-bottom: 1px solid var(--ss-border); position: sticky; top: 0; z-index: 30; flex-wrap: wrap;
+  border-bottom: 1px solid var(--ss-border); position: sticky; top: 0; z-index: 50; flex-wrap: wrap;
   box-shadow: 0 1px 2px rgba(31, 36, 48, .04); }
+/* above the drawers: on a narrow screen they slide in under it, and its buttons are what close them */
 .ss-crumb { font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 6px; }
 .ss-crumb .ss-dim { color: var(--ss-faint); font-weight: 400; }
 .ss-spacer { flex: 1 1 auto; }
@@ -40,9 +70,9 @@
   font-size: 11px; font-weight: 600; letter-spacing: .02em; background: var(--ss-sunken); color: var(--ss-muted);
   border: 1px solid var(--ss-border); white-space: nowrap; }
 .ss-tag[data-kind="env"] { background: var(--ss-primary-wash); color: var(--ss-primary); border-color: var(--ss-primary-line); }
-.ss-tag[data-kind="good"] { background: var(--ss-success-wash); color: var(--ss-success); border-color: #BFE5CE; }
-.ss-tag[data-kind="warn"] { background: var(--ss-warning-wash); color: #8A6400; border-color: #F3DFAE; }
-.ss-tag[data-kind="bad"] { background: var(--ss-error-wash); color: var(--ss-error); border-color: #F5C6C6; }
+.ss-tag[data-kind="good"] { background: var(--ss-success-wash); color: var(--ss-success); border-color: var(--ss-success-line); }
+.ss-tag[data-kind="warn"] { background: var(--ss-warning-wash); color: var(--ss-warning-ink); border-color: var(--ss-warning-line); }
+.ss-tag[data-kind="bad"] { background: var(--ss-error-wash); color: var(--ss-error); border-color: var(--ss-error-line); }
 .ss-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
 
 .ss-btn { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px;
@@ -66,8 +96,6 @@
 .ss-panes[data-copilot="closed"] { grid-template-columns: 268px minmax(0, 1fr); }
 .ss-panes[data-explorer="closed"] { grid-template-columns: minmax(0, 1fr) 380px; }
 .ss-panes[data-explorer="closed"][data-copilot="closed"] { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 1240px) { .ss-panes, .ss-panes[data-copilot="closed"], .ss-panes[data-explorer="closed"] {
-  grid-template-columns: minmax(0, 1fr); } .ss-pane { position: static !important; max-height: none !important; } }
 
 .ss-card { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius);
   box-shadow: var(--ss-shadow); }
@@ -122,15 +150,15 @@
 .ss-tile[aria-selected="true"] { border-color: var(--ss-primary); box-shadow: 0 0 0 2px var(--ss-primary-line); }
 .ss-tile[data-dragging="true"] { opacity: .35; }
 .ss-tile > header { display: flex; align-items: center; gap: 6px; padding: 7px 10px; cursor: grab;
-  border-bottom: 1px solid var(--ss-line); background: linear-gradient(var(--ss-surface), #FCFDFE); }
+  border-bottom: 1px solid var(--ss-line); background: linear-gradient(var(--ss-surface), var(--ss-raised)); }
 .ss-tile > header:active { cursor: grabbing; }
 .ss-tile > header strong { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .ss-tile .ss-slot { font-size: 10px; color: var(--ss-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ss-shot { flex: 1; display: block; width: 100%; object-fit: contain; object-position: top;
-  background: var(--ss-surface); }
+  background: var(--ss-tile); }
 .ss-shot-missing { flex: 1; display: grid; place-items: center; text-align: center; padding: 14px;
-  color: var(--ss-faint); font-size: 11px; background: repeating-linear-gradient(45deg, #FBFCFD, #FBFCFD 8px,
+  color: var(--ss-faint); font-size: 11px; background: repeating-linear-gradient(45deg, var(--ss-raised), var(--ss-raised) 8px,
   var(--ss-sunken) 8px, var(--ss-sunken) 16px); }
 .ss-grip { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; }
 .ss-grip::after { content: ""; position: absolute; top: 50%; right: 4px; width: 3px; height: 26px;
@@ -152,7 +180,7 @@
 .ss-count { font-size: 10px; background: var(--ss-border); color: var(--ss-muted); border-radius: 999px;
   padding: 0 5px; margin-left: 4px; }
 .ss-count[data-kind="bad"] { background: var(--ss-error); color: #fff; }
-.ss-count[data-kind="warn"] { background: var(--ss-warning); color: #5A4300; }
+.ss-count[data-kind="warn"] { background: var(--ss-warning); color: #2A2214; }
 
 .ss-field { display: block; margin-bottom: 10px; }
 .ss-field > span { display: block; font-size: 11px; color: var(--ss-muted); margin-bottom: 3px; }
@@ -187,11 +215,11 @@
 .ss-changes li::before { content: "·"; position: absolute; left: 4px; color: var(--ss-primary); }
 
 .ss-callout { border-left: 3px solid var(--ss-warning); background: var(--ss-warning-wash); padding: 10px 12px;
-  border-radius: 0 var(--ss-radius-sm) var(--ss-radius-sm) 0; font-size: 12px; color: #6B5200; }
+  border-radius: 0 var(--ss-radius-sm) var(--ss-radius-sm) 0; font-size: 12px; color: var(--ss-warning-ink); }
 .ss-callout[data-kind="info"] { border-color: var(--ss-primary); background: var(--ss-primary-wash);
   color: var(--ss-primary-dark); }
-.ss-callout[data-kind="bad"] { border-color: var(--ss-error); background: var(--ss-error-wash); color: #8A2B2B; }
-.ss-callout[data-kind="good"] { border-color: var(--ss-success); background: var(--ss-success-wash); color: #1F6B40; }
+.ss-callout[data-kind="bad"] { border-color: var(--ss-error); background: var(--ss-error-wash); color: var(--ss-error-ink); }
+.ss-callout[data-kind="good"] { border-color: var(--ss-success); background: var(--ss-success-wash); color: var(--ss-success-ink); }
 
 /* ── the drawer (§47.7) ──────────────────────────────────────────────────────────────────────────────────── */
 .ss-drawer { margin: 0 var(--ss-gap) var(--ss-gap); }
@@ -213,7 +241,7 @@
 /* ── toasts, the modal, the skeleton ─────────────────────────────────────────────────────────────────────── */
 .ss-toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: grid; gap: 8px;
   justify-items: end; }
-.ss-toast { background: var(--ss-text); color: #fff; padding: 10px 14px; border-radius: var(--ss-radius-sm);
+.ss-toast { background: var(--ss-toast); color: var(--ss-toast-ink); padding: 10px 14px; border-radius: var(--ss-radius-sm);
   box-shadow: var(--ss-shadow-lg); font-size: 12px; display: flex; align-items: center; gap: 12px;
   max-width: 460px; animation: ss-rise .14s ease-out; }
 .ss-toast[data-kind="bad"] { background: var(--ss-error); }
@@ -232,7 +260,7 @@
 .ss-scrim .ss-field textarea { width: 100%; padding: 6px 9px; font: inherit;
   border: 1px solid var(--ss-border); border-radius: var(--ss-radius-sm); }
 
-.ss-scrim { position: fixed; inset: 0; background: rgba(31, 36, 48, .38); z-index: 50; display: grid;
+.ss-scrim { position: fixed; inset: 0; background: rgba(10, 13, 20, .45); z-index: 50; display: grid;
   place-items: center; padding: 24px; }
 .ss-modal { background: var(--ss-surface); border-radius: var(--ss-radius); box-shadow: var(--ss-shadow-lg);
   width: min(720px, 100%); max-height: 86vh; overflow: auto; }
@@ -251,12 +279,36 @@
 .ss-pick input { margin: 0; }
 .ss-pick label:has(input:checked) { border-color: var(--ss-primary); background: var(--ss-primary-wash); }
 
-.ss-skeleton { background: linear-gradient(90deg, var(--ss-line) 25%, #E9ECF1 37%, var(--ss-line) 63%);
+/* ── the command palette ─────────────────────────────────────────────────────────────────────────────── */
+.ss-palette { display: grid; gap: 2px; margin-top: 10px; max-height: 48vh; overflow: auto; }
+.ss-palette-row { all: unset; display: flex; align-items: baseline; gap: 10px; padding: 7px 10px;
+  border-radius: var(--ss-radius-sm); cursor: pointer; font-size: 13px; color: var(--ss-text); }
+.ss-palette-row[aria-selected="true"] { background: var(--ss-primary-wash); color: var(--ss-primary-dark); }
+.ss-palette-row .ss-where { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ss-faint); min-width: 64px; }
+.ss-palette-row .ss-key { margin-left: auto; }
+
+.ss-skeleton { background: linear-gradient(90deg, var(--ss-line) 25%, var(--ss-border) 37%, var(--ss-line) 63%);
   background-size: 400% 100%; animation: ss-shimmer 1.3s ease infinite; border-radius: var(--ss-radius); }
 @keyframes ss-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 .ss-wait { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--ss-primary-line);
   border-top-color: var(--ss-primary); border-radius: 50%; animation: ss-spin .8s linear infinite; }
 @keyframes ss-spin { to { transform: rotate(360deg); } }
+
+/* Narrow: the side panes become drawers over the canvas rather than columns squeezed beside it — a canvas
+   in a third of a laptop's width is worse than no canvas (§47.1). The bar's ◧ and ◨ open and close them. */
+@media (max-width: 1240px) {
+  .ss-panes, .ss-panes[data-copilot="closed"], .ss-panes[data-explorer="closed"],
+  .ss-panes[data-explorer="closed"][data-copilot="closed"] { grid-template-columns: minmax(0, 1fr); }
+  .ss-pane { position: fixed; top: var(--ss-bar-h, 56px); bottom: 0; left: 0; width: min(340px, 88vw);
+    max-height: none;
+    z-index: 45; overflow: auto; border-radius: 0; box-shadow: var(--ss-shadow-lg); }
+  .ss-card.ss-pane { background: var(--ss-surface); }
+  .ss-stack.ss-pane { left: auto; right: 0; background: var(--ss-sunken); padding: 12px;
+    border-left: 1px solid var(--ss-border); }
+  .ss-drawer, .ss-panes { padding-left: 12px; padding-right: 12px; margin-left: 0; margin-right: 0; }
+  .ss-bar { gap: 6px; padding: 8px 12px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   #sharpsight-studio *, #sharpsight-studio *::after { transition: none !important; animation: none !important; }

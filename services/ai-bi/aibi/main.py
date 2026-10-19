@@ -184,6 +184,8 @@ SUPERSET_MAY = frozenset({
     ("POST", "/projects/{project_id}/propose"), ("POST", "/projects/{project_id}/compose"),
     # what a run found, last time: the levels of validation only a run can produce
     ("GET", "/projects/{project_id}/report"), ("GET", "/datasets/{dataset_id}/lineage"),
+    # the immutable package a version was cut as (§47.2 « Export Package »): reading it is not promoting it
+    ("GET", "/projects/{project_id}/versions/{version}/package"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
 })
