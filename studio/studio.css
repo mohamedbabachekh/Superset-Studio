@@ -137,6 +137,15 @@
   position: relative; border-radius: 8px; transition: outline-color .12s; outline: 2px dashed transparent;
   outline-offset: 5px; }
 .ss-row[data-over="true"] { outline-color: var(--ss-primary); }
+.ss-viewport { overflow-x: auto; }
+.ss-frame { transform-origin: top left; transition: width .12s; }
+.ss-mini { font: inherit; font-size: 11px; padding: 3px 6px; border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-sm); background: var(--ss-surface); color: var(--ss-muted); }
+.ss-kind { cursor: grab; }
+.ss-kind:active { cursor: grabbing; }
+.ss-kind .ss-name { font-variant-numeric: tabular-nums; }
+.ss-kind[draggable="true"] .ss-name::before { content: "⠿"; color: var(--ss-faint); margin-right: 6px; }
+
 .ss-rowbar { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ss-faint);
   margin: 0 2px 4px; opacity: 0; transition: opacity .12s; }
 .ss-rowblock:hover .ss-rowbar, .ss-rowblock:focus-within .ss-rowbar { opacity: 1; }

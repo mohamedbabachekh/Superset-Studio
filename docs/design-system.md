@@ -48,10 +48,10 @@ there is no component framework ([ADR 0014](adr/0014-no-build-step-and-no-second
 | Group | Here | Where |
 |---|---|---|
 | **Navigation** | the command bar (`.ss-bar`, `.ss-crumb`, `.ss-group`), the command palette (`.ss-palette`), the explorer tree (`.ss-tree`), tabs (`.ss-tabs`) | `view.js` · `ui.js::palette` |
-| **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the lineage panel | the gallery, the explorer, the inspector's *Data & dbt* |
-| **Builder** | the canvas (`.ss-canvas`, `.ss-row`), a chart tile (`.ss-tile`, `.ss-shot`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), the inspector (`.ss-field`, `.ss-two`) | `view.js` |
+| **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the filter picker, the lineage panel | the gallery, the explorer, the dashboard inspector's *Filters*, the inspector's *Data & dbt* |
+| **Builder** | the component library (`.ss-kind`, draggable), the canvas (`.ss-canvas`, `.ss-row`) in its zoomable frame (`.ss-frame`, `.ss-viewport`), a chart tile (`.ss-tile`, `.ss-shot`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), both inspectors (`.ss-field`, `.ss-two`) | `view.js` |
 | **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`) | `view.js::copilot` |
-| **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the inspector, the drawer |
+| **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the chart inspector's *Governance*, the dashboard inspector's *Security* (who may open it, and the row-level rules), the drawer |
 | **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action | the bar, the drawer's *Releases* |
 
 Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()`, `tag()`, `toast()`,
@@ -114,7 +114,8 @@ width is worse than no canvas.
 
 | | |
 |---|---|
-| **The canvas is not Figma's** | it edits a specification, not pixels, and it supports what Superset's own dashboard model can store — rows and twelfths, not free coordinates ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)) |
+| **The canvas is not Figma's** | it edits a specification, not pixels, and it supports what Superset's own dashboard model can store — rows and twelfths, not free coordinates ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)). There are no alignment guides because there is nothing to align: a twelfth is a twelfth, and every drop snaps by construction. Zoom and the template's own viewport widths are there, because *how wide it will be read* is a real question |
+| **The library is not a component palette** | it offers the **kinds of chart the registry approves**, each saying which of this template's slots accept it and whether it is installed in this BI engine — not buttons, inputs and containers. Dragging one onto a row does not place a component: it opens the gallery on the free slot of that row's section, because a chart without a governed metric is not a chart |
 | **The inspector has little style** | a colour, a legend, an axis has no place in a specification, so the Style tab a design tool would have is a sentence explaining that Explore owns them and a commit sets them back |
 | **The drawer shows no data** | the brief asks for a permission-checked sample; a developer's Superset account is given no database in SQL Lab, and this page is not a way round that decision ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)) — **the owner can overrule this in one tab and one route** |
 | **The AI proposes, never applies** | Retool and Figma edit live; here every AI change is a proposal with a diff and an explicit Apply ([ADR 0012](adr/0012-the-copilot-is-deterministic-and-proposes.md)) |

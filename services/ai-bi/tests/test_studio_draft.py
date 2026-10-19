@@ -79,6 +79,19 @@ def test_the_studio_draws_the_version_until_there_is_a_draft(service, dev):
     # and the template's constraints, which are what the canvas may rearrange
     assert payload["template"]["grid"]["columns"] == 12
     assert payload["template"]["min_slot_width"] == {"kpi": 2, "chart": 4}
+    # the component library: every approved visualization, where it may go, and whether it can be drawn here
+    library = {v["id"]: v for v in payload["visualizations"]}
+    assert library["big_number"]["slots"] == ["kpi_1", "kpi_2", "kpi_3", "kpi_4"]
+    assert library["line"]["purposes"] == ["trend"] and library["line"]["status"] == "available"
+    assert any(v["status"] != "available" for v in payload["visualizations"]), (
+        "the library must show what is approved but not installed, not hide it")
+    # the filters it may carry: a column of a dataset it uses, in a role the template allows
+    offered = {f["column"]: f for f in payload["filter_options"]}
+    assert offered["date"]["used"] is True and offered["region"]["used"] is False
+    assert all(f["role"] in payload["template"]["filters"]["allowed_roles"] for f in payload["filter_options"])
+    # and who may open the dashboard this becomes
+    assert "bi_developer" in payload["security"]["audience"]
+    assert payload["security"]["classifications"] == ["internal"]
     # and the specification itself, which is what the workspace edits and sends back
     assert payload["spec"]["dashboard"]["id"] == "cem-qoe" and payload["spec"]["layout"] == []
 

@@ -32,7 +32,8 @@ const commands = {
   redraw: () => view.draw(el, api, commands),
   reload: () => load(),
   help: () => view.help(),
-  gallery: slot => view.gallery(typeof slot === 'string' ? slot : null, api, commands),
+  gallery: (slot, kind) => view.gallery(typeof slot === 'string' ? slot : null,
+    typeof kind === 'string' ? kind : null, commands),
 
   select(slot) {
     state.selected = slot;
@@ -309,7 +310,10 @@ window.addEventListener('resize', () => {
   const now = window.innerWidth >= 1240;
   if (now !== wide) {
     wide = now;
-    if (!now) { state.explorer = false; state.copilot = false; }
+    // closed because the screen was narrow, and back when it is not: a pane a person closed at full width
+    // and then narrowed past is no reason to leave them with one pane when they widen again.
+    state.explorer = now;
+    state.copilot = now;
   }
   if (state.payload) commands.redraw();
 });

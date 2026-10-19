@@ -53,7 +53,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 
 | | | |
 |---|---|---|
-| §19 | Governance drawer | **built** — the Studio's inspector (metric, definition, owner, certification, dataset, domain, grain, section) |
+| §19 | Governance drawer | **built** — the chart's inspector (metric, definition, owner, certification, dataset, domain, grain, section) and the dashboard's *Security* tab (audience, classifications, row-level rules, what is not certified) |
 | §20 | Version control and git in the menus | **partly** — validate and commit are commands in SQL Lab and in the Studio; git holds every version's specification, and `restore` re-applies one. Superset's own dashboard menu takes no SharpSight entry: no extension point |
 | §21 | BI review inside Superset | **partly** — the Studio's « Changes » tab shows what a draft changes about its version, and what Superset holds against what was validated. Approving is deliberately elsewhere ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)) |
 | §22 | Release and deployment controls | **partly** — the « Releases » tab lists every version, its gate and its package. Promotion is the command line, on purpose |
@@ -98,10 +98,10 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §46 | The product decision, the feasibility table | **built** — the staged reading is [`superset-studio.md`](superset-studio.md) |
 | §47.1 | Three panes and a drawer | **built** |
 | §47.2 | The command bar: environment, save state, undo/redo, preview, validate, commit, export, deploy | **built, less deploy** — including **Export .ssbi**, the immutable package of the latest version. Deploying is the command line's, because PROD needs a second person ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). Draft / version / package / deployment are never conflated |
-| §47.3 | The project and asset explorer | **partly** — outline, free slots, parked charts, governed datasets and metrics, search. **No drag from the list onto the canvas**: a chart is placed on a slot through a proposal |
-| §47.4 | The canvas | **partly** — grid, drag to another row, resize, reorder rows, row heights, selection, loading and empty states, keyboard equivalents for every mouse move, undo/redo, autosave, « add here » on a free slot. **Not built**: zoom, responsive preview modes, alignment guides, cross-filter preview (that is Preview, in Superset), duplicate |
+| §47.3 | The project and asset explorer | **built** — outline, free slots, parked charts, a **component library** of the approved chart kinds (each saying where it may go and whether it is installed), governed datasets and metrics, search. A kind **drags onto a row**, which opens the gallery on that section's free slot: what is placed is still a proposal, because a chart without a governed metric is not a chart |
+| §47.4 | The canvas | **built, less two** — grid, drag to another row, resize, reorder rows, row heights, selection, loading and empty states, keyboard equivalents for every mouse move, undo/redo, autosave, « add here » on a free slot, **zoom**, and **the viewport widths the template declares**. Not built: duplicate, and cross-filter preview (that is Preview, in Superset). Alignment guides are moot: a twelfth is a twelfth, and every drop snaps |
 | §47.1 | Small screens: collapse the panes into drawers rather than squeezing the canvas | **built** — under 1240px the side panes are drawers over the canvas, closed to begin with |
-| §47.5 | The contextual inspector | **built** — Content, Chart, Governance, Data & dbt. Style is deliberately thin: colour and legend have no place in a specification |
+| §47.5 | The contextual inspector | **built** — for a chart: Content, Chart, Governance, Data & dbt. For the dashboard (nothing selected): Dashboard, **Filters** (the columns the template allows, on datasets it already uses), **Security** (who may open it, and the row-level rules that follow), Layout. Style is deliberately thin: colour and legend have no place in a specification |
 | §47.6 | The AI copilot | **built, deterministic** — a proposal with its changes, what it touches, its validation, Apply / Reject, history per project, suggestions drawn from the project. **Not built**: streaming, cancel, clarifying questions, « explain this change » beyond the diff |
 | §47.7 | The validation drawer | **partly** — Validation, Changes, Last run (the levels only a run can produce), Releases. **No data preview** ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)); logs and timings are inside the last run's report rather than tabs of their own |
 | §48.1 | Create a dashboard from a prompt | **built** — on the command line (`ai-bi.sh request`), twenty-two steps. Not from the Studio: a project starts with a request |
@@ -160,10 +160,10 @@ measurement, or work with a known shape.
 14. **Comments and real-time collaboration** — §54 says later, and this agrees.
 15. **Warehouses other than PostgreSQL** — the matrix says `not_tested`, which is a statement about what was
     run, not a limitation of the design.
-16. **Canvas refinements** — zoom, responsive preview modes, alignment guides, duplicate; drag from the
-    explorer onto the canvas; « compare » and « branch » on a conflicting draft; streaming and clarifying
-    questions in the copilot. (Small screens, the command palette, the dark theme and the written design
-    system were done on 2026-10-19.)
+16. **What is left of the canvas** — duplicating a chart, « compare » and « branch » on a conflicting
+    draft, streaming and clarifying questions in the copilot. (Small screens, the command palette, the dark
+    theme, the written design system, the component library with drag onto the canvas, zoom and the
+    template's viewport widths were all done on 2026-10-19.)
 17. **A site-level map** — map tiles come from outside, and this kit calls nobody.
 18. **One source for the brand values** — they are in three files kept alike by hand.
 

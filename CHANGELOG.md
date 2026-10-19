@@ -50,6 +50,14 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
   palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
   become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **A component library, and the dashboard's own inspector.** The explorer now offers every chart kind the
+  registry approves, grouped by what it is for, each saying which of this template's slots accept it and
+  whether it is installed in this BI engine — what is approved but not installed is shown, not hidden. A kind
+  drags onto a row and opens the gallery on that section's free slot. And with nothing selected, the
+  inspector is the dashboard's: its title and owner, its **filters** (the columns the template allows, on
+  datasets it already uses, with the limit it allows), its **security** (who may open the dashboard this
+  becomes, and the row-level rules that follow it), and its layout. The canvas gained **zoom** and **the
+  viewport widths the template declares**.
 - **Export .ssbi from the bar** — the immutable package of the latest version, through the same gateway with
   the same identity. Reading a package is not promoting it: PROD still needs a second person.
 - **Twenty-one architecture decision records** ([docs/adr/](docs/adr/)) — everything this architecture rests

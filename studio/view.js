@@ -171,6 +171,43 @@ function explorer(commands) {
         node('span', { class: 'ss-faint', text: free.mandatory ? 'mandatory' : 'add' }))));
   }
 
+  const library = state.payload.visualizations || [];
+  if (library.length) {
+    tree.appendChild(node('h3', {}, node('span', { text: 'Components' }),
+      node('span', { class: 'ss-faint', text: `${library.filter(kind => kind.status === 'available').length}` })));
+    const byPurpose = {};
+    // a kind no slot of this template accepts still belongs in the library, under « elsewhere »: a library
+    // that hides what cannot be used here would be hiding the reason it cannot
+    library.forEach(kind => ((kind.purposes || []).length ? kind.purposes : ['elsewhere']).forEach(purpose => {
+      byPurpose[purpose] = byPurpose[purpose] || [];
+      byPurpose[purpose].push(kind);
+    }));
+    Object.entries(byPurpose).forEach(([purpose, kinds]) => {
+      const shown = kinds.filter(kind => match(kind.id) || match(purpose));
+      if (!shown.length) return;
+      tree.appendChild(node('li', { class: 'ss-section-head' }, purpose));
+      shown.forEach(kind => {
+        const free = (state.payload.free_slots || []).filter(slot => (slot.accepts || []).includes(kind.id));
+        const ready = kind.status === 'available' && free.length && act.editable();
+        tree.appendChild(node('li', { class: 'ss-sub ss-kind', draggable: ready, title: ready
+          ? `Drag onto a row, or click: it goes on ${free.map(slot => slot.slot).join(' or ')}`
+          : kind.status !== 'available'
+            ? `${kind.id} is approved but not installed in this BI engine: a dashboard asking for it is refused`
+            : `every slot that accepts a ${kind.id} already holds a chart`,
+        on: {
+          dragstart: event => { event.dataTransfer.setData('text/plain', `type:${kind.id}`); },
+          click: () => (ready ? commands.gallery(free[0].slot, kind.id)
+            : toast(kind.status !== 'available'
+              ? `${kind.id} is approved but not installed in this BI engine.`
+              : `Every slot that accepts a ${kind.id} already holds a chart.`, { kind: 'bad' })),
+        } },
+        node('span', { class: 'ss-name', 'data-kind': kind.id, text: kind.id }),
+        node('span', { class: 'ss-faint', text: kind.status === 'available'
+          ? (free.length ? `${free.length} free` : 'full') : 'not installed' })));
+      });
+    });
+  }
+
   tree.appendChild(node('h3', {}, node('span', { text: 'Datasets' }),
     node('span', { class: 'ss-faint', text: String(state.datasets.length) })));
   state.datasets.filter(d => match(d.id) || match(d.name)).slice(0, 30).forEach(dataset =>
@@ -213,13 +250,34 @@ function canvas(client, commands) {
     inner.appendChild(node('div', { class: 'ss-callout', 'data-kind': 'info' },
       'This project has no chart on its layout. Add one from a free slot of its template.'));
   }
+  // Zoom and the template's own viewports (§47.4). The canvas is a grid of twelfths, so « responsive
+  // preview » is the width the dashboard will actually be read at — the template declares them — and the
+  // zoom is how much of it fits on this screen.
+  const zoom = state.zoom || 1;
+  const viewport = state.viewport || 0;
+  const frame = node('div', { class: 'ss-frame', style: viewport
+    ? `width: ${viewport}px; transform: scale(${zoom}); `
+    : `width: ${Math.round(100 / zoom)}%; transform: scale(${zoom});` }, inner);
+  const viewports = [[0, 'Fit']].concat((state.payload.template.viewports || [])
+    .map(one => [one.width, `${one.name} ${one.width}`]));
   return node('section', { class: 'ss-card', style: 'padding: 6px' },
     node('header', {},
       node('span', { text: state.payload.layout_of === 'specification'
         ? 'Canvas — the layout this project placed' : `Canvas — the template's own layout` }),
       node('span', { class: 'ss-spacer' }),
-      node('span', { class: 'ss-faint', text: tilesTaken() })),
-    node('div', { class: 'ss-body', style: 'padding: 8px' }, inner));
+      node('span', { class: 'ss-faint', text: tilesTaken() }),
+      select(String(viewport), viewports.map(([width, label]) => [String(width), label]),
+        value => { state.viewport = Number(value); commands.redraw(); },
+        { class: 'ss-mini', 'aria-label': 'The width it is read at' }),
+      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '−',
+        'aria-label': 'Zoom out', title: 'Zoom out',
+        on: { click: () => { state.zoom = Math.max(0.5, zoom - 0.1); commands.redraw(); } } }),
+      node('span', { class: 'ss-faint', style: 'min-width: 34px; text-align: center',
+        text: `${Math.round(zoom * 100)}%` }),
+      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '+',
+        'aria-label': 'Zoom in', title: 'Zoom in',
+        on: { click: () => { state.zoom = Math.min(1, zoom + 0.1); commands.redraw(); } } })),
+    node('div', { class: 'ss-body ss-viewport', style: 'padding: 8px' }, frame));
 }
 
 function tilesTaken() {
@@ -253,7 +311,14 @@ function rowNode(row, client, commands) {
     drop: event => {
       event.preventDefault();
       delete made.dataset.over;
-      act.drop(event.dataTransfer.getData('text/plain'), row.row);
+      const kind = act.drop(event.dataTransfer.getData('text/plain'), row.row);
+      if (!kind) return;
+      const free = act.slotFor(kind, row.row);
+      if (!free) {
+        toast(`This row's section has no free slot that accepts a ${kind}.`, { kind: 'bad' });
+        return;
+      }
+      commands.gallery(free.slot, kind);
     },
   } });
   row.slots.forEach(place => made.appendChild(tile(place, row, client, commands)));
@@ -280,7 +345,7 @@ function tile(place, row, client, commands) {
       // Enter or Space on a focused tile selects it; focus alone does not, or a redraw would move the
       // focus out from under the keyboard.
       keydown: event => { if (event.key === 'Enter' || event.key === ' ') commands.select(place.id); },
-      dragstart: event => { event.dataTransfer.setData('text/plain', place.id); },
+      dragstart: event => { event.dataTransfer.setData('text/plain', `slot:${place.id}`); },
     } },
     node('header', {},
       node('strong', { text: act.title(place.id) }),
@@ -345,11 +410,7 @@ function rightPane(client, commands) {
 }
 
 function inspector(client, commands) {
-  if (!state.selected) {
-    return node('section', { class: 'ss-card' }, node('header', {}, 'Inspector'),
-      node('div', { class: 'ss-body ss-note' },
-        'Select a chart on the canvas to see what it measures, who owns it, and what may be changed about it.'));
-  }
+  if (!state.selected) return dashboardInspector(commands);
   const slot = state.selected;
   const own = act.component(slot) || {};
   const said = act.described(slot);
@@ -449,6 +510,91 @@ function inspector(client, commands) {
     node('div', { style: 'padding: 8px 10px 0' }, node('div', { class: 'ss-tabs' },
       Object.entries(tabs).map(([key, label]) => node('button', { type: 'button', text: label,
         'aria-selected': which === key, on: { click: () => { state.inspector = key; commands.redraw(); } } })))),
+    body);
+}
+
+/* With nothing selected, the inspector is the DASHBOARD's: what a specification says about the whole of it
+ * (§47.5, « for a dashboard: layout, filters, theme, security, metadata »). */
+function dashboardInspector(commands) {
+  const tabs = { about: 'Dashboard', filters: 'Filters', security: 'Security', layout: 'Layout' };
+  const which = state.dashboardTab || 'about';
+  const body = node('div', { class: 'ss-body' });
+  const header = state.spec.dashboard || {};
+  const security = state.payload.security || {};
+  const template = state.payload.template;
+
+  if (which === 'about') {
+    body.appendChild(field('Title', node('input', { value: header.title || '', maxlength: 120,
+      disabled: !act.editable(), on: { change: e => act.setDashboard('title', e.target.value) } })));
+    body.appendChild(field('Description', node('textarea', { rows: 2, maxlength: 500, disabled: !act.editable(),
+      on: { change: e => act.setDashboard('description', e.target.value) } }, header.description || '')));
+    body.appendChild(field('Owner', node('input', { value: header.owner || '', maxlength: 80,
+      disabled: !act.editable(), on: { change: e => act.setDashboard('owner', e.target.value) } })));
+    body.appendChild(node('ul', { class: 'ss-gov' },
+      pair('Template', `${template.id} v${template.version}`),
+      pair('Charts', (state.spec.components || []).length),
+      pair('Version', state.payload.project.version),
+      pair('Gate', state.payload.project.gate),
+      pair('Environment', state.payload.project.environment)));
+  }
+  if (which === 'filters') {
+    const offered = state.payload.filter_options || [];
+    const used = state.spec.filters || [];
+    body.appendChild(node('p', { class: 'ss-note', text:
+      `${used.length} of ${template.filters.max} this template allows. A filter is a column of a dataset this `
+      + `dashboard already uses, in a role the template permits (${template.filters.allowed_roles.join(', ')}).` }));
+    if (!offered.length) {
+      body.appendChild(node('div', { class: 'ss-callout', text:
+        'No column of this dashboard\u2019s datasets may be filtered on under this template.' }));
+    }
+    body.appendChild(node('div', { class: 'ss-pick' }, offered.map(option => node('label', {},
+      node('input', { type: 'checkbox', checked: used.includes(option.column), disabled: !act.editable(),
+        on: { change: event => act.setFilter(option.column, event.target.checked) } }),
+      node('span', { class: 'ss-what' }, node('strong', { text: option.label }),
+        node('span', { class: 'ss-faint', text: ` ${option.column} · ${option.role}` }),
+        option.reaches_every_chart ? null
+          : node('div', { class: 'ss-faint', text: 'not on every dataset: it will not reach every chart' })),
+      node('span', { class: 'ss-cert', 'data-certified': option.reaches_every_chart,
+        text: option.reaches_every_chart ? '✓' : '○' })))));
+  }
+  if (which === 'security') {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'Who may open the dashboard this becomes — SharpSight decides it from what the dashboard uses, and the '
+      + 'engine enforces it in Superset when a version is built, then asks Superset whether it agrees.' }));
+    body.appendChild(node('ul', { class: 'ss-gov' },
+      pair('May open it', (security.audience || []).join(', ')),
+      pair('Classifications', (security.classifications || []).join(', ')),
+      pair('Row-level rules', (security.row_rules || []).length)));
+    (security.row_rules || []).slice(0, 8).forEach(rule => body.appendChild(node('div', { class: 'ss-code',
+      style: 'margin-top: 6px', text: `${rule.role} on ${rule.dataset}: ${rule.clause}` })));
+    if ((security.uncertified || []).length) {
+      body.appendChild(node('div', { class: 'ss-callout', style: 'margin-top: 10px' },
+        node('strong', { text: 'Not certified: ' }), security.uncertified.join(', ')));
+    }
+  }
+  if (which === 'layout') {
+    body.appendChild(node('ul', { class: 'ss-gov' },
+      pair('Grid', `${template.grid.columns} columns, ${template.grid.row_unit_px}px a unit`),
+      pair('Rows', act.rows().length),
+      pair('Sections', (template.sections || []).map(section => section.title || section.id).join(', ')),
+      pair('Laid out by', state.payload.layout_of === 'specification' ? 'this project' : 'the template')));
+    body.appendChild(field('Brand', select((state.spec.theme || {}).brand || '',
+      [['', 'SharpSight\u2019s own'], 'sharpsight', 'inwi'], value => act.setDashboard('brand', value),
+      { disabled: !act.editable() })));
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'A brand is an accent and a series of colours, nothing else: the page around the dashboard stays '
+      + 'SharpSight\u2019s. Everything else about the layout is the template\u2019s, and the canvas rearranges '
+      + 'it within what the template allows.' }));
+  }
+
+  return node('section', { class: 'ss-card' },
+    node('header', {}, node('span', { text: 'The dashboard' }),
+      node('span', { class: 'ss-spacer' }),
+      node('span', { class: 'ss-faint', text: 'select a chart for its own' })),
+    node('div', { style: 'padding: 8px 10px 0' }, node('div', { class: 'ss-tabs' },
+      Object.entries(tabs).map(([key, label]) => node('button', { type: 'button', text: label,
+        'aria-selected': which === key,
+        on: { click: () => { state.dashboardTab = key; commands.redraw(); } } })))),
     body);
 }
 
@@ -648,13 +794,13 @@ function aboutTab(body) {
 }
 
 /* ── the gallery (§48.3): the manual path, which is not a prompt ─────────────────────────────────────────── */
-export function gallery(wanted, client, commands) {
+export function gallery(wanted, kind, commands) {
   const free = state.payload.free_slots;
   if (!free.length) {
     toast('Every slot of this template already holds a chart.', { kind: 'bad' });
     return;
   }
-  const chosen = { slot: (free.find(f => f.slot === wanted) || free[0]).slot, metric: null, type: null,
+  const chosen = { slot: (free.find(f => f.slot === wanted) || free[0]).slot, metric: null, type: kind || null,
     dimension: '', time_grain: '' };
   const body = node('div', {});
   const draw_ = () => {

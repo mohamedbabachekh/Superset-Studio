@@ -485,6 +485,39 @@ def _studio_spec(project: dict[str, Any]) -> tuple[DashboardSpec, bool]:
     return DashboardSpec(**project["spec"]), False
 
 
+def _filter_options(spec: DashboardSpec, template: Any, identity: Identity) -> list[dict[str, Any]]:
+    """The columns a filter may be put on. A filter reaches charts, so it is offered only on a dataset the
+    dashboard already uses; the template says which ROLES of column may be filtered on and how many filters
+    it allows; the registry says which columns this person may read at all."""
+    offered: dict[str, dict[str, Any]] = {}
+    for dataset_id in spec.datasets():
+        dataset = service.registry.datasets.get(dataset_id)
+        if dataset is None or not service.policy.can_read(identity, dataset):
+            continue
+        readable = service.policy.readable_columns(identity, dataset)
+        for name, column in dataset.columns.items():
+            if name not in readable or column.role not in template.filters.allowed_roles:
+                continue
+            entry = offered.setdefault(name, {"column": name, "role": column.role, "label": column.label or name,
+                                              "datasets": [], "used": name in spec.filters})
+            entry["datasets"].append(dataset.id)
+    # a filter that does not reach every chart is a warning at validation, so say it here instead of there
+    for entry in offered.values():
+        entry["reaches_every_chart"] = len(entry["datasets"]) == len(spec.datasets())
+    return sorted(offered.values(), key=lambda entry: (not entry["used"], entry["column"]))
+
+
+def _security(spec: DashboardSpec, identity: Identity) -> dict[str, Any]:
+    datasets = [service.registry.datasets[d] for d in spec.datasets() if d in service.registry.datasets]
+    metrics = [service.registry.metrics[m] for m in spec.metrics() if m in service.registry.metrics]
+    rules = service.policy.row_rules(datasets, metrics)
+    return {"audience": service.policy.audience(datasets, metrics),
+            "row_rules": rules,
+            "classifications": sorted({m.classification for m in metrics}),
+            "uncertified": sorted({m.id for m in metrics if not m.certified}
+                                  | {d.id for d in datasets if not d.certified})}
+
+
 def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, Any]:
     spec, from_draft = _studio_spec(project)
     template = service.registry.template(spec.dashboard.template)
@@ -559,6 +592,21 @@ def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, An
                       "validation": (v.validation or {}).get("summary") or {}}
                      for v in service.store.list_versions(project["project_id"])],
         "ask": service.copilot.examples(spec, template),
+        # the component library (§47.3): what may be drawn, where each may go, and what is approved but not
+        # installed in this BI engine — a library that offered a visualization the engine cannot draw would
+        # be offering a refusal
+        "visualizations": [
+            {"id": name, "status": body.status, "needs": body.needs,
+             "slots": [slot for slot, defined in template.slots.items() if name in defined.accepts],
+             "purposes": sorted({template.slots[slot].purpose for slot in template.slots
+                                 if name in template.slots[slot].accepts})}
+            for name, body in service.registry.visualizations.items()],
+        # the filters this dashboard may carry: a column of a dataset it already uses, in a role the
+        # template allows, that this person may read (§47.5, « for a dashboard: filters »)
+        "filter_options": _filter_options(spec, template, identity),
+        # who may open the dashboard this becomes, and the row-level rules that follow it — SharpSight's
+        # decision, enforced in Superset when a version is built (§19 « Security »)
+        "security": _security(spec, identity),
         # the free slots a chart may be added to, with what each accepts: the gallery of §48.3
         "free_slots": [{"slot": slot, "purpose": template.slots[slot].purpose,
                         "accepts": template.slots[slot].accepts,

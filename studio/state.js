@@ -182,9 +182,48 @@ export function taller(name, by) {
   });
 }
 
+/* ── the dashboard's own fields ──────────────────────────────────────────────────────────────────────────
+ * A filter, a title, a brand: what a specification says about the dashboard rather than about one chart.
+ * Each is bounded by the template — how many filters it allows, which roles of column may be filtered on —
+ * and the engine checks it again (dashboard_agent.validate).
+ */
+export function setFilter(column, on) {
+  const template = state.payload.template;
+  const already = state.spec.filters || [];
+  if (on && already.length >= template.filters.max) {
+    toast(`Template ${template.id} allows ${template.filters.max} filters on a dashboard. `
+      + 'Take one off first.', { kind: 'bad' });
+    return;
+  }
+  const offered = (state.payload.filter_options || []).find(option => option.column === column);
+  if (on && offered && !offered.reaches_every_chart) {
+    toast(`${column} is not a column of every dataset this dashboard uses, so the filter will not reach `
+      + 'every chart. Validation says which.', { seconds: 8 });
+  }
+  change(() => {
+    state.spec.filters = on ? [...already, column] : already.filter(name => name !== column);
+  });
+}
+
+export function setDashboard(name, value) {
+  change(() => {
+    if (name === 'brand') {
+      state.spec.theme = { ...(state.spec.theme || {}) };
+      if (value) state.spec.theme.brand = value;
+      else delete state.spec.theme.brand;
+      return;
+    }
+    state.spec.dashboard = { ...state.spec.dashboard, [name]: value || undefined };
+  });
+}
+
 /** A chart dragged to another row. The engine refuses it across sections — a section has an owner and
  *  filters of its own — so it is refused here too, with the same reason. */
-export function drop(slot, onto) {
+export function drop(what, onto) {
+  // two things can be dropped on a row: a chart that is already on the canvas, and a kind of chart from the
+  // library. The second is not a move — it is an offer to fill a free slot of that row's section.
+  if (String(what).startsWith('type:')) return String(what).slice(5);
+  const slot = String(what).replace(/^slot:/, '');
   const from = rowOf(slot);
   if (!from || from.row === onto) return;
   if (sectionOfRow(from.row) !== sectionOfRow(onto)) {
@@ -199,6 +238,14 @@ export function drop(slot, onto) {
     row.slots.push(taken);
     state.spec.layout = rows().filter(r => r.slots.length);
   });
+  return null;
+}
+
+/** A free slot of that row's section that accepts this kind of chart — what a drop from the library means. */
+export function slotFor(kind, row) {
+  const section = sectionOfRow(row);
+  return (state.payload.free_slots || []).find(free => free.section === section
+    && (free.accepts || []).includes(kind)) || null;
 }
 
 export function setField(slot, name, value) {

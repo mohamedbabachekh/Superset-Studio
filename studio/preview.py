@@ -130,6 +130,38 @@ def payload() -> dict:
         "versions": [{"version": "1.0.0", "status": "READY_FOR_REVIEW", "state": "DEV",
                       "created_at": "2026-10-19T21:00:00Z", "created_by": "dev.user", "title": "CEM QoE Overview",
                       "git_commit": "a1b2c3d", "package": "cem-qoe-1.0.0.ssbi", "validation": {"passed": True}}],
+        "visualizations": [
+            {"id": "big_number", "status": "available", "needs": {"metric": True},
+             "slots": ["kpi_1", "kpi_2", "kpi_3", "kpi_4"], "purposes": ["kpi"]},
+            {"id": "line", "status": "available", "needs": {"metric": True}, "slots": ["trend_1"],
+             "purposes": ["trend"]},
+            {"id": "area", "status": "available", "needs": {"metric": True}, "slots": ["trend_1"],
+             "purposes": ["trend"]},
+            {"id": "bar", "status": "available", "needs": {"metric": True}, "slots": ["ranking_1"],
+             "purposes": ["ranking"]},
+            {"id": "histogram", "status": "available", "needs": {"metric": True}, "slots": ["distribution_1"],
+             "purposes": ["distribution"]},
+            {"id": "table", "status": "available", "needs": {"metric": True},
+             "slots": ["ranking_1", "map_1"], "purposes": ["geo", "ranking"]},
+            {"id": "map", "status": "available", "needs": {"metric": True}, "slots": ["map_1"],
+             "purposes": ["geo"]},
+            {"id": "TelecomQoEChart", "status": "approved_not_installed", "needs": {"metric": True},
+             "slots": [], "purposes": []},
+        ],
+        "filter_options": [
+            {"column": "date", "role": "time", "label": "Date", "datasets": ["cem.qoe_daily"], "used": True,
+             "reaches_every_chart": True},
+            {"column": "region", "role": "dimension", "label": "Region", "datasets": ["cem.qoe_daily"],
+             "used": True, "reaches_every_chart": True},
+            {"column": "rat", "role": "dimension", "label": "RAT", "datasets": ["cem.qoe_daily"],
+             "used": True, "reaches_every_chart": True},
+            {"column": "site", "role": "dimension", "label": "Site", "datasets": ["cem.qoe_site_daily"],
+             "used": False, "reaches_every_chart": False},
+        ],
+        "security": {"audience": ["bi_developer", "bi_reviewer", "cem_analyst"],
+                     "row_rules": [{"role": "cem_analyst", "dataset": "cem.qoe_daily",
+                                    "clause": "region in ('Casablanca-Settat')"}],
+                     "classifications": ["internal"], "uncertified": ["cem.degraded_rate"]},
         "ask": ["add a distribution of QoE Score", "make the trend weekly", "show only the top 5 regions",
                 "make all the KPIs compact", "what is the QoE Score?"],
         "free_slots": [{"slot": slot, "purpose": TEMPLATE["slots"][slot]["purpose"],
@@ -526,6 +558,51 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("and the explorer opens over it, as a drawer",
            page.eval_on_selector(".ss-card.ss-pane", "n => getComputedStyle(n).position") == "fixed")
     page.set_viewport_size({"width": 1600, "height": 1200})
+    time.sleep(0.3)
+
+    # ── the component library (§47.3) ──────────────────────────────────────────────────────────────────────
+    if page.eval_on_selector('.ss-bar button[aria-label="The explorer"]',
+                             "n => n.getAttribute('aria-pressed') !== 'true'"):
+        page.click('.ss-bar button[aria-label="The explorer"]')
+        time.sleep(0.3)
+    expect("the explorer offers the chart kinds, grouped by what they are for",
+           page.eval_on_selector_all(".ss-kind", "n => n.length") >= 6)
+    expect("and says which are approved but not installed, rather than hiding them",
+           "not installed" in page.inner_text(".ss-card.ss-pane"))
+    page.click('.ss-kind [data-kind="map"]')
+    page.wait_for_selector(".ss-modal")
+    expect("clicking one opens the gallery on the slot that accepts it, with the kind chosen",
+           "map_1" in page.inner_text(".ss-modal"))
+    page.click(".ss-modal >> text=Cancel")
+
+    # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
+    if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',
+                             "n => n.getAttribute('aria-pressed') !== 'true'"):
+        page.click('.ss-bar button[aria-label="The copilot"]')
+        time.sleep(0.3)
+    page.keyboard.press("Escape")
+    time.sleep(0.2)
+    inspector = ".ss-stack > .ss-card:first-child"
+    expect("with nothing selected the inspector is the dashboard's",
+           "dashboard" in page.inner_text(f"{inspector} header").lower())
+    page.click(f'{inspector} .ss-tabs >> text=Filters')
+    expect("whose filters are the columns the template allows, on datasets it already uses",
+           "Region" in page.inner_text(inspector) and "of 5" in page.inner_text(inspector))
+    page.click(f'{inspector} .ss-tabs >> text=Security')
+    expect("and whose security says who may open it and which rows they see",
+           "bi_reviewer" in page.inner_text(inspector) and "cem_analyst" in page.inner_text(inspector))
+    page.click(f'{inspector} .ss-tabs >> text=Layout')
+    expect("and whose layout says who laid it out", "template" in page.inner_text(inspector).lower())
+
+    # ── zoom and the width it is read at (§47.4) ───────────────────────────────────────────────────────────
+    page.click('.ss-card button[aria-label="Zoom out"]')
+    time.sleep(0.2)
+    expect("the canvas zooms out", "scale(0.9)" in page.eval_on_selector(".ss-frame", "n => n.style.transform"))
+    page.select_option('select[aria-label="The width it is read at"]', "1180")
+    time.sleep(0.2)
+    expect("and can be seen at the width the template says it is read at",
+           page.eval_on_selector(".ss-frame", "n => n.style.width") == "1180px")
+    page.select_option('select[aria-label="The width it is read at"]', "0")
     return said
 
 
