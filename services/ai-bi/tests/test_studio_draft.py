@@ -18,6 +18,7 @@ import pytest
 
 from aibi import main
 from aibi.audit import AuditLog
+from aibi.copilot import Copilot
 from aibi.dashboard_agent import DashboardAgent
 from aibi.lifecycle import LifecycleError
 from aibi.models import DashboardSpec
@@ -41,10 +42,12 @@ PROJECT = {"project_id": "cem-qoe", "title": "CEM QoE", "template": "executive",
 def service(registry, policy, semantic, tmp_path: Path, monkeypatch):
     store = Store(tmp_path / "control-plane.sqlite")
     store.save_project("cem-qoe", json.loads(json.dumps(PROJECT)), "2026-10-19T00:00:00Z")
+    dashboards = DashboardAgent(registry, policy, semantic)
     stand_in = SimpleNamespace(
         registry=registry, policy=policy, store=store,
         audit=AuditLog(tmp_path / "audit", []),
-        tools=SimpleNamespace(dashboards=DashboardAgent(registry, policy, semantic)),
+        tools=SimpleNamespace(dashboards=dashboards),
+        copilot=Copilot(registry, policy, dashboards),
         pictures=SimpleNamespace(taken=lambda project_id: None))
     monkeypatch.setattr(main, "service", stand_in)
     return stand_in

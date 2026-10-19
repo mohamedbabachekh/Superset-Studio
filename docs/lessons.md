@@ -629,3 +629,23 @@ promises — the moves it offers, the minimum widths, the section a chart may no
 undo. Thirteen checks in nine seconds, against a kit that takes a minute to start and real data to be
 meaningful. It proves no rule of the engine's: those are tested against the real registry, and the whole
 thing is run by `bash ai-bi.sh demo`.
+
+**A rule in the page is not a rule.** The canvas refuses a move the engine would refuse — a width below the
+template's minimum, a chart leaving its section — so that a person is never offered something that will fail.
+Both refusals are also in `aibi/layout.py`, and the engine's is the one that decides: the page's copy exists
+for the explanation, not for the enforcement. The same shape holds for the copilot, which proposes a
+specification that `dashboards.validate` then judges.
+
+**A form control inherits rules written for other form controls.** `.ss-field input { width: 100% }` is right
+for a text field and wrong for a radio button: in the chart gallery it stretched every radio across its row
+and left the label nothing, which read as a broken list rather than a CSS rule. → the rule excludes radios and
+checkboxes, and the gallery is in `studio/preview.py --check`, which would have caught it the first time if
+it had been written before the modal.
+
+**A modal and a toast hang off `<body>`, outside the page's own root.** Every style was scoped to
+`#sharpsight-studio`, so the first modal inherited Superset's type and looked like another product's. → the
+two rules that live outside the root say so, and set their own type and colours.
+
+**Selecting on click and selecting on focus cancel each other.** A tile that selected itself on `focus` and
+toggled on `click` ended up deselected by a single click: the focus handler had already selected it. → focus
+selects nothing; Enter or Space on a focused tile does, and the arrow keys move the selection.

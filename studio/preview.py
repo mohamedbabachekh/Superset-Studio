@@ -25,6 +25,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# what the page is made of — the same names superset-addon/sharpsight_bi.py serves inside Superset
+FILES = ("studio.js", "view.js", "state.js", "api.js", "ui.js", "studio.css")
 TEMPLATE = {
     "id": "executive", "version": "1.2", "name": "Executive overview",
     "grid": {"columns": 12, "row_unit_px": 8},
@@ -60,7 +62,7 @@ CHARTS = [
     ("trend_1", "line", "cem.qoe_score", "date", "QoE Score, daily trend"),
     ("distribution_1", "histogram", "cem.qoe_score", None, "QoE Score, distribution"),
     ("ranking_1", "bar", "cem.qoe_score", "region", "Top regions by QoE"),
-    ("map_1", "table", "cem.qoe_score", "region", "QoE by region"),
+    # map_1 is left free on purpose: a dashboard with a slot still to fill is what the gallery is for
 ]
 SPEC = {
     "dashboard": {"id": "cem-qoe", "template": "executive", "title": "CEM QoE Overview",
@@ -124,10 +126,64 @@ def payload() -> dict:
         "editing": "draft" if state["draft"] else "version",
         "draft": {k: state["draft"][k] for k in ("saved_at", "saved_by")} if state["draft"] else None,
         "token": token(state["draft"]), "problems": [],
+        "diff": ["~ the layout: " + ", ".join(r["row"] for r in rows)] if state["draft"] else [],
+        "versions": [{"version": "1.0.0", "status": "READY_FOR_REVIEW", "state": "DEV",
+                      "created_at": "2026-10-19T21:00:00Z", "created_by": "dev.user", "title": "CEM QoE Overview",
+                      "git_commit": "a1b2c3d", "package": "cem-qoe-1.0.0.ssbi", "validation": {"passed": True}}],
+        "ask": ["add a distribution of QoE Score", "make the trend weekly", "show only the top 5 regions",
+                "make all the KPIs compact", "what is the QoE Score?"],
+        "free_slots": [{"slot": slot, "purpose": TEMPLATE["slots"][slot]["purpose"],
+                        "accepts": TEMPLATE["slots"][slot]["accepts"],
+                        "mandatory": TEMPLATE["slots"][slot]["mandatory"],
+                        "section": next(s["id"] for s in TEMPLATE["sections"]
+                                        if any(slot in [p["id"] for p in r["slots"]]
+                                               for r in TEMPLATE["rows"] if r["row"] in s["rows"]))}
+                       for slot in [p["id"] for r in TEMPLATE["rows"] for p in r["slots"]]
+                       if slot not in [c["slot"] for c in spec["components"]]],
         "pictures": {"taken_at": "2026-10-19T22:00:00Z", "dashboard": 7, "width": 1440, "load_ms": 4200,
                      "slots": {slot: {"width": 300, "height": 200, "drawn": True} for slot, *_ in CHARTS},
                      "missing": [], "console_errors": []},
     }
+
+
+def proposal(body: dict) -> dict:
+    """A proposal of the engine's own shape. The engine's reading of a request is tested against the real
+    registry (services/ai-bi/tests/test_studio_copilot.py); what is held here is that the WORKSPACE shows a
+    proposal, lets it be applied, and does not apply it by itself."""
+    spec = copy.deepcopy((state["draft"] or {}).get("spec") or SPEC)
+    asked = str(body.get("request") or f"add {body.get('metric')} on {body.get('slot')}")
+    if "weekly" in asked:
+        for component in spec["components"]:
+            if component["slot"] == "trend_1":
+                component["options"] = {**component.get("options", {}), "time_grain": "P1W"}
+        return {"request": asked, "read_by": "none (deterministic copilot)", "understood": "trend_1: time grain P1W",
+                "summary": "~ trend_1: time_grain P1D → P1W", "spec": spec,
+                "changes": [{"kind": "option", "slot": "trend_1", "says": "trend_1 is read by P1W"}],
+                "touches": {"metrics": ["cem.qoe_score"], "datasets": ["cem.qoe_daily"], "slots": ["trend_1"]},
+                "validation": {"passed": True, "checks": 42, "failures": [], "warnings": []},
+                "problems": [], "unresolved": []}
+    if body.get("slot"):
+        slot = body["slot"]
+        spec["components"].append({"slot": slot, "type": body.get("type") or "big_number",
+                                   "metric": body.get("metric"), "dataset": "cem.qoe_daily", "options": {}})
+        # a chart is given the template's own place for its slot: a specification that carries a layout and
+        # a chart with no place on it would not be drawn, and the engine refuses that (aibi/layout.py)
+        for template_row in TEMPLATE["rows"]:
+            place = next((p for p in template_row["slots"] if p["id"] == slot), None)
+            row = next((r for r in spec.get("layout") or [] if r["row"] == template_row["row"]), None)
+            if place and row:
+                row["slots"].append(dict(place))
+        return {"request": asked, "read_by": "the Studio's own form", "understood": f"a chart on {slot}",
+                "summary": f"+ {slot}: a chart of {body.get('metric')}", "spec": spec,
+                "changes": [{"kind": "add", "slot": slot, "says": f"a chart of {body.get('metric')} on {slot}"}],
+                "touches": {"metrics": [body.get("metric")], "datasets": ["cem.qoe_daily"], "slots": [slot]},
+                "validation": {"passed": True, "checks": 42, "failures": [], "warnings": []},
+                "problems": [], "unresolved": []}
+    return {"request": asked, "read_by": "none (deterministic copilot)", "understood": "nothing this copilot knows",
+            "summary": "nothing is proposed", "changes": [], "spec": None, "touches": {},
+            "validation": {}, "problems": [],
+            "unresolved": [f"« {asked} » was not recognised. This copilot is deterministic — no language model "
+                           "has been chosen for this kit — so it understands a short list."]}
 
 
 PAGE = """<!doctype html>
@@ -161,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(204, b"", "image/x-icon")
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html; charset=utf-8")
-        if path in ("/studio.js", "/studio.css"):
+        if path.lstrip("/") in FILES:
             kind = "text/javascript" if path.endswith(".js") else "text/css"
             return self._send(200, (HERE / path.lstrip("/")).read_bytes(), f"{kind}; charset=utf-8")
         if path.endswith("/studio"):
@@ -175,9 +231,31 @@ class Handler(BaseHTTPRequestHandler):
                                                {"id": "cem.qoe_site_daily", "name": "QoE by site",
                                                 "certified": False}]})
         if path.endswith("/metrics"):
-            return self._json(200, {"result": [{"id": m, "name": m, "certified": m != "cem.degraded_rate"}
-                                               for m in ("cem.qoe_score", "cem.active_users",
-                                                         "cem.degraded_users", "cem.degraded_rate")]})
+            return self._json(200, {"result": [
+                {"id": m, "name": m.split(".")[-1].replace("_", " ").title(), "certified": m != "cem.degraded_rate",
+                 "owner": "CEM", "documentation": f"{m} as the registry defines it",
+                 "dimensions": ["region", "rat"]}
+                for m in ("cem.qoe_score", "cem.active_users", "cem.degraded_users", "cem.degraded_rate")]})
+        if path.endswith("/report"):
+            return self._json(200, {"result": {
+                "version": "1.0.0", "status": "READY_FOR_REVIEW", "created_at": "2026-10-19T21:00:00Z",
+                "created_by": "dev.user", "dashboard": {"id": 7}, "package": {"name": "cem-qoe-1.0.0.ssbi"},
+                "validation": {"checks": [
+                    {"category": "data", "name": "every chart's query succeeds", "status": "pass",
+                     "subject": "7 charts", "detail": ""},
+                    {"category": "security", "name": "a reader sees only its rows", "status": "pass",
+                     "subject": "probe account", "detail": ""},
+                    {"category": "visual", "name": "no label is clipped", "status": "warn",
+                     "subject": "ranking_1", "detail": "« Casablanca-Settat » is cut by 3 px"},
+                    {"category": "performance", "name": "the dashboard loads under 10 s", "status": "pass",
+                     "subject": "4.2 s", "detail": ""}]}}})
+        if "/lineage" in path:
+            return self._json(200, {"result": {"dataset": "cem.qoe_daily", "model": "mart_cem_qoe_daily",
+                                               "built_from": ["stg_cem_qoe", "dim_region"],
+                                               "tests": {"passed": 24, "failed": 0}}})
+        if path.endswith("/changes"):
+            return self._json(200, {"result": {"same_as_validated": True, "charts": [], "why_not": None,
+                                               "on_the_dashboard": [], "would_take": []}})
         return self._json(404, {"message": "the preview has no answer for that"})
 
     def do_PUT(self) -> None:  # noqa: N802
@@ -206,6 +284,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"result": payload()["pictures"]})
         if path.endswith("/draft/commit"):
             return self._json(202, {"result": {"run_id": "preview00", "status": "running"}})
+        if path.endswith("/propose") or path.endswith("/compose"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            return self._json(200, {"result": proposal(body)})
         return self._json(404, {"message": "the preview has no answer for that"})
 
 
@@ -268,21 +349,30 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("the canvas draws the template's three rows",
            [row.split(":")[0] for row in page.evaluate(ROW)] == ["kpis", "trend", "breakdown"])
     page.click('[data-slot="kpi_1"]')
-    expect("selecting a chart opens its inspector", "KPI_1" in page.inner_text(".ss-pane .ss-card header"))
+    inspector = ".ss-stack > .ss-card:first-child"
+    expect("selecting a chart opens its inspector",
+           "kpi_1" in page.inner_text(f"{inspector} header").lower())
+    expect("whose first tab is what the chart measures, from the registry",
+           "cem.qoe_score" in page.inner_text(inspector))
+    page.click(f'{inspector} .ss-tabs >> text=Governance')
+    expect("and whose governance tab says who owns it and whether it is certified",
+           "Certified" in page.inner_text(inspector) and "Owner" in page.inner_text(inspector))
 
-    page.click('button[title="Later on the row"]')
+    page.click(f'{inspector} .ss-tabs >> text=Chart')
+    page.click('button[title^="Later on the row"]')
     time.sleep(0.2)
     expect("a chart moves later on its row",
            page.evaluate(ROW)[0].startswith("kpis: kpi_2 3, kpi_1 3"))
-    page.click('button[title="Wider"]')
+    page.click('button[title^="Wider"]')
     time.sleep(0.2)
     expect("widening a chart narrows its neighbour, and the row still fits",
            page.evaluate(ROW)[0] == "kpis: kpi_2 3, kpi_1 4, kpi_3 2, kpi_4 3")
     for _ in range(4):
-        page.click('button[title="Narrower"]')
-        time.sleep(0.1)
-    expect("a kpi is not taken below the template's minimum width",
-           page.evaluate(ROW)[0] == "kpis: kpi_2 3, kpi_1 2, kpi_3 4, kpi_4 3")
+        page.click('button[title^="Narrower"]')
+        time.sleep(0.15)
+    expect("a kpi is not taken below the template's minimum width, and is told so",
+           page.evaluate(ROW)[0] == "kpis: kpi_2 3, kpi_1 2, kpi_3 4, kpi_4 3"
+           and "as narrow as" in page.inner_text(".ss-toasts"))
 
     grip = page.eval_on_selector('[data-slot="kpi_3"] .ss-grip',
                                  "n => { const r = n.getBoundingClientRect();"
@@ -300,27 +390,95 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("a row moves down", [row.split(":")[0] for row in page.evaluate(ROW)] == ["trend", "kpis", "breakdown"])
 
     page.drag_and_drop('[data-slot="kpi_1"]', '.ss-row[data-row="trend"]')
-    time.sleep(0.3)
-    refused = page.query_selector('.ss-callout[data-kind="bad"]')
+    time.sleep(0.4)
     expect("a chart may not leave its section, and is told why",
-           bool(refused) and "accountable to" in refused.inner_text())
+           "accountable to" in page.inner_text(".ss-toasts"))
 
     time.sleep(1.6)                                   # the draft saves itself a moment after the last change
     expect("the draft is saved", bool(state["draft"]) and "Draft saved" in page.inner_text(".ss-bar"))
+    expect("and the drawer says what it changes about the version",
+           bool(page.query_selector(".ss-drawer")))
     expect("and it carries the layout that was placed",
            state["draft"]["spec"]["layout"][1]["slots"][2]["id"] == "kpi_3")
 
     before = page.evaluate(ROW)
-    page.click('button[title="Undo"]')
+    page.click('button[title^="Undo"]')
     time.sleep(0.2)
     expect("undo takes back one step, not a whole drag", page.evaluate(ROW) != before
            and page.evaluate(ROW)[0].startswith("kpis"))
 
-    page.click("text=Validate")
+    page.click(".ss-bar >> text=Validate")
     page.wait_for_selector(".ss-checks")
     expect("validate shows the engine's own report", "passed" in page.inner_text(".ss-drawer"))
-    page.click("text=What this is")
-    expect("and the drawer says what this workspace is", "not a dashboard" in page.inner_text(".ss-drawer"))
+
+    # ── the keyboard: every move the mouse can make (§47.4) ────────────────────────────────────────────────
+    page.click('[data-slot="trend_1"]')
+    page.keyboard.press("BracketLeft")
+    time.sleep(0.2)
+    expect("the keyboard narrows the selected chart",
+           "trend_1 7" in page.evaluate(ROW)[1] or "trend_1 7" in " ".join(page.evaluate(ROW)))
+    page.keyboard.press("Shift+ArrowRight")
+    time.sleep(0.2)
+    expect("and moves it along its row", page.evaluate(ROW)[1].startswith("trend: distribution_1"))
+    page.keyboard.press("Escape")
+    expect("escape deselects", page.eval_on_selector_all('.ss-tile[aria-selected="true"]', "n => n.length") == 0)
+    page.keyboard.press("?")
+    page.wait_for_selector(".ss-modal")
+    expect("« ? » lists the keyboard", "undo" in page.inner_text(".ss-modal"))
+    page.keyboard.press("Escape")
+
+    # ── the gallery: the manual path, which is not a prompt (§48.3) ────────────────────────────────────────
+    page.click(".ss-bar >> text=Add chart")
+    page.wait_for_selector(".ss-modal")
+    expect("the gallery offers the template's free slot", "map_1" in page.inner_text(".ss-modal"))
+    page.check('.ss-modal input[value="cem.qoe_score"]')
+    page.click(".ss-modal >> text=Propose")
+    page.wait_for_selector(".ss-proposal")
+    expect("it answers with a proposal, and changes nothing yet",
+           "map_1" in page.inner_text(".ss-proposal")
+           and page.eval_on_selector_all('[data-slot="map_1"]', "n => n.length") == 0)
+    page.click(".ss-proposal >> text=Apply to the draft")
+    time.sleep(0.3)
+    expect("applying it puts the chart on the canvas",
+           page.eval_on_selector_all('[data-slot="map_1"]', "n => n.length") == 1)
+    page.keyboard.press("Control+z")
+    time.sleep(0.2)
+    expect("and one undo takes it back",
+           page.eval_on_selector_all('[data-slot="map_1"]', "n => n.length") == 0)
+
+    # ── the copilot: a proposal, never a change (§47.6) ────────────────────────────────────────────────────
+    page.click(".ss-chip >> text=make the trend weekly")
+    page.wait_for_selector(".ss-proposal")
+    expect("the copilot answers a request with a proposal",
+           "P1W" in page.inner_text(".ss-proposal"))
+    page.click(".ss-proposal >> text=Reject")
+    time.sleep(0.2)
+    expect("rejecting it leaves the draft alone",
+           page.eval_on_selector_all(".ss-proposal", "n => n.length") == 0)
+
+    # ── taking a chart off the dashboard ───────────────────────────────────────────────────────────────────
+    page.click('[data-slot="kpi_4"]')
+    page.keyboard.press("Backspace")
+    time.sleep(0.3)
+    expect("a chart taken off the dashboard is kept, parked",
+           page.eval_on_selector_all('[data-slot="kpi_4"]', "n => n.length") == 0
+           and "parked" in page.inner_text(".ss-card.ss-pane").lower())
+    page.click('[data-slot="trend_1"]')
+    page.keyboard.press("Backspace")
+    time.sleep(0.3)
+    expect("a mandatory chart is not", page.eval_on_selector_all('[data-slot="trend_1"]', "n => n.length") == 1)
+
+    # ── the drawer: what a commit would change, what the last run found, where the versions stand ──────────
+    page.click(".ss-drawer >> text=Releases")
+    expect("the drawer lists the versions and says promotion is elsewhere",
+           "1.0.0" in page.inner_text(".ss-drawer") and "command line" in page.inner_text(".ss-drawer"))
+    page.click(".ss-drawer >> text=Last run")
+    page.click(".ss-drawer >> text=Read the last run")
+    page.wait_for_selector(".ss-table")
+    expect("and shows the levels only a run can produce",
+           "security" in page.inner_text(".ss-drawer") and "performance" in page.inner_text(".ss-drawer"))
+    page.click(".ss-drawer >> text=What this is")
+    expect("and says what this workspace is", "not a dashboard" in page.inner_text(".ss-drawer"))
     return said
 
 

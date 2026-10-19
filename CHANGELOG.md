@@ -29,11 +29,27 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
 - **A tile is a photograph of the real chart**, cut out of one picture of the real dashboard taken in the
   engine's own browser; *Preview* opens Superset's own dashboard for the live thing. There is no second chart
   renderer anywhere, which is the brief's own first rule.
-- **The AI panel is there and answers nothing**, on purpose: no language model has been chosen. It says what
-  it will do when one is — a proposal with a diff, and Preview / Apply / Reject.
+- **A copilot that invents nothing.** It reads a request with the planner's own governed vocabulary and
+  answers with a **proposal**: the changes, what they touch, whether validation would pass, and the
+  specification as it would be — never a change. Add a view, take one off, rename, a top N, a time grain, an
+  order, a number format, a width, a height, a row moved, « what is … ». What it does not understand, it says
+  it does not understand, and proposes nothing. No language model has been chosen for this kit, which calls
+  nobody; one plugs into `aibi/llm.py` and produces the same proposal.
+- **A chart is added without a prompt too** (the brief's « do not force users to use AI »): a gallery of the
+  template's free slots and the governed metrics, answered by the same proposal.
+- **A workspace with a keyboard.** Thirteen shortcuts, a card that lists them, four inspector tabs
+  (content, chart, governance, data and dbt), five drawer tabs (validation, what a draft changes, what the
+  last run found, the releases, what this workspace is), toasts that say why something was refused,
+  skeletons while it loads, and a reason on every control that is disabled.
 - **Looked at without Superset**: `python studio/preview.py` serves the workspace against a stand-in engine,
   and `--check` drives it in a browser and holds it to thirteen promises. The engine's own rules are held by
   24 new tests against the real registry (194 in all).
+- **Seventeen architecture decision records** ([docs/adr/](docs/adr/)) — everything this architecture rests
+  on, including the decisions taken before the Studio — and the brief read section by section, each marked
+  built, partly or not here, with its reason
+  ([docs/spec-v3-coverage.md](docs/spec-v3-coverage.md)).
+- Proof: 212 engine tests, and `python studio/preview.py --check` driving the workspace in a browser against
+  a stand-in engine — thirty promises, no console error.
 - Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in
   [docs/superset-studio.md](docs/superset-studio.md) §11.
 

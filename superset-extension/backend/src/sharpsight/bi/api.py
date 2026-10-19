@@ -38,7 +38,8 @@ class SharpSightBiApi(RestApi):
                               "studio": "read", "datasets": "read", "metrics": "read",
                               "templates": "read", "check_draft": "read", "picture": "read",
                               "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
-                              "pictures": "write"}
+                              "pictures": "write", "propose": "write", "compose": "write",
+                              "report": "read", "lineage": "read"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
     # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
@@ -340,3 +341,84 @@ class SharpSightBiApi(RestApi):
               description: The templates
         """
         return self._engine("GET", "/templates")
+
+    @expose("/projects/<project_id>/propose", methods=("POST",))
+    @protect()
+    @safe
+    def propose(self, project_id: str) -> Response:
+        """A request in words, answered with a proposal: what it would change, what it touches, whether it
+        would pass validation, and the specification as it would be. Nothing is saved by asking.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The proposal
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        asked = str((request.get_json(silent=True) or {}).get("request") or "")[:500]
+        return self._engine("POST", f"/projects/{project_id}/propose", json={"request": asked})
+
+    @expose("/projects/<project_id>/compose", methods=("POST",))
+    @protect()
+    @safe
+    def compose(self, project_id: str) -> Response:
+        """The same proposal, from the Studio's own form: a chart on a free slot of the template.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The proposal
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        body = request.get_json(silent=True) or {}
+        wanted = {key: body.get(key) for key in ("slot", "metric", "type", "dimension", "time_grain")}
+        return self._engine("POST", f"/projects/{project_id}/compose", json=wanted)
+
+    @expose("/projects/<project_id>/report", methods=("GET",))
+    @protect()
+    @safe
+    def report(self, project_id: str) -> Response:
+        """What the last run found: the levels of validation only a run can produce — the data, the security
+        probes, the render, the picture, the timings.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The report
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("GET", f"/projects/{project_id}/report")
+
+    @expose("/datasets/<dataset_id>/lineage", methods=("GET",))
+    @protect()
+    @safe
+    def lineage(self, dataset_id: str) -> Response:
+        """Where a governed dataset comes from: its dbt model, what that model is built from, its tests.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: dataset_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The lineage
+        """
+        if not _NAME.match(dataset_id):
+            return self.response(400, message="that is not a dataset's name")
+        return self._engine("GET", f"/datasets/{dataset_id}/lineage")

@@ -5,11 +5,13 @@
 from what [`docs/ai-bi.md`](ai-bi.md) and [`docs/lessons.md`](lessons.md) already measured. Every claim that
 still needs a command to settle it is marked **spike**.
 
-**Since 2026-10-19 this document has a second half in the repository.** Stages 0 to 2 of §10 are built: the
+**Since 2026-10-19 this document has a second half in the repository.** Stages 0 to 4 of §10 are built: the
 Studio is a page of Superset's own at `/sharpsight/studio/<project>/`, the layout belongs to the
-specification, and a draft is saved, validated and committed through the pipeline every other commit goes
-through. §11 below says exactly what was built, what was measured, and what was left. Everything in §1 to §9
-is the reading it was built from, unchanged.
+specification, a draft is saved, validated and committed through the pipeline every other commit goes
+through, charts are added from a gallery, and a deterministic copilot answers a request with a proposal.
+§11 below says exactly what was built and what is owed; [`spec-v3-coverage.md`](spec-v3-coverage.md) takes
+the brief section by section; [`adr/`](adr/) records every decision underneath it. Everything in §1 to §9 is
+the reading it was built from, unchanged.
 
 ---
 
@@ -225,12 +227,12 @@ done, each stage ending in something that can be run and looked at — the repos
 | **0** | **The host, proved.** The three spikes of §3; one picture of one chart from the engine, timed; `position_json` written by the canvas's shape and read back unchanged (a round trip, asserted) | **done, except the timing** (§11): the round trip is asserted in a test, and the mounting question was answered by removing it — no second React |
 | **1** | **The workspace, read-only.** `/sharpsight/studio/<project>`: explorer, canvas drawn from the *committed* specification, inspector showing governance, validation drawer showing the last report. Nothing editable | **done** (§11) |
 | **2** | **Layout becomes data.** The owner's decision taken; `layout` in `DashboardSpec`; the template reduced to a starting layout and constraints; Level 1 validation of a layout; drag, resize, undo/redo, autosaved draft; a commit that keeps it | **built, not yet run against a kit** (§11): a chart moved on the canvas must still be there after a commit, a build and a reload, and `rehearse-upgrade.sh` must still say every chart returns the same data |
-| **3** | **The inspector, and the manual path.** Title, metric, dimension, dataset, top N, order, time grain, bins — each field widening what a commit takes, each with its test. Add a chart from the gallery without AI. « Open in native Superset editor » for the rest | an analyst builds a chart and places it without touching the command line or Explore (V3 §48.3: « do not force users to use AI ») |
-| **4** | **The copilot.** Proposals with diffs, Preview / Apply / Reject, revert the last applied change, chat history per project, streaming and cancel — on the deterministic planner first, exactly as the engine was built | « add a 30-day QoE trend » produces a reviewable diff that applies, and rejecting it leaves the draft untouched |
-| **5** | **The model.** Behind `llm.py`, once the owner has chosen where it runs. Clarifying questions; refusals for an uncertain metric | the same requests as stage 4, with a model, and no new guard needed downstream |
-| **6** | **The release workspace.** The gates, the package and the promotion already exist — bring them into the workspace: changes, impact, review, approve-elsewhere, deploy, rollback | a version goes draft → commit → review → UAT from the page, and PROD still needs a second person on the command line |
+| **3** | **The inspector, and the manual path.** The fields a specification carries, each with its test. Add a chart from a gallery without AI. Say plainly what Explore keeps and a commit sets back | **done** — the inspector's four tabs, and a gallery that places a governed metric on a free slot through the same proposal the copilot uses (V3 §48.3: « do not force users to use AI ») |
+| **4** | **The copilot.** Proposals with diffs, Apply / Reject, chat history per project — on the deterministic reading first, exactly as the engine was built | **done** — `aibi/copilot.py`: add a view, take one off, rename, a top N, a grain, an order, a format, a width, a height, « what is … ». What it does not understand, it says. Not yet: streaming, cancel, clarifying questions |
+| **5** | **The model.** Behind `llm.py`, once the owner has chosen where it runs. Clarifying questions; refusals for an uncertain metric | **waiting on a decision** (§13 question 3). The deterministic copilot already produces the `Proposal` a model will have to produce |
+| **6** | **The release workspace.** The gates, the package and the promotion already exist — bring them into the workspace: changes, impact, review, approve-elsewhere, deploy, rollback | **partly done** — the drawer shows the versions, their gates and their packages, what a draft changes, and what the last run found. Promotion stays on the command line, on purpose |
 
-Stages 0–3 are the expansion. Stages 4–6 are the brief's §58 slice, which the engine can already partly do.
+Stages 0–4 are built. What is left of 5 and 6 is a decision and a short list, both in §11.
 
 ## 11 · The first vertical slice
 
@@ -298,6 +300,22 @@ and each project there opens in the Studio.
 | `services/ai-bi/tests/` | 194 pass, of which 24 are new: the layout's rules against the real registry and the real templates, the round trip, and the draft — its token, its refusals, what the workspace is given |
 | `python studio/preview.py --check` | the workspace driven in a browser against a stand-in engine: 13 promises, no console errors |
 | `python studio/preview.py` | the same page to look at, and `--shot` to photograph it |
+
+### The second sitting, the same day
+
+| | |
+|---|---|
+| `aibi/copilot.py` | the deterministic copilot: a request read with the planner's own governed vocabulary, answered with a proposal — what it would change, what it touches, whether it would pass validation, and the specification as it would be. It changes nothing; applying it is an ordinary draft save |
+| the gallery | the same proposal from a form: a free slot, a governed metric, a type the slot accepts. The manual path is not a prompt |
+| `aibi/layout.py::materialise` | the rows as they are drawn — the layout a specification is given when a person first moves something |
+| the engine's new routes | `/propose`, `/compose`, `/report` (the levels only a run can produce), and the dataset's lineage, each added to the gateway's allowlist |
+| the workspace, rebuilt | five ES modules; a design system in one stylesheet; toasts; a modal; thirteen keyboard shortcuts with a card that lists them; four inspector tabs; five drawer tabs; skeletons, empty states, and a reason on every disabled control |
+| `docs/adr/` | seventeen decision records — everything this architecture rests on, including the ones taken before the Studio |
+| `docs/spec-v3-coverage.md` | the brief's sixty sections, each marked built, partly or not here, with the reason |
+
+Proof after the second sitting: **212 engine tests** (18 more, for the copilot), and
+`python studio/preview.py --check` driving the workspace in a browser against a stand-in engine — **thirty
+promises**, no console error.
 
 ### What is owed before this can be called done
 

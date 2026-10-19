@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import __version__, compatibility
 from .audit import AuditLog
 from .config import Settings, get_settings
+from .copilot import Copilot, diff as spec_diff
 from .data_gateway import DataGateway
 from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
@@ -78,6 +79,8 @@ class Service:
         self.lifecycle = Lifecycle(self.tools, settings.exports_dir)
         # the Studio's tiles: one picture of the dashboard, cut per slot (aibi/picture.py)
         self.pictures = Pictures(self.tools.visual, state)
+        # the Studio's copilot: a request in words, answered with a proposal and never with a change
+        self.copilot = Copilot(self.registry, self.policy, self.tools.dashboards)
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
@@ -177,6 +180,10 @@ SUPERSET_MAY = frozenset({
     ("DELETE", "/projects/{project_id}/draft"), ("POST", "/projects/{project_id}/draft/validate"),
     ("POST", "/projects/{project_id}/draft/commit"), ("POST", "/projects/{project_id}/pictures"),
     ("GET", "/projects/{project_id}/picture/{slot}"),
+    # the copilot and the gallery: both answer with a proposal and change nothing by themselves
+    ("POST", "/projects/{project_id}/propose"), ("POST", "/projects/{project_id}/compose"),
+    # what a run found, last time: the levels of validation only a run can produce
+    ("GET", "/projects/{project_id}/report"), ("GET", "/datasets/{dataset_id}/lineage"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
 })
@@ -540,6 +547,22 @@ def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, An
         "token": _token(project.get("draft")),
         "problems": layout_problems(spec, template),
         "pictures": service.pictures.taken(project["project_id"]),
+        # what the draft changes about the committed specification — the brief's review panel (§21)
+        "diff": spec_diff(DashboardSpec(**project["spec"]), spec, template) if from_draft else [],
+        # the versions this project has, and where each stands: the release panel (§22). Promotion is not
+        # here and is not meant to be: PROD needs a second person, on the command line.
+        "versions": [{"version": v.version, "status": v.status, "state": v.state, "created_at": v.created_at,
+                      "created_by": v.created_by, "title": v.title,
+                      "git_commit": v.git_commit, "package": (v.package or {}).get("name"),
+                      "validation": (v.validation or {}).get("summary") or {}}
+                     for v in service.store.list_versions(project["project_id"])],
+        "ask": service.copilot.examples(spec, template),
+        # the free slots a chart may be added to, with what each accepts: the gallery of §48.3
+        "free_slots": [{"slot": slot, "purpose": template.slots[slot].purpose,
+                        "accepts": template.slots[slot].accepts,
+                        "mandatory": template.slots[slot].mandatory,
+                        "section": template.section_of(slot)}
+                       for slot in service.copilot._free(spec, template)],
     }
 
 
@@ -655,6 +678,67 @@ def commit_draft(project_id: str, body: Commit, response: Response, identity: Id
     threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
     response.status_code = 202
     return {"run_id": run.id, "request_id": run.request_id, "status": "running", "layout_of": layout_source(spec)}
+
+
+class Request(BaseModel):
+    request: str = Field(default="", max_length=500)
+
+
+class Compose(BaseModel):
+    slot: str = Field(max_length=40)
+    metric: str = Field(max_length=120)
+    type: Optional[str] = Field(default=None, max_length=40)
+    dimension: Optional[str] = Field(default=None, max_length=120)
+    time_grain: Optional[Literal["P1D", "P1W", "P1M"]] = None
+
+
+def _proposal(project: dict[str, Any], identity: Identity, make) -> Any:  # noqa: ANN001
+    spec, _ = _studio_spec(project)
+    template = service.registry.template(spec.dashboard.template)
+    proposal = make(spec, template)
+    service.audit.record(action="copilot:propose", user=identity.user, request_id=str(uuid.uuid4()),
+                         actor="ai", ai_model=proposal.read_by, project_id=project["project_id"],
+                         metrics=proposal.touches.get("metrics", []),
+                         outcome="refused" if proposal.unresolved and not proposal.changes else "ok",
+                         detail={"request": proposal.request, "understood": proposal.understood,
+                                 "changes": [c.says for c in proposal.changes],
+                                 "unresolved": proposal.unresolved})
+    return proposal
+
+
+@app.post("/projects/{project_id}/propose")
+def propose(project_id: str, body: Request, identity: Identity = Depends(caller)) -> Any:
+    """A request in words, answered with a proposal: what it would change, what it touches, whether it would
+    pass validation — and the specification as it would be. Nothing is saved. Applying it is the Studio
+    sending that specification back as a draft, through the same route as any other change (§47.6)."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity,
+                     lambda spec, template: service.copilot.propose(body.request, spec, template, identity))
+
+
+@app.post("/projects/{project_id}/compose")
+def compose(project_id: str, body: Compose, identity: Identity = Depends(caller)) -> Any:
+    """The same proposal, from the Studio's own form rather than from a sentence: a chart on a free slot.
+    « Do not force users to use AI » (§48.3) — the manual path is not a prompt, and is checked the same."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity, lambda spec, template: service.copilot.compose(
+        body.slot, body.metric, body.type, body.dimension, body.time_grain, spec, template, identity))
+
+
+@app.get("/projects/{project_id}/report")
+def last_report(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """The whole of the last version's validation — the brief's levels 2 to 6, which only a run can produce:
+    the SQL and the data, the security probes, the render, the picture, the timings (§53)."""
+    project = _project(project_id, identity)
+    latest = service.store.latest_version(project_id)
+    if latest is None:
+        raise HTTPException(status_code=404, detail=f"{project_id} has no version yet")
+    return {"version": latest.version, "status": latest.status, "created_at": latest.created_at,
+            "created_by": latest.created_by, "validation": latest.validation,
+            "dashboard": latest.dashboard, "package": latest.package, "built_with": latest.built_with,
+            "history": [h.model_dump() for h in latest.history], "approvals": [a.model_dump() for a in latest.approvals]}
 
 
 @app.post("/projects/{project_id}/pictures")

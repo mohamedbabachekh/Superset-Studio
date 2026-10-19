@@ -2,7 +2,7 @@
   "publisher": "sharpsight",
   "name": "bi",
   "displayName": "SharpSight BI",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "Proprietary",
   "description": "SharpSight inside Superset: the panel of SQL Lab, and the Studio's own API.",
   "permissions": ["can_read", "can_write"],

@@ -124,7 +124,9 @@ builder of the revised brief's sections 46 to 60.
 | [`docs/connecting-sharpsight.md`](docs/connecting-sharpsight.md) | 119 | you need the platform's dashboards and mart |
 | [`docs/cem.md`](docs/cem.md) | 77 | you are pointing it at the cluster |
 | [`docs/ai-bi.md`](docs/ai-bi.md) | **747** | you are touching the engine; §9 is everything not built |
-| [`docs/superset-studio.md`](docs/superset-studio.md) | 319 | the AI Visual Builder of the V3 brief, read against this kit — and, §11, what of it is built |
+| [`docs/superset-studio.md`](docs/superset-studio.md) | 337 | the AI Visual Builder of the V3 brief, read against this kit — and, §11, what of it is built |
+| [`docs/spec-v3-coverage.md`](docs/spec-v3-coverage.md) | 168 | **what of the brief is built and what is not** — all sixty sections, each with its reason |
+| [`docs/adr/`](docs/adr/) | 17 files | every decision this architecture rests on: what was true, what was decided, what follows |
 | [`CHANGELOG.md`](CHANGELOG.md) | 270 | what each bundle changed, 20260927 → 20261016 |
 | `SharpSight_BI_Studio_Spec_Updated.md` | — | the owner's brief the engine implements (sections 18–32 are the factory) |
 
@@ -275,4 +277,4 @@ running image before relying on it, exactly as the notes in §5 were checked. An
 means an upgrade is never a quick thing to test, so keep the rehearsal.
 
 **Start by reading, in this order**: `README.md` → `docs/architecture.md` → `docs/lessons.md` → (if the engine
-matters) `docs/ai-bi.md`. Then run `bash install.sh` and look at what comes up.
+matters) `docs/ai-bi.md` → (if the Studio matters) `docs/adr/` and `docs/spec-v3-coverage.md`. Then run `bash install.sh` and look at what comes up.

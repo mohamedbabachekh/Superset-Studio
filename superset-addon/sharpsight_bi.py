@@ -58,6 +58,9 @@ LINKS = (
 )
 # dbt's site is one file that reads these two from beside it; nothing else in the volume is served
 _DOCS_FILES = ("index.html", "manifest.json", "catalog.json")
+# the Studio's own files, served as they are in the repository — named here, so that nothing else in that
+# folder (its preview server, anything a developer leaves there) is reachable from Superset
+STUDIO_FILES = ("studio.js", "view.js", "state.js", "api.js", "ui.js", "studio.css")
 # Superset's own extensions API, and the one sharpsight-bi.supx contributes (superset-extension/)
 EXTENSION_APIS = ("ExtensionsRestApi", "SharpSightBiApi")
 
@@ -214,7 +217,7 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         (studio/), which is why the kit needs no Node to ship a workspace."""
         if not current_user.is_authenticated:
             abort(403)
-        if name not in ("studio.js", "studio.css"):
+        if name not in STUDIO_FILES:
             abort(404)
         if not (studio_dir / name).is_file():
             return ("the Studio's files are not mounted: ./studio is bind-mounted at /app/sharpsight/studio "
