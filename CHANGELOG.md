@@ -50,6 +50,15 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
   palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
   become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **It is navigated like a workspace.** A rail on the left — SharpSight's own pages, the ones this person
+  may open (built server-side from the same rule the menu obeys), and Superset's own — and four areas under
+  the breadcrumb: **Design** (the canvas), **Data** (what the dashboard reads, with its lineage), **Filters**
+  (the columns the template allows, with its limit) and **Interactions** (what a specification carries about
+  scope, and what is Superset's own). The canvas gained device widths; the inspector gained a row of the
+  chart kinds its slot accepts.
+- **The inspector's controls propose.** Dataset, metric, dimension and kind are dropdowns, as a visual
+  builder has them — and changing one asks the engine for a **proposal** with its validation rather than
+  editing the draft, because those four are the registry's to allow. One road in, checked once.
 - **The canvas has two modes.** *Compose* is the draft — tiles that can be dragged, resized and reordered.
   *Live* frames **Superset's own standalone dashboard inside the workspace**, with the Studio's chrome drawn
   over it: a box per chart, read from that page's own DOM by the same chart id the engine's visual QA reads,

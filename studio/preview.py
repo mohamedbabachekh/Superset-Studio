@@ -264,7 +264,10 @@ PAGE = """<!doctype html>
 <style>body { margin: 0; } #bar { background: #0972BC; color: #fff; padding: 8px 20px; font: 13px Inter,
 sans-serif; } </style></head>
 <body><div id="bar">Superset's own top bar stands here · this page is studio/preview.py, not Superset</div>
-<main id="sharpsight-studio" data-project="cem-qoe" data-user="dev.user" data-csrf="preview"></main>
+<main id="sharpsight-studio" data-project="cem-qoe" data-user="dev.user" data-csrf="preview"
+ data-links='[{"name": "Projects", "href": "/sharpsight/projects/"},
+              {"name": "Data Quality", "href": "/superset/dashboard/sharpsight-data-quality/"},
+              {"name": "Releases", "href": "/superset/dashboard/sharpsight-releases/"}]'></main>
 <script type="module" src="/studio.js"></script></body></html>
 """
 
@@ -360,6 +363,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"result": payload()["pictures"]})
         if path.endswith("/draft/commit"):
             return self._json(202, {"result": {"run_id": "preview00", "status": "running"}})
+        if path.endswith("/alter"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            spec = copy.deepcopy((state["draft"] or {}).get("spec") or SPEC)
+            slot = body.get("slot")
+            asked = {k: v for k, v in body.items() if k != "slot" and v}
+            for component in spec["components"]:
+                if component["slot"] == slot:
+                    component.update(asked)
+            said = ", ".join(f"{name} → {value}" for name, value in asked.items())
+            return self._json(200, {"result": {
+                "request": f"change {slot}", "read_by": "the Studio's own controls",
+                "understood": f"{slot}: {', '.join(asked)}", "summary": f"~ {slot}: {said}", "spec": spec,
+                "changes": [{"kind": "option", "slot": slot, "says": f"{slot}: {said}"}],
+                "touches": {"metrics": [], "datasets": [], "slots": [slot]},
+                "validation": {"passed": True, "checks": 42, "failures": [], "warnings": []},
+                "problems": [], "unresolved": []}})
         if path.endswith("/propose") or path.endswith("/compose"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
             return self._json(200, {"result": proposal(body)})
@@ -428,8 +447,8 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     inspector = ".ss-stack > .ss-card:first-child"
     expect("selecting a chart opens its inspector",
            "kpi_1" in page.inner_text(f"{inspector} header").lower())
-    expect("whose first tab is what the chart measures, from the registry",
-           "cem.qoe_score" in page.inner_text(inspector))
+    expect("whose first tab is what the chart measures, as a control bound to the registry",
+           page.eval_on_selector(f"{inspector} select", "n => n.value") == "cem.qoe_score")
     page.click(f'{inspector} .ss-tabs >> text=Governance')
     expect("and whose governance tab says who owns it and whether it is certified",
            "Certified" in page.inner_text(inspector) and "Owner" in page.inner_text(inspector))
@@ -662,6 +681,54 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("compose comes back to the layout that can be moved",
            page.eval_on_selector_all(".ss-tile", "n => n.length") > 0)
 
+    # ── the rail, and the areas of the workspace ───────────────────────────────────────────────────────────
+    expect("a rail of where to go next: SharpSight's pages this person may open, and Superset's own",
+           page.eval_on_selector_all(".ss-rail-link", "n => n.length") >= 7
+           and "SQL Lab" in page.inner_text(".ss-rail")
+           and "Data Quality" in page.inner_text(".ss-rail"))
+    expect("and the Studio is the one marked as where you are",
+           page.eval_on_selector('.ss-rail-link[aria-current="page"]', "n => n.textContent") == "Studio")
+    page.click('.ss-areas >> text=Filters')
+    time.sleep(0.2)
+    expect("the Filters area is the dashboard's filters, with the template's limit",
+           "of 5" in page.inner_text(".ss-panes") and "Region" in page.inner_text(".ss-panes"))
+    page.click('.ss-areas >> text=Data')
+    time.sleep(0.2)
+    expect("the Data area is what the dashboard reads, with its lineage to ask for",
+           "cem.qoe_daily" in page.inner_text(".ss-panes"))
+    page.click('.ss-areas >> text=Interactions')
+    time.sleep(0.2)
+    expect("the Interactions area says what a specification carries and what is Superset's",
+           "cross-filtering" in page.inner_text(".ss-panes"))
+    page.click('.ss-areas >> text=Design')
+    time.sleep(0.2)
+
+    # ── the inspector's own controls: a change is a proposal ───────────────────────────────────────────────
+    page.click('[data-slot="ranking_1"]')
+    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Chart')
+    expect("the kinds the slot accepts are a row of icons, the current one pressed",
+           page.eval_on_selector_all(".ss-kindbtn", "n => n.length") >= 2
+           and page.eval_on_selector('.ss-kindbtn[data-kind="bar"]',
+                                     "n => n.getAttribute('aria-pressed')") == "true")
+    page.click('.ss-kindbtn[data-kind="table"]')
+    page.wait_for_selector(".ss-proposal")
+    expect("and switching to another asks for a proposal rather than changing the draft",
+           "table" in page.inner_text(".ss-proposal"))
+    page.click(".ss-proposal >> text=Reject")
+    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Content')
+    page.select_option('.ss-stack select >> nth=0', "cem.active_users")
+    page.wait_for_selector(".ss-proposal")
+    expect("changing what a chart measures asks for one too",
+           "cem.active_users" in page.inner_text(".ss-proposal"))
+    page.click(".ss-proposal >> text=Reject")
+
+    # ── the width it is read at, as devices ────────────────────────────────────────────────────────────────
+    page.click('.ss-devices button[aria-label="Phone, 420"]')
+    time.sleep(0.2)
+    expect("and the canvas can be seen at a phone's width",
+           page.eval_on_selector(".ss-frame", "n => n.style.width") == "420px")
+    page.click('.ss-devices button[aria-label="Fit to the pane"]')
+
     # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
     if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',
                              "n => n.getAttribute('aria-pressed') !== 'true'"):
@@ -685,11 +752,11 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.click('.ss-card button[aria-label="Zoom out"]')
     time.sleep(0.2)
     expect("the canvas zooms out", "scale(0.9)" in page.eval_on_selector(".ss-frame", "n => n.style.transform"))
-    page.select_option('select[aria-label="The width it is read at"]', "1180")
+    page.click('.ss-devices button[aria-label="Tablet, 1024"]')
     time.sleep(0.2)
-    expect("and can be seen at the width the template says it is read at",
-           page.eval_on_selector(".ss-frame", "n => n.style.width") == "1180px")
-    page.select_option('select[aria-label="The width it is read at"]', "0")
+    expect("and can be seen at the width it will be read at",
+           page.eval_on_selector(".ss-frame", "n => n.style.width") == "1024px")
+    page.click('.ss-devices button[aria-label="Fit to the pane"]')
     return said
 
 

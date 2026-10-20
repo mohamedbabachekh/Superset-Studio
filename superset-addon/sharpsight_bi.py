@@ -32,6 +32,7 @@ calls Superset makes for its own menu — so a Superset upgrade does not have to
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -207,9 +208,12 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         from superset.views.base import get_spa_template_context
 
         context = get_spa_template_context(os.environ.get("SHARPSIGHT_PAGE_ENTRY", "spa"), None)
+        # the Studio's own rail shows the SharpSight entries this person may open — the same rule the menu
+        # obeys, applied once here rather than copied into the page
+        links = json.dumps([{"name": name, "href": href} for name, _, href, _ in LINKS if may(name)])
         return render_template("sharpsight/studio.html", **context, appbuilder=appbuilder,
                                sharpsight_user=current_user.username, sharpsight_project=project_id,
-                               sharpsight_assets="/sharpsight/studio-assets")
+                               sharpsight_links=links, sharpsight_assets="/sharpsight/studio-assets")
 
     @pages.route("/studio-assets/<name>")
     def studio_assets(name: str):  # noqa: ANN202

@@ -32,3 +32,4 @@ rather than repeated. Where it is the owner's and not ours, it says so and is li
 | [0020](0020-adapters-at-every-boundary.md) | Every external system is reached through an adapter | accepted |
 | [0021](0021-the-control-plane-and-the-execution-plane.md) | SharpSight is the control plane; Superset and dbt execute | accepted |
 | [0022](0022-two-canvases-compose-and-live.md) | Two canvases: Compose edits the specification, Live frames Superset's own | accepted |
+| [0023](0023-a-rail-of-short-cuts-inside-the-studio.md) | A rail of short cuts inside the Studio, and Superset's menu is still the authority | accepted |

@@ -21,15 +21,156 @@ export function draw(el, client, commands) {
   el.appendChild(barNode);
   // the drawers of a narrow screen start below the bar, whose height depends on how far it wraps
   document.documentElement.style.setProperty('--ss-bar-h', `${barNode.offsetHeight || 56}px`);
+  el.appendChild(areas(commands));
   banners(el, commands);
   const panes = node('div', { class: 'ss-panes', 'data-explorer': state.explorer ? 'open' : 'closed',
     'data-copilot': state.copilot ? 'open' : 'closed' });
   if (state.explorer) panes.appendChild(explorer(commands));
-  panes.appendChild(canvas(client, commands));
+  panes.appendChild(middle(client, commands));
   if (state.copilot) panes.appendChild(rightPane(client, commands));
   el.appendChild(panes);
   el.appendChild(drawer(commands));
+  el.appendChild(rail());
   window.scrollTo(0, where);
+}
+
+/* The rail: where a person goes from here. SharpSight's own entries are the ones this person may open —
+ * the add-on puts them in the page, applying the same rule the menu obeys — and Superset's are its own
+ * pages, which it will refuse itself if they are not theirs. It is a short cut, not a second application:
+ * every one of these addresses is reachable from Superset's top bar too. */
+const SUPERSET_PAGES = [
+  ['home', 'Home', '/superset/welcome/'],
+  ['datasets', 'Datasets', '/tablemodelview/list/'],
+  ['charts', 'Charts', '/chart/list/'],
+  ['dashboards', 'Dashboards', '/dashboard/list/'],
+  ['sql', 'SQL Lab', '/sqllab/'],
+];
+const SHARPSIGHT_ICONS = { Projects: 'projects', 'BI Factory': 'ai', 'Data Quality': 'quality',
+  'Impact Analysis': 'impact', Releases: 'releases', 'Audit trail': 'audit', 'Data models (dbt)': 'dbt' };
+
+function rail() {
+  let links = [];
+  try { links = JSON.parse(document.getElementById('sharpsight-studio').dataset.links || '[]'); }
+  catch (error) { links = []; }
+  const here = window.location.pathname;
+  const entry = (kind, label, href, current) => node('a', { class: 'ss-rail-link', href,
+    'aria-current': current ? 'page' : false, title: label },
+  icon(kind, { class: 'ss-rail-icon' }), node('span', { class: 'ss-rail-label', text: label }));
+  return node('nav', { class: 'ss-rail', 'aria-label': 'SharpSight' },
+    node('div', { class: 'ss-rail-group' },
+      node('span', { class: 'ss-rail-head', text: 'SharpSight' }),
+      entry('studio', 'Studio', here, true),
+      links.map(link => entry(SHARPSIGHT_ICONS[link.name] || 'other', link.name, link.href,
+        here.startsWith(link.href)))),
+    node('div', { class: 'ss-rail-group' },
+      node('span', { class: 'ss-rail-head', text: 'Superset' }),
+      SUPERSET_PAGES.map(([kind, label, href]) => entry(kind, label, href, false))));
+}
+
+/* The areas of the brief's own top row (§47.2): the canvas, and the three things about a dashboard that are
+ * not one chart. Design is the canvas; the others take the middle of the workspace, so the explorer and the
+ * copilot stay where they are. */
+const AREAS = [['design', 'Design'], ['data', 'Data'], ['filters', 'Filters'],
+  ['interactions', 'Interactions']];
+
+function areas(commands) {
+  const now = state.area || 'design';
+  return node('div', { class: 'ss-areas', role: 'tablist', 'aria-label': 'What is being worked on' },
+    AREAS.map(([key, label]) => node('button', { type: 'button', role: 'tab', text: label,
+      'aria-selected': now === key,
+      on: { click: () => { state.area = key; commands.redraw(); } } })));
+}
+
+const middle = (client, commands) => ({
+  design: () => canvas(client, commands),
+  data: () => dataArea(commands),
+  filters: () => filtersArea(commands),
+  interactions: () => interactionsArea(),
+}[state.area || 'design'] || (() => canvas(client, commands)))();
+
+function dataArea(commands) {
+  const used = [...new Set((state.spec.components || []).map(component => component.dataset))].filter(Boolean);
+  const metrics = [...new Set((state.spec.components || []).map(component => component.metric))];
+  const body = node('div', { class: 'ss-body' });
+  body.appendChild(node('p', { class: 'ss-note', text:
+    'What this dashboard reads, and where it comes from. A dataset is governed: it has an owner, a grain and '
+    + 'a dbt model behind it, and who may read it decides who may open the dashboard.' }));
+  used.forEach(id => {
+    const dataset = (state.datasets || []).find(one => one.id === id) || { id };
+    const lineage = state.lineage[id];
+    body.appendChild(node('div', { class: 'ss-panel' },
+      node('h4', {}, dataset.name || id, node('span', { class: 'ss-cert',
+        'data-certified': Boolean(dataset.certified), text: dataset.certified ? ' ✓ certified' : ' ○ not certified' })),
+      node('ul', { class: 'ss-gov' },
+        pair('Id', id), pair('Owner', dataset.owner), pair('Domain', dataset.domain),
+        pair('Grain', (dataset.grain || []).join(', ')),
+        pair('Used by', (state.spec.components || []).filter(c => c.dataset === id).length + ' charts')),
+      lineage === undefined
+        ? button('Read its lineage', () => commands.lineage(id), { style: 'margin-top: 8px' })
+        : node('div', { class: 'ss-code', text: JSON.stringify(lineage, null, 2).slice(0, 1200) })));
+  });
+  body.appendChild(node('h4', { style: 'margin-top: 14px', text: 'Metrics' }));
+  metrics.forEach(id => {
+    const metric = (state.metrics || []).find(one => one.id === id) || { id };
+    body.appendChild(node('div', { class: 'ss-panel' },
+      node('h4', {}, metric.name || id, node('span', { class: 'ss-cert',
+        'data-certified': Boolean(metric.certified),
+        text: metric.certified ? ' ✓ certified' : ' ⚠ not certified' })),
+      node('p', { class: 'ss-note', text: metric.documentation || 'no documentation in the registry' }),
+      node('ul', { class: 'ss-gov' }, pair('Owner', metric.owner), pair('Version', metric.version),
+        pair('Broken down by', (metric.dimensions || []).join(', ')))));
+  });
+  return node('section', { class: 'ss-card' }, node('header', {}, 'Data — what this dashboard reads'), body);
+}
+
+function filtersArea(commands) {
+  const offered = state.payload.filter_options || [];
+  const used = state.spec.filters || [];
+  const template = state.payload.template;
+  const body = node('div', { class: 'ss-body' });
+  body.appendChild(node('p', { class: 'ss-note', text:
+    `${used.length} of ${template.filters.max} this template allows, in the roles it permits `
+    + `(${template.filters.allowed_roles.join(', ')}). A filter is a column of a dataset this dashboard `
+    + 'already reads; one that is not on every dataset will not reach every chart.' }));
+  body.appendChild(node('div', { class: 'ss-pick' }, offered.map(option => node('label', {},
+    node('input', { type: 'checkbox', checked: used.includes(option.column), disabled: !act.editable(),
+      on: { change: event => act.setFilter(option.column, event.target.checked) } }),
+    node('span', { class: 'ss-what' }, node('strong', { text: option.label }),
+      node('span', { class: 'ss-faint', text: ` ${option.column} · ${option.role}` }),
+      node('div', { class: 'ss-faint', text: option.reaches_every_chart
+        ? `on every dataset this dashboard reads` : `only on ${option.datasets.join(', ')}` })),
+    node('span', { class: 'ss-cert', 'data-certified': option.reaches_every_chart,
+      text: option.reaches_every_chart ? '✓' : '○' })))));
+  if (!offered.length) {
+    body.appendChild(node('div', { class: 'ss-callout', text:
+      'No column of this dashboard\u2019s datasets may be filtered on under this template.' }));
+  }
+  return node('section', { class: 'ss-card' }, node('header', {}, 'Filters — what a reader may narrow'), body);
+}
+
+function interactionsArea() {
+  const used = state.spec.filters || [];
+  const sections = state.payload.template.sections || [];
+  return node('section', { class: 'ss-card' }, node('header', {}, 'Interactions'),
+    node('div', { class: 'ss-body' },
+      node('p', { class: 'ss-note', text:
+        'What a specification carries about interaction, and what it does not. What it carries is scope: '
+        + 'which charts a filter reaches. What it does not — cross-filtering, drill-through, a chart\u2019s '
+        + 'own emitted filters — is Superset\u2019s own, set on the dashboard there, and a commit does not '
+        + 'undo it because a specification never claimed it.' }),
+      node('h4', { style: 'margin-top: 12px', text: 'The dashboard\u2019s filters' }),
+      used.length
+        ? node('ul', { class: 'ss-gov' }, used.map(column => pair(column, 'every chart that reads it')))
+        : node('p', { class: 'ss-note', text: 'none' }),
+      node('h4', { style: 'margin-top: 12px', text: 'Sections' }),
+      node('ul', { class: 'ss-gov' }, sections.map(section => {
+        const own = (state.spec.sections || []).find(one => one.id === section.id) || {};
+        return pair(section.title || section.id, (own.filters || []).length
+          ? `its own filters: ${own.filters.join(', ')}` : 'the dashboard\u2019s filters only');
+      })),
+      node('div', { class: 'ss-callout', 'data-kind': 'info', style: 'margin-top: 12px', text:
+        'A section\u2019s own filter reaches that section\u2019s charts and no others. It is set in a '
+        + 'specification, which today means on the command line or by the copilot — the Studio shows it.' })));
 }
 
 function skeleton() {
@@ -349,8 +490,9 @@ function composeCanvas(client, commands) {
   const frame = node('div', { class: 'ss-frame', style: viewport
     ? `width: ${viewport}px; transform: scale(${zoom}); `
     : `width: ${Math.round(100 / zoom)}%; transform: scale(${zoom});` }, inner);
-  const viewports = [[0, 'Fit']].concat((state.payload.template.viewports || [])
-    .map(one => [one.width, `${one.name} ${one.width}`]));
+  const widest = Math.max(0, ...(state.payload.template.viewports || []).map(one => one.width));
+  const devices = [['desktop', 'Fit to the pane', 0], ['tablet', 'Tablet, 1024', 1024],
+    ['mobile', 'Phone, 420', 420]].concat(widest ? [['desktop', `Widest, ${widest}`, widest]] : []);
   return node('section', { class: 'ss-card', style: 'padding: 6px' },
     node('header', {},
       node('span', { text: state.payload.layout_of === 'specification'
@@ -358,9 +500,11 @@ function composeCanvas(client, commands) {
       node('span', { class: 'ss-spacer' }),
       node('span', { class: 'ss-faint', text: tilesTaken() }),
       mode(commands),
-      select(String(viewport), viewports.map(([width, label]) => [String(width), label]),
-        value => { state.viewport = Number(value); commands.redraw(); },
-        { class: 'ss-mini', 'aria-label': 'The width it is read at' }),
+      node('div', { class: 'ss-devices', role: 'group', 'aria-label': 'The width it is read at' },
+        devices.map(([kind, label, width]) => node('button', { class: 'ss-btn', 'data-weight': 'quiet',
+          type: 'button', title: label, 'aria-label': label, 'aria-pressed': viewport === width,
+          on: { click: () => { state.viewport = width; commands.redraw(); } } },
+        icon(kind, { class: 'ss-device-icon' })))),
       node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '−',
         'aria-label': 'Zoom out', title: 'Zoom out',
         on: { click: () => { state.zoom = Math.max(0.5, zoom - 0.1); commands.redraw(); } } }),
@@ -535,14 +679,36 @@ function inspector(client, commands) {
     body.appendChild(field('What it is for', node('textarea', { rows: 2, maxlength: 300,
       disabled: !act.editable(), on: { change: e => act.setField(slot, 'description', e.target.value) } },
       own.description || '')));
-    body.appendChild(node('ul', { class: 'ss-gov' },
-      pair('Measures', own.metric), pair('Broken down by', own.dimension), pair('From', own.dataset)));
+    // What a chart MEASURES is the registry's, so these three do not edit the draft: each asks for a
+    // proposal, which says whether it would pass and is applied — or not — by hand.
+    const metrics = (state.metrics || []).map(metric => [metric.id,
+      `${metric.name || metric.id}${metric.certified ? '' : '  (not certified)'}`]);
+    body.appendChild(field('Measures', select(own.metric, metrics.length ? metrics : [own.metric],
+      value => commands.alter({ slot, metric: value }), { disabled: !act.editable() })));
+    const dimensions = [...new Set([own.dimension, ...(((state.metrics || [])
+      .find(metric => metric.id === own.metric) || {}).dimensions || [])])].filter(Boolean);
+    body.appendChild(field('Broken down by', select(own.dimension || '',
+      [['', '— none —'], ...dimensions], value => commands.alter({ slot, dimension: value }),
+      { disabled: !act.editable() || ['big_number', 'histogram'].includes(own.type) })));
+    const datasets = (state.datasets || []).map(dataset => [dataset.id,
+      `${dataset.id}${dataset.certified ? '' : '  (not certified)'}`]);
+    body.appendChild(field('Read from', select(own.dataset || '',
+      datasets.length ? datasets : [own.dataset || ''], value => commands.alter({ slot, dataset: value }),
+      { disabled: !act.editable() })));
     body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
-      'What a chart measures is the registry’s, not this page’s: ask the copilot for another chart, '
-      + 'or add one on a free slot. The engine checks the metric is valid on the dataset and that you are '
-      + 'cleared for it.' }));
+      'Changing one of those three asks for a proposal rather than editing the draft: the engine checks the '
+      + 'metric is registered and valid on the dataset, that the slot accepts the chart, and that you are '
+      + 'cleared for it. You see what it would do before it does it.' }));
   }
   if (which === 'chart') {
+    // the kinds this slot accepts, as a row: switching is one click, and it is a proposal like any other
+    body.appendChild(node('div', { class: 'ss-kindrow', role: 'group', 'aria-label': 'How it is drawn' },
+      (said.accepts || []).map(kind => node('button', { class: 'ss-kindbtn', type: 'button',
+        'data-kind': kind, 'aria-pressed': own.type === kind, title: own.type === kind
+          ? `${kind} — how it is drawn now` : `Propose drawing it as a ${kind}`,
+        disabled: !act.editable() || own.type === kind,
+        on: { click: () => commands.alter({ slot, type: kind }) } },
+      icon(kind, { class: 'ss-kindbtn-icon' }), node('span', { text: kind })))));
     body.appendChild(node('div', { class: 'ss-two' },
       field('Top N', node('input', { type: 'number', min: 1, max: 1000, value: (own.options || {}).row_limit || '',
         disabled: !act.editable() || !['bar', 'table', 'pie'].includes(own.type),

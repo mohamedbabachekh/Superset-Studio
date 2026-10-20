@@ -55,6 +55,52 @@
 #sharpsight-studio :focus-visible { outline: 2px solid var(--ss-primary); outline-offset: 2px; border-radius: 4px; }
 .ss-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+/* ── the rail: where a person goes from here ─────────────────────────────────────────────────────────────
+ * It sits to the left of everything, fixed, and holds two groups: SharpSight's own pages (the ones this
+ * person may open — the page is told which) and Superset's. It is a short cut: every address in it is also
+ * in Superset's own top bar, which is why it is narrow, quiet, and never the thing being looked at.
+ */
+#sharpsight-studio { padding-left: 196px; }
+.ss-rail { position: fixed; top: var(--ss-bar-h, 56px); left: 0; bottom: 0; width: 196px; z-index: 40;
+  background: var(--ss-surface); border-right: 1px solid var(--ss-border); padding: 12px 10px;
+  overflow-y: auto; display: grid; align-content: start; gap: 14px; }
+.ss-rail-group { display: grid; gap: 1px; }
+.ss-rail-head { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ss-faint); padding: 0 8px 4px; }
+.ss-rail-link { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: var(--ss-radius-sm);
+  color: var(--ss-muted); text-decoration: none; font-size: 12px; transition: background .12s, color .12s; }
+.ss-rail-link:hover { background: var(--ss-sunken); color: var(--ss-text); }
+.ss-rail-link[aria-current="page"] { background: var(--ss-primary-wash); color: var(--ss-primary-dark);
+  font-weight: 600; }
+.ss-rail-icon { width: 16px; height: 16px; flex: none; }
+.ss-rail-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the areas of the workspace ──────────────────────────────────────────────────────────────────────── */
+.ss-areas { display: flex; gap: 2px; padding: 8px 20px 0; background: var(--ss-surface);
+  border-bottom: 1px solid var(--ss-border); }
+.ss-areas button { all: unset; cursor: pointer; padding: 7px 14px 9px; font-size: 12px; font-weight: 600;
+  color: var(--ss-muted); border-bottom: 2px solid transparent; }
+.ss-areas button:hover { color: var(--ss-text); }
+.ss-areas button[aria-selected="true"] { color: var(--ss-primary-dark);
+  border-bottom-color: var(--ss-primary); }
+.ss-panel { border: 1px solid var(--ss-line); border-radius: var(--ss-radius-sm); padding: 10px 12px;
+  margin-bottom: 10px; }
+.ss-panel h4 { font-size: 13px; margin-bottom: 6px; }
+
+/* ── how a chart is drawn: a row of kinds ────────────────────────────────────────────────────────────── */
+.ss-kindrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ss-kindbtn { all: unset; box-sizing: border-box; display: grid; justify-items: center; gap: 2px;
+  padding: 6px 8px; min-width: 56px; border: 1px solid var(--ss-border); border-radius: var(--ss-radius-sm);
+  cursor: pointer; font-size: 10px; color: var(--ss-muted); transition: border-color .12s, background .12s; }
+.ss-kindbtn:hover:not(:disabled) { border-color: var(--ss-primary-line); background: var(--ss-primary-wash);
+  color: var(--ss-primary-dark); }
+.ss-kindbtn[aria-pressed="true"] { border-color: var(--ss-primary); background: var(--ss-primary-wash);
+  color: var(--ss-primary-dark); font-weight: 600; }
+.ss-kindbtn:disabled { cursor: default; }
+.ss-kindbtn-icon { width: 18px; height: 18px; }
+.ss-devices { display: inline-flex; gap: 2px; }
+.ss-device-icon { width: 15px; height: 15px; }
+
 /* ── the command bar (§47.2) ─────────────────────────────────────────────────────────────────────────────── */
 .ss-bar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--ss-surface);
   border-bottom: 1px solid var(--ss-border); position: sticky; top: 0; z-index: 50; flex-wrap: wrap;
@@ -370,6 +416,10 @@
 /* Narrow: the side panes become drawers over the canvas rather than columns squeezed beside it — a canvas
    in a third of a laptop's width is worse than no canvas (§47.1). The bar's ◧ and ◨ open and close them. */
 @media (max-width: 1240px) {
+  #sharpsight-studio { padding-left: 52px; }
+  .ss-rail { width: 52px; padding: 12px 6px; }
+  .ss-rail-label, .ss-rail-head { display: none; }
+  .ss-rail-link { justify-content: center; padding: 8px 0; }
   .ss-panes, .ss-panes[data-copilot="closed"], .ss-panes[data-explorer="closed"],
   .ss-panes[data-explorer="closed"][data-copilot="closed"] { grid-template-columns: minmax(0, 1fr); }
   .ss-pane { position: fixed; top: var(--ss-bar-h, 56px); bottom: 0; left: 0; width: min(340px, 88vw);

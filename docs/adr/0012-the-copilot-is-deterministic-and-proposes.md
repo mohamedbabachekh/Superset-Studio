@@ -30,4 +30,6 @@ What it does not recognise, it says it does not recognise.
 - It is narrower than a model, visibly: the examples it offers are drawn from the project itself, and a
   refusal names what it does understand.
 - The same machinery serves the gallery — the manual path is the same proposal, from a form (§48.3: « do not
-  force users to use AI »).
+  force users to use AI ») — and, since 2026-10-20, the inspector's own controls: changing a chart's metric,
+  dimension, dataset or kind from a dropdown asks for a proposal rather than editing the draft, because those
+  four are the registry's to allow, not a field to type into. One road in, checked once.

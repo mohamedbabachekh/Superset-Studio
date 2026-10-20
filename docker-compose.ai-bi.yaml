@@ -183,7 +183,7 @@ services:
       SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
       # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
-      SHARPSIGHT_EXTENSION_SHA256: "7edba326495489738771606ab9361016f3fb7bc20a1c674dae34f1dbd3ce5d05"
+      SHARPSIGHT_EXTENSION_SHA256: "0d073e1622af13ad39954eaeddd0880e68761773efdfbd4aea5738947efb26e2"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
       # the Studio's own stylesheet and script, read as they are in the repository: no build step, no Node
       SHARPSIGHT_STUDIO_DIR: /app/sharpsight/studio

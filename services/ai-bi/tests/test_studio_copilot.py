@@ -179,3 +179,43 @@ def test_the_diff_says_what_one_specification_changes_about_another(copilot, spe
     proposal = copilot.propose("add a distribution of QoE Score", spec, template, dev)
     said = diff(spec, DashboardSpec(**proposal.spec), template)
     assert any(line.startswith("+ ") and "distribution_1" in line for line in said)
+
+
+# ── the inspector's own controls ────────────────────────────────────────────────────────────────────────────
+# Changing what a chart measures is not a field edit: it is the same proposal the words and the gallery
+# produce, and the same rules decide it.
+
+def test_a_chart_s_kind_is_changed_only_to_one_its_slot_accepts(copilot, spec, template, dev):
+    good = copilot.alter("trend_1", {"type": "area"}, spec, template, dev)
+    assert good.changes and "drawn as a area" in good.changes[0].says
+    assert DashboardSpec(**good.spec).component("trend_1").type == "area"
+    bad = copilot.alter("trend_1", {"type": "pie"}, spec, template, dev)
+    assert not bad.changes and any("accepts line, area" in said for said in bad.unresolved)
+
+
+def test_a_metric_is_changed_and_its_dataset_found_again(copilot, spec, template, dev):
+    proposal = copilot.alter("kpi_1", {"metric": "cem.active_users"}, spec, template, dev)
+    after = DashboardSpec(**proposal.spec).component("kpi_1")
+    assert after.metric == "cem.active_users" and after.dataset, "the dataset is resolved for the new metric"
+    assert proposal.validation["passed"] is True
+
+
+def test_a_metric_the_person_may_not_use_is_refused_by_the_controls_too(copilot, spec, template, policy):
+    analyst = policy.identify("cem.analyst")
+    restricted = next((m for m in copilot.registry.metrics.values() if not policy.may_use(analyst, m)), None)
+    if restricted is None:
+        pytest.skip("no metric in the registry is closed to cem.analyst")
+    proposal = copilot.alter("kpi_1", {"metric": restricted.id}, spec,
+                             copilot.registry.template("executive"), analyst)
+    assert not proposal.changes and any("not cleared" in said for said in proposal.unresolved)
+
+
+def test_changing_nothing_proposes_nothing(copilot, spec, template, dev):
+    proposal = copilot.alter("trend_1", {"type": "line"}, spec, template, dev)
+    assert not proposal.changes and any("nothing of that chart would change" in said
+                                        for said in proposal.unresolved)
+
+
+def test_a_slot_with_no_chart_has_nothing_to_alter(copilot, spec, template, dev):
+    proposal = copilot.alter("map_1", {"type": "table"}, spec, template, dev)
+    assert not proposal.changes and "holds no chart" in proposal.unresolved[0]

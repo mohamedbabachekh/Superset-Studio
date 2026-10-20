@@ -193,6 +193,68 @@ class Copilot:
         return self._finish(f"add a chart on {slot}", after, spec, template, identity, changes, unresolved,
                             [f"a {kind or 'chart'} of {metric_id} on {slot}"], read_by="the Studio's own form")
 
+    def alter(self, slot: str, wanted: dict[str, Any], spec: DashboardSpec, template: TemplateDef,
+              identity: Identity) -> Proposal:
+        """A chart changed from the inspector's own controls — a dataset, a kind, a metric, a dimension.
+
+        The same proposal the words and the gallery produce, for the same reason: changing what a chart
+        measures is not a field edit. The metric must be one of the registry's and one this person is
+        cleared for; the kind must be one the slot accepts and one the BI engine can actually draw; and the
+        dataset is found again unless it was named, because a metric read by another breakdown may live
+        somewhere else. What comes back is checked and never applied."""
+        after = spec.model_copy(deep=True)
+        changes: list[Change] = []
+        unresolved: list[str] = []
+        component = after.component(slot)
+        if component is None:
+            return Proposal(request=f"change {slot}", read_by="the Studio's own controls",
+                            understood="nothing to change", summary="nothing is proposed",
+                            unresolved=[f"{slot} holds no chart"])
+        body = template.slots.get(slot)
+        asked = {name: value for name, value in wanted.items() if value not in (None, "")}
+
+        if "metric" in asked:
+            metric = self.registry.metrics.get(asked["metric"])
+            if metric is None:
+                unresolved.append(f"{asked['metric']} is not a metric of the registry")
+            elif not self.policy.may_use(identity, metric):
+                unresolved.append(f"{identity.user} is not cleared for {metric.id} "
+                                  f"(classified {metric.classification})")
+            elif metric.id != component.metric:
+                changes.append(Change(kind="option", slot=slot,
+                                      says=f"{slot} measures {metric.name} instead of {component.metric}"))
+                component.metric = metric.id
+                component.dataset = None                    # found again below, for the new metric
+        if "type" in asked and asked["type"] != component.type:
+            kind = asked["type"]
+            visualization = self.registry.visualizations.get(kind)
+            if body is None or kind not in body.accepts:
+                unresolved.append(f"slot {slot} accepts {', '.join(body.accepts) if body else 'nothing'}, "
+                                  f"not a {kind}")
+            elif visualization is None or visualization.status != "available":
+                unresolved.append(f"{kind} is approved but not installed in this BI engine")
+            else:
+                changes.append(Change(kind="option", slot=slot, says=f"{slot} is drawn as a {kind}"))
+                component.type = kind
+                if kind in ("big_number", "histogram"):
+                    component.dimension = None
+        if "dimension" in asked and asked["dimension"] != component.dimension:
+            changes.append(Change(kind="option", slot=slot,
+                                  says=f"{slot} is broken down by {asked['dimension']}"))
+            component.dimension = asked["dimension"]
+            component.dataset = None
+        if "dataset" in asked and asked["dataset"] != component.dataset:
+            dataset = self.registry.datasets.get(asked["dataset"])
+            if dataset is None or not self.policy.can_read(identity, dataset):
+                unresolved.append(f"{identity.user} may not read {asked['dataset']}")
+            else:
+                changes.append(Change(kind="option", slot=slot, says=f"{slot} is read from {dataset.id}"))
+                component.dataset = dataset.id
+        if not changes and not unresolved:
+            unresolved.append("nothing of that chart would change")
+        return self._finish(f"change {slot}", after, spec, template, identity, changes, unresolved,
+                            [f"{slot}: {', '.join(asked)}"], read_by="the Studio's own controls")
+
     # ── the instructions it knows ───────────────────────────────────────────────────────────────────────────
     def _free(self, spec: DashboardSpec, template: TemplateDef) -> list[str]:
         taken = {c.slot for c in spec.components}

@@ -55,6 +55,10 @@ components:
     #   · same-origin framing — this kit runs with TALISMAN_ENABLED = False, so nothing sets X-Frame-Options;
     #     a Superset that turns Talisman on must still allow 'self' as a frame ancestor.
     frames: Superset's standalone dashboard, same origin (docs/adr/0022-two-canvases-compose-and-live.md)
+    # the Studio's rail links to Superset's own pages by address (/superset/welcome/, /tablemodelview/list/,
+    # /chart/list/, /dashboard/list/, /sqllab/). If an upgrade moves one, the rail points at nothing while
+    # Superset's own menu is right: check them with the rest (docs/adr/0023)
+    links_to: Superset's own list pages, by address
 
 # Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
 connectors:

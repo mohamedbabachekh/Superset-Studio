@@ -182,6 +182,7 @@ SUPERSET_MAY = frozenset({
     ("GET", "/projects/{project_id}/picture/{slot}"),
     # the copilot and the gallery: both answer with a proposal and change nothing by themselves
     ("POST", "/projects/{project_id}/propose"), ("POST", "/projects/{project_id}/compose"),
+    ("POST", "/projects/{project_id}/alter"),
     # what a run found, last time: the levels of validation only a run can produce
     ("GET", "/projects/{project_id}/report"), ("GET", "/datasets/{dataset_id}/lineage"),
     # the immutable package a version was cut as (§47.2 « Export Package »): reading it is not promoting it
@@ -775,6 +776,24 @@ def compose(project_id: str, body: Compose, identity: Identity = Depends(caller)
     project = _project(project_id, identity)
     return _proposal(project, identity, lambda spec, template: service.copilot.compose(
         body.slot, body.metric, body.type, body.dimension, body.time_grain, spec, template, identity))
+
+
+class Alter(BaseModel):
+    slot: str = Field(max_length=40)
+    type: Optional[str] = Field(default=None, max_length=40)
+    metric: Optional[str] = Field(default=None, max_length=120)
+    dimension: Optional[str] = Field(default=None, max_length=120)
+    dataset: Optional[str] = Field(default=None, max_length=120)
+
+
+@app.post("/projects/{project_id}/alter")
+def alter(project_id: str, body: Alter, identity: Identity = Depends(caller)) -> Any:
+    """A chart changed from the Studio's own controls — a dataset, a kind, a metric, a dimension. The same
+    proposal the words and the gallery produce: checked, and never applied by asking."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity, lambda spec, template: service.copilot.alter(
+        body.slot, body.model_dump(exclude={"slot"}), spec, template, identity))
 
 
 @app.get("/projects/{project_id}/report")

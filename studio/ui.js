@@ -44,6 +44,22 @@ const PATHS = {
   table: 'M3 5h18v14H3zM3 10h18M9 10v9M15 10v9',
   map: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z M9 4v14 M15 6v14',
   other: 'M4 4h16v16H4zM4 9h16M9 9v11',
+  home: 'M4 11l8-7 8 7v8a1 1 0 01-1 1h-5v-6H10v6H5a1 1 0 01-1-1z',
+  projects: 'M3 7a1 1 0 011-1h5l2 2h9a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1z',
+  datasets: 'M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7',
+  charts: 'M4 19V9h4v10zM10 19V5h4v14zM16 19v-7h4v7z',
+  dashboards: 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
+  sql: 'M5 7h14M5 12h14M5 17h9M17 15l3 2-3 2',
+  ai: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM18 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z',
+  quality: 'M12 3l8 4v5c0 4.4-3.1 8.3-8 9-4.9-.7-8-4.6-8-9V7zM9 12l2 2 4-4',
+  releases: 'M4 6h16v4H4zM4 14h16v4H4zM8 8h.01M8 16h.01',
+  impact: 'M6 6h4v4H6zM14 14h4v4h-4zM10 8h4a2 2 0 012 2v4',
+  audit: 'M6 3h9l4 4v14H6zM15 3v4h4M9 12h6M9 16h6',
+  dbt: 'M12 3a9 9 0 019 9 9 9 0 01-9 9 9 9 0 01-9-9 9 9 0 019-9zM12 8v8M8 12h8',
+  studio: 'M4 5h16v11H4zM9 20h6M12 16v4M7 8h4M7 11h7',
+  desktop: 'M3 5h18v11H3zM8 20h8M12 16v4',
+  tablet: 'M6 3h12v18H6zM11 18h2',
+  mobile: 'M8 2h8v20H8zM11 19h2',
 };
 
 export function icon(kind, attrs = {}) {

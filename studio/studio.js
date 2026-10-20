@@ -120,6 +120,29 @@ const commands = {
     }
   },
 
+  /** A chart's content changed from the inspector's own controls. It is the same proposal the words and the
+   *  gallery produce — shown in the copilot, applied by hand — because changing what a chart measures is
+   *  checked, not typed. */
+  async alter(wanted) {
+    state.thinking = true;
+    state.copilot = true;
+    commands.redraw();
+    try {
+      const made = await api.alter(wanted);
+      state.proposal = made;
+      state.said.push({ who: 'person', text: Object.entries(wanted)
+        .filter(([name]) => name !== 'slot').map(([name, value]) => `${name} → ${value}`).join(', ')
+        + ` on ${wanted.slot}` });
+      state.said.push({ who: 'studio', text: made.summary || (made.unresolved || []).join(' ') });
+      if (!made.spec) toast((made.unresolved || []).join(' '), { kind: 'bad', seconds: 9 });
+    } catch (problem) {
+      toast(problem.message, { kind: 'bad', seconds: 0 });
+    } finally {
+      state.thinking = false;
+      commands.redraw();
+    }
+  },
+
   async report() {
     try {
       state.report = await api.report();

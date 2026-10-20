@@ -39,7 +39,7 @@ class SharpSightBiApi(RestApi):
                               "templates": "read", "check_draft": "read", "picture": "read",
                               "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
                               "pictures": "write", "propose": "write", "compose": "write",
-                              "report": "read", "lineage": "read", "package": "read"}
+                              "report": "read", "lineage": "read", "package": "read", "alter": "write"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
     # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
@@ -450,3 +450,25 @@ class SharpSightBiApi(RestApi):
             return self.response(400, message="that is not a project and a version")
         return self._engine_file("GET", f"/projects/{project_id}/versions/{version}/package",
                                  "application/zip", f"{project_id}-{version}.ssbi")
+
+    @expose("/projects/<project_id>/alter", methods=("POST",))
+    @protect()
+    @safe
+    def alter(self, project_id: str) -> Response:
+        """A chart changed from the Studio's own controls — a dataset, a kind, a metric, a dimension —
+        answered with a proposal, like the words and the gallery. Nothing is saved by asking.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The proposal
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        body = request.get_json(silent=True) or {}
+        wanted = {key: body.get(key) for key in ("slot", "type", "metric", "dimension", "dataset")}
+        return self._engine("POST", f"/projects/{project_id}/alter", json=wanted)

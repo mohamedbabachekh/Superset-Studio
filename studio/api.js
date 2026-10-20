@@ -54,6 +54,7 @@ export function client(el) {
     tiles: () => ask('POST', `/projects/${slot(project)}/pictures`),
     propose: request => ask('POST', `/projects/${slot(project)}/propose`, { request }),
     compose: wanted => ask('POST', `/projects/${slot(project)}/compose`, wanted),
+    alter: wanted => ask('POST', `/projects/${slot(project)}/alter`, wanted),
     report: () => ask('GET', `/projects/${slot(project)}/report`),
     changes: () => ask('GET', `/projects/${slot(project)}/changes`),
     run: id => ask('GET', `/runs/${slot(id)}`),
