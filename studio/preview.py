@@ -18,9 +18,7 @@ import argparse
 import copy
 import hashlib
 import json
-import struct
 import sys
-import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -72,24 +70,87 @@ SPEC = {
                     "dataset": "cem.qoe_daily", "options": {}} for slot, kind, metric, dimension, title in CHARTS],
     "sections": [], "layout": [],
 }
-COLOURS = {"kpi_1": (9, 114, 188), "kpi_2": (38, 171, 168), "kpi_3": (242, 183, 45), "kpi_4": (55, 161, 94),
-           "trend_1": (9, 114, 188), "distribution_1": (38, 171, 168), "ranking_1": (91, 100, 114),
-           "map_1": (214, 69, 69)}
 state = {"draft": None}
 
 
-def png(width: int, height: int, colour: tuple[int, int, int]) -> bytes:
-    """A flat picture, in place of a chart's. Enough to see where a tile is and how wide; the real tiles are
-    cut out of a photograph of the real dashboard (aibi/picture.py)."""
-    rows = b"".join(b"\x00" + bytes(colour) * width for _ in range(height))
+def tile(slot: str) -> bytes:
+    """A chart in place of a chart's photograph.
 
-    def chunk(kind: bytes, body: bytes) -> bytes:
-        return (struct.pack(">I", len(body)) + kind + body
-                + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
+    The real tiles are cut out of a picture of the real dashboard, which Superset drew (aibi/picture.py).
+    There is no Superset here, so these are drawn — as SVG, from the standard library — and they are drawn
+    to LOOK like what Superset draws, because a canvas full of flat rectangles says nothing about whether
+    the workspace around it reads well. Nothing about them is data: every number below is invented."""
+    kind, colour = STAND_IN.get(slot, ("line", "#0972BC"))
+    if kind == "big_number":
+        label, value, delta, up = BIG.get(slot, ("", "0", "", True))
+        spark = " ".join(f"{6 + n * 13},{44 - v * 0.3:.0f}" for n, v in enumerate(SPARK))
+        body = f"""
+          <text x="6" y="18" font-size="11" fill="#8A94A6">{label}</text>
+          <text x="6" y="46" font-size="30" font-weight="700" fill="#1F2430">{value}</text>
+          <text x="6" y="64" font-size="11" fill="{'#37A15E' if up else '#D64545'}">
+            {'↑' if up else '↓'} {delta}</text>
+          <polyline points="{spark}" fill="none" stroke="{colour}" stroke-width="2"
+            transform="translate(118, 14)" opacity=".85"/>"""
+        return _svg(220, 80, body)
+    if kind == "line":
+        points = " ".join(f"{10 + n * 17},{86 - v * 0.62:.0f}" for n, v in enumerate(TREND))
+        body = f"""
+          {_grid(300, 110)}
+          <polygon points="10,96 {points} {10 + (len(TREND) - 1) * 17},96" fill="{colour}" opacity=".12"/>
+          <polyline points="{points}" fill="none" stroke="{colour}" stroke-width="2.4"/>
+          {''.join(f'<circle cx="{10 + n * 17}" cy="{86 - v * 0.62:.0f}" r="2.2" fill="{colour}"/>'
+                   for n, v in enumerate(TREND) if n % 3 == 0)}
+          <text x="10" y="107" font-size="8" fill="#8A94A6">Jan 1</text>
+          <text x="265" y="107" font-size="8" fill="#8A94A6">Jan 31</text>"""
+        return _svg(300, 112, body)
+    if kind == "histogram":
+        bars = "".join(
+            f'<rect x="{14 + n * 22}" y="{92 - v * 0.8:.0f}" width="15" height="{v * 0.8:.0f}" rx="2"'
+            f' fill="{colour}" opacity="{0.45 + n * 0.06:.2f}"/>' for n, v in enumerate(SPREAD))
+        return _svg(200, 112, _grid(200, 110) + bars
+                    + '<text x="14" y="107" font-size="8" fill="#8A94A6">QoE buckets</text>')
+    if kind == "bar":
+        rows = "".join(
+            f'<text x="4" y="{20 + n * 22}" font-size="9" fill="#5B6472">{name}</text>'
+            f'<rect x="66" y="{11 + n * 22}" width="{v * 1.7:.0f}" height="11" rx="3" fill="{colour}"'
+            f' opacity="{0.95 - n * 0.13:.2f}"/>'
+            f'<text x="{72 + v * 1.7:.0f}" y="{20 + n * 22}" font-size="9" fill="#8A94A6">{v}</text>'
+            for n, (name, v) in enumerate(REGIONS))
+        return _svg(240, 118, rows)
+    if kind == "table":
+        rows = "".join(
+            f'<text x="6" y="{22 + n * 18}" font-size="9" fill="#1F2430">{name}</text>'
+            f'<text x="150" y="{22 + n * 18}" font-size="9" fill="#5B6472" text-anchor="end">{v}</text>'
+            f'<line x1="6" y1="{26 + n * 18}" x2="150" y2="{26 + n * 18}" stroke="#F0F2F5"/>'
+            for n, (name, v) in enumerate(REGIONS))
+        return _svg(160, 112,
+                    '<text x="6" y="10" font-size="8" fill="#8A94A6">REGION</text>'
+                    '<text x="150" y="10" font-size="8" fill="#8A94A6" text-anchor="end">QOE</text>' + rows)
+    return _svg(200, 110, f'<rect x="8" y="8" width="184" height="94" rx="6" fill="{colour}" opacity=".2"/>')
 
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
+
+def _svg(width: int, height: int, body: str) -> bytes:
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}"'
+            f' height="{height}" font-family="Inter, sans-serif">{body}</svg>').encode()
+
+
+def _grid(width: int, height: int) -> str:
+    return "".join(f'<line x1="8" y1="{y}" x2="{width - 8}" y2="{y}" stroke="#F0F2F5"/>'
+                   for y in range(20, height - 10, 22))
+
+
+STAND_IN = {"kpi_1": ("big_number", "#0972BC"), "kpi_2": ("big_number", "#26ABA8"),
+            "kpi_3": ("big_number", "#F2B72D"), "kpi_4": ("big_number", "#37A15E"),
+            "trend_1": ("line", "#0972BC"), "distribution_1": ("histogram", "#26ABA8"),
+            "ranking_1": ("bar", "#0972BC"), "map_1": ("table", "#5B6472")}
+BIG = {"kpi_1": ("QoE Score", "92.4", "3.2% vs last month", True),
+       "kpi_2": ("Active users", "1.24M", "12.6% vs last month", True),
+       "kpi_3": ("Degraded users", "56.2K", "8.4% vs last month", False),
+       "kpi_4": ("Degraded rate", "4.5%", "0.3 pt vs last month", False)}
+SPARK = [38, 44, 41, 52, 48, 60, 57, 66]
+TREND = [52, 61, 58, 70, 66, 74, 71, 80, 77, 85, 82, 90, 87, 94, 91, 99, 96]
+SPREAD = [18, 34, 58, 86, 104, 92, 61, 37]
+REGIONS = [("Rabat", 94), ("Casablanca", 91), ("Tanger", 88), ("Fès", 85), ("Agadir", 81)]
 
 
 def token(draft) -> str:
@@ -300,8 +361,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith("/studio"):
             return self._json(200, {"result": payload()})
         if "/picture/" in path:
-            slot = path.rsplit("/", 1)[-1]
-            return self._send(200, png(60, 40, COLOURS.get(slot, (200, 200, 200))), "image/png")
+            slot = path.rsplit("/", 1)[-1].split("?")[0]
+            return self._send(200, tile(slot), "image/svg+xml; charset=utf-8")
         if path.endswith("/datasets"):
             return self._json(200, {"result": [{"id": "cem.qoe_daily", "name": "CEM QoE Daily", "certified": True},
                                                {"id": "cem.region", "name": "Regions", "certified": True},

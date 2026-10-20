@@ -181,6 +181,10 @@ function skeleton() {
 }
 
 /* ── the command bar (§47.2) ─────────────────────────────────────────────────────────────────────────────── */
+const who = () => (document.getElementById('sharpsight-studio').dataset.user || '?');
+const initials = name => name.split(/[.\s_-]+/).filter(Boolean).slice(0, 2)
+  .map(part => part[0].toUpperCase()).join('') || '?';
+
 const AGO = at => {
   if (!at) return null;
   const seconds = Math.max(0, (Date.now() - new Date(at).getTime()) / 1000);
@@ -205,6 +209,7 @@ function bar(commands) {
     project.gate && tag(project.gate.replace(/_/g, ' ').toLowerCase(), gate),
     tag(saved, state.dirty ? 'warn' : state.savedAt ? 'good' : undefined),
     node('span', { class: 'ss-spacer' }),
+    node('span', { class: 'ss-avatar', title: `Signed in as ${who()}`, text: initials(who()) }),
     node('div', { class: 'ss-group' },
       button('↶', () => act.undo('undo'), { 'data-weight': 'quiet', title: 'Undo (⌘Z)',
         'aria-label': 'Undo', disabled: !state.past.length }),
@@ -468,6 +473,16 @@ const mode = commands => node('div', { class: 'ss-switch', role: 'group', 'aria-
 function composeCanvas(client, commands) {
   const sections = state.payload.template.sections || [];
   const inner = node('div', { class: 'ss-canvas' });
+  // the dashboard as a reader will meet it: its title, and the filters it carries as the chips they become
+  inner.appendChild(node('div', { class: 'ss-sheet' },
+    node('h2', { text: state.spec.dashboard.title }),
+    node('span', { class: 'ss-faint', text: state.spec.dashboard.description || '' }),
+    node('div', { class: 'ss-chipbar' }, (state.spec.filters || []).map(column => {
+      const option = (state.payload.filter_options || []).find(one => one.column === column) || {};
+      return node('span', { class: 'ss-filterchip',
+        title: 'A filter this dashboard carries — set them in the Filters area',
+        text: `${option.label || column}: all` });
+    }))));
   const announced = new Set();
   const drawn = act.rows();
   drawn.forEach(row => {
@@ -505,14 +520,15 @@ function composeCanvas(client, commands) {
           type: 'button', title: label, 'aria-label': label, 'aria-pressed': viewport === width,
           on: { click: () => { state.viewport = width; commands.redraw(); } } },
         icon(kind, { class: 'ss-device-icon' })))),
-      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '−',
-        'aria-label': 'Zoom out', title: 'Zoom out',
-        on: { click: () => { state.zoom = Math.max(0.5, zoom - 0.1); commands.redraw(); } } }),
-      node('span', { class: 'ss-faint', style: 'min-width: 34px; text-align: center',
-        text: `${Math.round(zoom * 100)}%` }),
-      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '+',
-        'aria-label': 'Zoom in', title: 'Zoom in',
-        on: { click: () => { state.zoom = Math.min(1, zoom + 0.1); commands.redraw(); } } })),
+      node('div', { class: 'ss-zoom' },
+        node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '−',
+          'aria-label': 'Zoom out', title: 'Zoom out',
+          on: { click: () => { state.zoom = Math.max(0.5, zoom - 0.1); commands.redraw(); } } }),
+        node('span', { class: 'ss-faint', style: 'min-width: 34px; text-align: center',
+          text: `${Math.round(zoom * 100)}%` }),
+        node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '+',
+          'aria-label': 'Zoom in', title: 'Zoom in',
+          on: { click: () => { state.zoom = Math.min(1, zoom + 0.1); commands.redraw(); } } }))),
     node('div', { class: 'ss-body ss-viewport', style: 'padding: 8px' }, frame));
 }
 

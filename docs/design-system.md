@@ -26,7 +26,7 @@ anywhere else** — which is what makes a second theme possible at all.
 | `--ss-text` / `-muted` / `-faint` | `#1F2430` / `#5B6472` / `#8A94A6` | `#E6E9EF` / `#A4ADBD` / `#788296` | three weights of type, and no more |
 | `--ss-surface` / `-sunken` / `-raised` | `#FFFFFF` / `#F5F6F9` / `#FCFDFE` | `#151A24` / `#0F131B` / `#1A2130` | a card, the ground it sits on, a header inside it |
 | `--ss-border` / `-line` | `#E3E6EC` / `#F0F2F5` | `#2A3040` / `#1E2430` | a card's edge, and a divider inside one |
-| `--ss-radius` / `-sm` / `-gap` | `10px` / `7px` / `16px` | — | one corner, one smaller corner, one gap |
+| `--ss-radius` / `-sm` / `-gap` | `12px` / `8px` / `18px` | — | one corner, one smaller corner, one gap |
 | `--ss-shadow` / `-lg` | two steps | two steps | a card, and something floating over it |
 
 **Naming.** The brief's own names map onto these: *Midnight* is `--ss-text` (and the dark theme's ground),
@@ -73,16 +73,29 @@ Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()
    payload is in flight, a named empty state for a dashboard with no charts and for a search that matches
    nothing, a reason when a project cannot be opened, and a banner when the registry says this person may read
    and not change.
-7. **Configuration is contextual**: the inspector shows the selected chart and nothing else, with governance
+7. **The dashboard is shown as a reader will meet it**: its title, its description, and the filters it
+   carries as the chips they will become — on the canvas, above the first section, not as a control panel.
+8. **Configuration is contextual**: the inspector shows the selected chart and nothing else, with governance
    behind its own tab rather than spread over the page.
-8. **The canvas never claims more than it supports.** What it cannot do, Superset's own editor does, and the
+9. **The canvas never claims more than it supports.** What it cannot do, Superset's own editor does, and the
    drawer says so in plain words.
-9. **The canvas says what it is doing.** A tile under the pointer names itself; a selected one is dashed,
+10. **The canvas says what it is doing.** A tile under the pointer names itself; a selected one is dashed,
    carries eight handles and its slot's label; and the twelve columns a drop will snap to are drawn while
    something is being moved or resized, and only then.
-10. **Motion is 120ms or nothing**, and `prefers-reduced-motion` turns it off.
-11. **A toast is not a log.** It says what happened and offers the one action that answers it (*Undo*,
+11. **Motion is 120ms or nothing**, and `prefers-reduced-motion` turns it off.
+12. **A toast is not a log.** It says what happened and offers the one action that answers it (*Undo*,
     *Reload*); anything longer belongs in the drawer.
+
+## 3b · What a tile looks like, and where that comes from
+
+A tile shows what **Superset drew** — a photograph in Compose, the live chart in Live. Nothing in this
+stylesheet styles a chart, and nothing should: a KPI that reads as a big number with a delta and a sparkline
+reads that way because Superset's `big_number_total` draws it that way.
+
+`studio/preview.py` draws stand-ins, in SVG, so the workspace can be looked at without a Superset — a line
+with its area, a histogram, a ranking with its values, a KPI with its delta. They are **invented numbers**,
+and they are drawn to look like what Superset draws for the same slot, because a canvas full of flat
+rectangles says nothing about whether the workspace around it reads well.
 
 ## 4 · The layout
 

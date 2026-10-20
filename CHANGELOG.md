@@ -50,6 +50,12 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
   palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
   become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **The style pass.** Softer corners and shadows, more air, buttons that read as actions; the canvas is a
+  white surface whose grain appears only while something is being placed; the dashboard is shown as a reader
+  will meet it — its title, its description, and the filters it carries as the chips they become; and the
+  person signed in is in the bar. What a chart looks like is still Superset's, and the stand-in charts
+  `studio/preview.py` draws (SVG, invented numbers) now look like what Superset draws, because a canvas of
+  flat rectangles says nothing about whether the workspace around it reads well.
 - **It is navigated like a workspace.** A rail on the left — SharpSight's own pages, the ones this person
   may open (built server-side from the same rule the menu obeys), and Superset's own — and four areas under
   the breadcrumb: **Design** (the canvas), **Data** (what the dashboard reads, with its lineage), **Filters**
