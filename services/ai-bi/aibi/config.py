@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 
@@ -118,3 +119,41 @@ def get_settings() -> Settings:
         superset_gateway_token=_env("AIBI_SUPERSET_GATEWAY_TOKEN", ""),
         llm_provider=_env("AIBI_LLM_PROVIDER", "none"),
     )
+
+
+def targets() -> dict[str, Any]:
+    """Where a version may be deployed, read from the environment.
+
+    A target is a SUPERSET SOMEWHERE ELSE — the « run » environment — named by four or five variables:
+
+        AIBI_TARGET_RUN_URL        https://bi.example.com
+        AIBI_TARGET_RUN_USER       a Superset account there that may import
+        AIBI_TARGET_RUN_PASSWORD   its password
+        AIBI_TARGET_RUN_DB_NAME    what the governed connection is called THERE — the same name the package
+                                   expects, because Superset 6 records a catalog per dataset and for
+                                   PostgreSQL the catalog is the database (docs/lessons.md)
+        AIBI_TARGET_RUN_DB_URI     that environment's warehouse
+        AIBI_TARGET_RUN_FROM_STUDIO=false   to make it the command line's alone
+        AIBI_TARGET_RUN_PUBLIC_URL  where a PERSON reaches it, when that is not _URL (a container name, a
+                                    private address): the link a deployment leaves behind is for somebody
+                                    to open
+
+    Nothing is deployed anywhere that is not named here, and nothing here is written down in this
+    repository: a target is somebody else's server, with somebody else's password.
+    """
+    from .deploy import Target                      # imported here: config is read before deploy is loaded
+
+    found: dict[str, Target] = {}
+    for key, url in os.environ.items():
+        if not key.startswith("AIBI_TARGET_") or not key.endswith("_URL") or not url.strip():
+            continue
+        name = key[len("AIBI_TARGET_"):-len("_URL")].lower()
+        read = lambda part, default="": os.environ.get(f"AIBI_TARGET_{name.upper()}_{part}", default)  # noqa: E731
+        if not read("DB_URI"):
+            continue                                 # a target without its warehouse is not a target
+        found[name] = Target(name=name, url=url.strip(), user=read("USER", "admin"),
+                             password=read("PASSWORD"), database_name=read("DB_NAME", "SharpSight BI"),
+                             database_uri=read("DB_URI"),
+                             from_studio=read("FROM_STUDIO", "true").lower() != "false",
+                             public_url=read("PUBLIC_URL").strip())
+    return found

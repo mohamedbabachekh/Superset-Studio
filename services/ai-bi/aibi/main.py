@@ -32,8 +32,10 @@ from pydantic import BaseModel, Field
 from . import __version__, compatibility
 from .audit import AuditLog
 from .config import Settings, get_settings
+from .config import targets as config_targets
 from .copilot import Copilot, diff as spec_diff
 from .data_gateway import DataGateway
+from .deploy import Deployer
 from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
 from .layout import problems as layout_problems
@@ -81,6 +83,9 @@ class Service:
         self.pictures = Pictures(self.tools.visual, state)
         # the Studio's copilot: a request in words, answered with a proposal and never with a change
         self.copilot = Copilot(self.registry, self.policy, self.tools.dashboards)
+        # taking a version to another Superset — the « run » environment — and proving it arrived
+        self.deployer = Deployer(self.store, self.audit, self.lifecycle, self.policy, self.registry)
+        self.targets = config_targets()
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
@@ -187,6 +192,9 @@ SUPERSET_MAY = frozenset({
     ("GET", "/projects/{project_id}/report"), ("GET", "/datasets/{dataset_id}/lineage"),
     # the immutable package a version was cut as (§47.2 « Export Package »): reading it is not promoting it
     ("GET", "/projects/{project_id}/versions/{version}/package"),
+    # where a version may go, where it has been, and taking it there — never approving it to go
+    ("GET", "/targets"), ("GET", "/projects/{project_id}/deployments"),
+    ("POST", "/projects/{project_id}/versions/{version}/deploy"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
 })
@@ -204,8 +212,10 @@ def caller(request: Request, authorization: str = Header(default=""),
            x_sharpsight_user: str = Header(default="")) -> Identity:
     token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
     if _same(token, service.settings.api_token):
+        request.state.via = "command line"
         return service.policy.identify(x_sharpsight_user)
     if _same(token, service.settings.superset_gateway_token):
+        request.state.via = "Superset"
         route = getattr(request.scope.get("route"), "path", "")
         if not superset_may(request.method, route):
             raise HTTPException(status_code=403, detail=(
@@ -794,6 +804,58 @@ def alter(project_id: str, body: Alter, identity: Identity = Depends(caller)) ->
     project = _project(project_id, identity)
     return _proposal(project, identity, lambda spec, template: service.copilot.alter(
         body.slot, body.model_dump(exclude={"slot"}), spec, template, identity))
+
+
+class Deploy(BaseModel):
+    target: str = Field(max_length=40)
+    gate: Literal["UAT", "PROD"] = "UAT"
+    comment: str = Field(default="", max_length=500)
+
+
+@app.get("/targets")
+def deployment_targets(identity: Identity = Depends(reader)) -> Any:
+    """Where a version may be deployed from here. A target is a Superset somewhere else, named in this
+    service's environment and written down nowhere in the repository."""
+    return [{"name": name, "url": target.where, "database": target.database_name,
+             "from_studio": target.from_studio}
+            for name, target in sorted(service.targets.items())]
+
+
+@app.get("/projects/{project_id}/deployments")
+def deployments(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """Every deployment of this project, most recent last — what went where, when, by whom, and what was
+    read back."""
+    project = _project(project_id, identity)
+    return project.get("deployments") or []
+
+
+@app.post("/projects/{project_id}/versions/{version}/deploy")
+def deploy(project_id: str, version: str, body: Deploy, request: Request,
+           identity: Identity = Depends(caller)) -> Any:
+    """Take a version to another Superset, and prove it arrived.
+
+    What it deploys is the package that was validated — not a new generation — and it deploys only a version
+    ALREADY APPROVED for that gate, by someone other than whoever asked for it. Approving is elsewhere, on
+    purpose; this executes an approval that exists, and records what it did."""
+    service.policy.require(identity, "bi.generate")
+    _project(project_id, identity)
+    target = service.targets.get(body.target)
+    if target is None:
+        raise LifecycleError(f"no deployment target is called « {body.target} ». "
+                             f"This service knows: {', '.join(sorted(service.targets)) or 'none'}")
+    if not target.from_studio and getattr(request.state, "via", "") != "command line":
+        raise LifecycleError(f"{body.target} is deployed to from the command line only")
+    record = service.store.get_version(project_id, version)
+    refused = service.deployer.refusal(record, target, body.gate)
+    if refused:
+        raise LifecycleError(refused)
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
+    try:
+        return service.deployer.deploy(record, target, body.gate, identity.user, str(uuid.uuid4()),
+                                       uuid.uuid4().hex[:12])
+    finally:
+        service.busy.release()
 
 
 @app.get("/projects/{project_id}/report")

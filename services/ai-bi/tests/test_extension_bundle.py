@@ -80,7 +80,10 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
                        ("/projects/<project_id>/report", "GET"),
                        ("/datasets/<dataset_id>/lineage", "GET"),
                        ("/projects/<project_id>/versions/<version>/package", "GET"),
-                       ("/projects/<project_id>/alter", "POST")]
+                       ("/projects/<project_id>/alter", "POST"),
+                       # where a version may go, where it has been, and taking it there
+                       ("/targets", "GET"), ("/projects/<project_id>/deployments", "GET"),
+                       ("/projects/<project_id>/versions/<version>/deploy", "POST")]
     assert not re.search(r"approve|reject|restore|discard|/audit|/people", api.split('"""', 2)[2])
     # a POST is refused without Superset's CSRF token: Flask-AppBuilder exempts an API unless told otherwise
     assert "    csrf_exempt = False\n" in api
@@ -100,13 +103,18 @@ def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_ot
     assert SUPERSET_MAY <= routes, "a call Superset may make is not a route of the engine"
     allowed = sorted(pair for pair in routes if superset_may(*pair))
     assert allowed == [("DELETE", "/projects/{project_id}/draft"),
-                       ("GET", "/datasets"), ("GET", "/datasets/{dataset_id}/lineage"), ("GET", "/metrics"),
-                       ("GET", "/projects"), ("GET", "/projects/{project_id}/changes"),
+                       ("GET", "/datasets"),
+                       ("GET", "/datasets/{dataset_id}/lineage"),
+                       ("GET", "/metrics"),
+                       ("GET", "/projects"),
+                       ("GET", "/projects/{project_id}/changes"),
+                       ("GET", "/projects/{project_id}/deployments"),
                        ("GET", "/projects/{project_id}/picture/{slot}"),
                        ("GET", "/projects/{project_id}/report"),
                        ("GET", "/projects/{project_id}/studio"),
                        ("GET", "/projects/{project_id}/versions/{version}/package"),
                        ("GET", "/runs/{run_id}"),
+                       ("GET", "/targets"),
                        ("GET", "/templates"),
                        ("POST", "/projects/{project_id}/alter"),
                        ("POST", "/projects/{project_id}/commit"),
@@ -115,6 +123,9 @@ def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_ot
                        ("POST", "/projects/{project_id}/draft/validate"),
                        ("POST", "/projects/{project_id}/pictures"),
                        ("POST", "/projects/{project_id}/propose"),
+                       # a deployment CARRIES OUT an approval that exists; the approval itself is refused
+                       # below with every other decision, and stays on the command line
+                       ("POST", "/projects/{project_id}/versions/{version}/deploy"),
                        ("PUT", "/projects/{project_id}/draft")]
     for refused in (("POST", "/projects/{project_id}/approve"), ("POST", "/projects/{project_id}/reject"),
                     ("POST", "/projects/{project_id}/restore"), ("POST", "/projects/{project_id}/discard"),

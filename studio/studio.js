@@ -143,6 +143,42 @@ const commands = {
     }
   },
 
+  /** Take a version to another Superset. The engine refuses a version nobody else has approved for that
+   *  gate before anything is sent, so this is a button, not a decision. */
+  async deploy(version, target, gate, comment = '') {
+    state.deploying = true;
+    commands.redraw();
+    const waiting = toast(`Deploying ${version} to ${target} — importing, repointing, granting, reading back…`,
+      { seconds: 0 });
+    try {
+      const done = await api.deploy(version, { target, gate, comment });
+      state.deployments = [...(state.deployments || []), done];
+      toast(done.status === 'succeeded'
+        ? `${version} is in ${target}: ${done.checks.filter(c => c.status === 'pass').length} checks passed.`
+        : `The deployment failed: ${done.error}`,
+      { kind: done.status === 'succeeded' ? 'good' : 'bad', seconds: 0 });
+    } catch (problem) {
+      toast(problem.message, { kind: 'bad', seconds: 0 });
+    } finally {
+      waiting.remove();
+      state.deploying = false;
+      state.tab = 'deployments';
+      commands.redraw();
+    }
+  },
+
+  async deployments() {
+    try {
+      const [targets, done] = await Promise.all([api.targets(), api.deployments()]);
+      state.targets = targets;
+      state.deployments = done;
+    } catch (problem) {
+      state.targets = state.targets || [];
+      toast(problem.message, { kind: 'bad' });
+    }
+    commands.redraw();
+  },
+
   async report() {
     try {
       state.report = await api.report();

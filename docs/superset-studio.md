@@ -317,9 +317,31 @@ Proof after the second sitting: **212 engine tests** (18 more, for the copilot),
 `python studio/preview.py --check` driving the workspace in a browser against a stand-in engine — **thirty
 promises**, no console error.
 
+### The third sitting, 2026-10-20 — deploying it, and trying the whole thing
+
+The owner asked the two questions that follow a workspace: *can a dashboard built here be deployed to the run
+platform, with everything it needs?* and *can all of it be tested?*
+
+| | |
+|---|---|
+| `aibi/deploy.py` | nine steps, each recorded: the package's checksum · the target's versions against the matrix · the governed connection created there under the name the package expects · the import · the **repoint** (an import keeps an existing URI — a run environment would otherwise read the development warehouse) · the audience and the row-level rules, which are not in an export · what arrived, read back · **every chart asked for its data**, because an import answers 200 for a dashboard that cannot draw · the record |
+| what it refuses | a version nobody approved for that gate, a version whose validation did not pass, a package whose checksum is not the one that was validated, a package without Superset's own export, a target outside the compatibility matrix. Each in words a person can act on, and before anything is imported |
+| `config.targets()` | a target is five variables in the engine's own environment (`AIBI_TARGET_<NAME>_URL`, `_USER`, `_PASSWORD`, `_DB_NAME`, `_DB_URI`), plus `_FROM_STUDIO=false` to make it the command line's alone and `_PUBLIC_URL` where a person reaches it. Nothing is deployed anywhere that is not named there, and nothing there is written down in this repository |
+| the engine, the extension, the CLI, the Studio | `GET /targets`, `GET /projects/{id}/deployments`, `POST /projects/{id}/versions/{v}/deploy` — on the gateway's allowlist, so the Studio may deploy and still cannot approve. `bash ai-bi.sh targets · deploy · deployments`. In the Studio: a **Deploy** button and a *Deployments* drawer tab showing the steps and what was read back |
+| `docker-compose.run-target.yaml` | a **second Superset** on this machine as the « run » environment: its own metadata database (`runbi`), its own accounts, its own Redis database, its own URL — and nothing of the kit's in it. `bash ai-bi.sh run-target` |
+| `scripts/e2e.sh` | the whole walk on a running kit, as eleven sections of promises: the machine · what is governed · a project from a request · the Studio's payload, draft, token refusal, validation and three roads to a proposal · a modification committed as the next version · the second person and the audit chain · the package and its checksum · the deployment and its read-back · the package as Superset's own importable export · what Superset's token may and may not open · both suites. `bash ai-bi.sh e2e`, `--only <n>` for one section |
+
+Proof after the third sitting: **231 engine tests** (nineteen more: the deployment's refusals and its read-back, the
+link a person can open, and the run-target overlay's handover to `config.targets`), and
+`python studio/preview.py --check` — **sixty-nine promises**, no console error.
+
 ### What is owed before this can be called done
 
-- **Run it.** The three spikes of §3 against a real Superset: the page under the bar with a workspace on it,
+- **Run it — and now there is one command for it.** `bash ai-bi.sh e2e` walks everything below that a
+  machine with Docker can answer: the generation, the Studio's draft and proposals, a commit, an approval,
+  the package, the deployment to a second Superset and the read-back there. What it cannot answer is the
+  three spikes of §3, which need eyes on the page.
+- **The three spikes of §3** against a real Superset: the page under the bar with a workspace on it,
   the bar's own navigation with unsaved work, and `csrf_token()` in that template. Then one picture of one
   chart, timed, on real hardware.
 - **The round trip on a real kit**: move a chart, commit, build, reload — and `rehearse-upgrade.sh` still

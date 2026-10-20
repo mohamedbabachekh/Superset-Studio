@@ -161,19 +161,44 @@ def report(run: dict[str, Any], user: str) -> int:
     return 0
 
 
+def deploy(project_id: str, version: str, target: str, gate: str, comment: str, user: str) -> int:
+    """Take a version to another Superset, and say what was done, step by step. What is deployed is the
+    package that was validated; a version nobody else signed off for that gate is refused before anything
+    is sent."""
+    done = call("POST", f"/projects/{project_id}/versions/{version}/deploy", user,
+                json={"target": target, "gate": gate, "comment": comment})
+    mark = {"done": "✓", "failed": "✗", "skipped": "·", "pending": " "}
+    print(f"{project_id} {version} → {target} ({gate})")
+    for step in done["steps"]:
+        print(f"  {mark.get(step['status'], '?')} {step['title']:<48} {step['detail'][:60]}")
+    for check in done["checks"]:
+        print(f"  {mark.get('done' if check['status'] == 'pass' else 'failed')} {check['check']:<48} "
+              f"{check['detail'][:60]}")
+    if done["status"] == "succeeded":
+        print(f"\n{done['dashboard'].get('url', '')}")
+        return 0
+    print(f"\nthe deployment failed: {done.get('error')}")
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="aibi", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("demo", "generate", "run", "project", "approve", "reject", "discard", "audit", "health", "people",
-                 "person", "compatibility", "validate", "commit"):
+                 "person", "compatibility", "validate", "commit", "deploy", "targets", "deployments"):
         command = sub.add_parser(name)
         command.add_argument("--user", default="dev.user")
         if name == "generate":
             command.add_argument("prompt")
         if name == "run":
             command.add_argument("run_id")
-        if name in ("project", "approve", "reject", "discard", "validate", "commit"):
+        if name in ("project", "approve", "reject", "discard", "validate", "commit", "deploy", "deployments"):
             command.add_argument("project_id")
+        if name == "deploy":
+            command.add_argument("version")
+            command.add_argument("--to", required=True, help="a target of this service's environment")
+            command.add_argument("--gate", choices=["UAT", "PROD"], default="UAT")
+            command.add_argument("--comment", default="")
         if name == "approve":
             command.add_argument("target", choices=["UAT", "PROD"])
             command.add_argument("--confirm", action="store_true")
@@ -197,6 +222,21 @@ def main() -> int:
         validate(args.project_id, args.user)
     elif args.command == "commit":
         return commit(args.project_id, args.comment, args.user)
+    elif args.command == "targets":
+        found = call("GET", "/targets", args.user)
+        if not found:
+            print("no deployment target is configured. A target is a Superset somewhere else, named in this\n"
+                  "service's environment: AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI.")
+            return 1
+        for target in found:
+            print(f"{target['name']:<12} {target['url']}  ({target['database']})"
+                  + ("" if target["from_studio"] else "  — the command line only"))
+    elif args.command == "deployments":
+        for one in call("GET", f"/projects/{args.project_id}/deployments", args.user):
+            print(f"{one['started_at']}  {one['version']} → {one['target']:<10} {one['status']:<10} "
+                  f"by {one['by']}" + (f"  — {one['error'][:90]}" if one.get("error") else ""))
+    elif args.command == "deploy":
+        return deploy(args.project_id, args.version, args.to, args.gate, args.comment, args.user)
     elif args.command == "run":
         print(json.dumps(follow(args.run_id, args.user), indent=2, ensure_ascii=False))
     elif args.command == "project":

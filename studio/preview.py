@@ -70,7 +70,7 @@ SPEC = {
                     "dataset": "cem.qoe_daily", "options": {}} for slot, kind, metric, dimension, title in CHARTS],
     "sections": [], "layout": [],
 }
-state = {"draft": None}
+state = {"draft": None, "deployments": []}
 
 
 def tile(slot: str) -> bytes:
@@ -188,7 +188,7 @@ def payload() -> dict:
         "draft": {k: state["draft"][k] for k in ("saved_at", "saved_by")} if state["draft"] else None,
         "token": token(state["draft"]), "problems": [],
         "diff": ["~ the layout: " + ", ".join(r["row"] for r in rows)] if state["draft"] else [],
-        "versions": [{"version": "1.0.0", "status": "READY_FOR_REVIEW", "state": "DEV",
+        "versions": [{"version": "1.0.0", "status": "APPROVED_FOR_UAT", "state": "DEV",
                       "created_at": "2026-10-19T21:00:00Z", "created_by": "dev.user", "title": "CEM QoE Overview",
                       "git_commit": "a1b2c3d", "package": "cem-qoe-1.0.0.ssbi", "validation": {"passed": True}}],
         "visualizations": [
@@ -374,6 +374,14 @@ class Handler(BaseHTTPRequestHandler):
                  "owner": "CEM", "documentation": f"{m} as the registry defines it",
                  "dimensions": ["region", "rat"]}
                 for m in ("cem.qoe_score", "cem.active_users", "cem.degraded_users", "cem.degraded_rate")]})
+        if path == "/targets" or path.endswith("/targets"):
+            return self._json(200, {"result": [
+                {"name": "run", "url": "https://bi.example.com", "database": "SharpSight BI",
+                 "from_studio": True},
+                {"name": "prod", "url": "https://bi-prod.example.com", "database": "SharpSight BI",
+                 "from_studio": False}]})
+        if path.endswith("/deployments"):
+            return self._json(200, {"result": state.get("deployments", [])})
         if path.endswith("/report"):
             return self._json(200, {"result": {
                 "version": "1.0.0", "status": "READY_FOR_REVIEW", "created_at": "2026-10-19T21:00:00Z",
@@ -422,6 +430,43 @@ class Handler(BaseHTTPRequestHandler):
                      "subject": "kpi_4 (big_number)", "detail": "cem.degraded_rate is not certified"}]}})
         if path.endswith("/pictures"):
             return self._json(200, {"result": payload()["pictures"]})
+        if "/deploy" in path:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            done = {"id": "dep1", "project_id": "cem-qoe", "version": "1.0.0",
+                    "target": body.get("target"), "by": "dev.user", "started_at": "2026-10-20T10:00:00Z",
+                    "ended_at": "2026-10-20T10:00:31Z", "status": "succeeded",
+                    "steps": [{"key": key, "title": title, "status": "done", "detail": detail}
+                              for key, title, detail in [
+                                  ("read_package", "Read the package and check its checksum",
+                                   "cem-qoe-1.0.0.ssbi, 41 files"),
+                                  ("check_compatibility", "Check it against the target's versions",
+                                   "built against 6.1.0, run runs 6.1.0"),
+                                  ("ensure_connection", "Point the governed connection at this environment",
+                                   "SharpSight BI (#7)"),
+                                  ("import_assets", "Import the dashboard, its charts and its datasets",
+                                   "the export was accepted"),
+                                  ("repoint_connection", "Repoint the imported connection", "points at run"),
+                                  ("apply_access", "Grant the audience and the row-level rules",
+                                   "3 roles, 1 row-level rule"),
+                                  ("verify_assets", "Read back what arrived", "7 charts, 3 roles"),
+                                  ("verify_data", "Ask every chart for its data", "7 charts answered"),
+                                  ("record", "Record the deployment", "")]],
+                    "dashboard": {"id": 42, "slug": "cem-qoe",
+                                  "url": "https://bi.example.com/superset/dashboard/cem-qoe/"},
+                    # the real engine adds one line per chart (deploy.py, step 8): an import answers 200
+                    # for a dashboard whose charts cannot draw, so each one is asked for its data
+                    "checks": [{"check": "charts arrived", "status": "pass", "detail": "7 of 7"},
+                               {"check": "audience as SharpSight decided", "status": "pass",
+                                "detail": "sharpsight_bi_developer, sharpsight_cem_analyst"}]
+                               + [{"check": f"{title} returns data", "status": "pass", "detail": rows}
+                                  for title, rows in [("QoE Score", "1 row"), ("Active users", "1 row"),
+                                                      ("Degraded users", "1 row"), ("Degraded rate", "1 row"),
+                                                      ("QoE Score, daily trend", "31 rows"),
+                                                      ("QoE Score, distribution", "8 rows"),
+                                                      ("Top regions by QoE", "5 rows")]],
+                    "error": None}
+            state.setdefault("deployments", []).append(done)
+            return self._json(200, {"result": done})
         if path.endswith("/draft/commit"):
             return self._json(202, {"result": {"run_id": "preview00", "status": "running"}})
         if path.endswith("/alter"):
@@ -789,6 +834,30 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("and the canvas can be seen at a phone's width",
            page.eval_on_selector(".ss-frame", "n => n.style.width") == "420px")
     page.click('.ss-devices button[aria-label="Fit to the pane"]')
+
+    # ── deploying to another Superset (§55) ────────────────────────────────────────────────────────────────
+    page.click(".ss-bar >> text=Deploy")
+    page.wait_for_selector(".ss-table")
+    expect("the Deployments tab says where a version may go, and what is the command line's",
+           "run" in page.inner_text(".ss-drawer") and "command line only" in page.inner_text(".ss-drawer"))
+    # (what may NOT be deployed — a version nobody signed off, a package that changed, a chart that cannot
+    #  draw — is held by services/ai-bi/tests/test_deploy.py, against the engine's own refusals)
+    page.click('.ss-drawer button:has-text("Deploy 1.0.0")')
+    page.wait_for_selector(".ss-modal")
+    expect("asking for it opens a sheet that says what a deployment does, in order",
+           page.locator(".ss-modal .ss-steps li").count() == 5
+           and "repointed" in page.inner_text(".ss-modal"))
+    page.fill(".ss-modal .ss-body input", "checked the QoE trend against the warehouse")
+    page.click('.ss-modal button:has-text("Deploy to run")')
+    page.wait_for_selector(".ss-panel")
+    expect("and a deployment is shown step by step, with what was read back afterwards",
+           "Ask every chart for its data" in page.inner_text(".ss-drawer")
+           and "charts arrived" in page.inner_text(".ss-drawer"))
+    # …and all of it is READ, not scrolled inside a window of its own: the last steps are the ones that say
+    # whether it worked, and they were hidden by the cap a validation's hundreds of checks need
+    expect("and none of its steps is hidden inside a scrolling box",
+           page.eval_on_selector(".ss-panel .ss-checks",
+                                 "n => n.scrollHeight <= n.clientHeight + 1"))
 
     # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
     if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',

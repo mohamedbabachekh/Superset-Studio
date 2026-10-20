@@ -86,6 +86,16 @@
 .ss-panel { border: 1px solid var(--ss-line); border-radius: var(--ss-radius-sm); padding: 10px 12px;
   margin-bottom: 10px; }
 .ss-panel h4 { font-size: 13px; margin-bottom: 6px; }
+.ss-steps { margin: 2px 0 12px 0; padding: 0; list-style: none; counter-reset: ss-step; }
+.ss-steps li { counter-increment: ss-step; position: relative; padding: 3px 0 3px 26px; font-size: 12px;
+  color: var(--ss-muted); line-height: 1.5; }
+.ss-steps li::before { content: counter(ss-step); position: absolute; left: 0; top: 4px; width: 18px;
+  height: 18px; border-radius: 50%; background: var(--ss-primary-wash); color: var(--ss-primary-dark);
+  border: 1px solid var(--ss-primary-line); font-size: 10px; font-weight: 700; display: grid;
+  place-items: center; }
+.ss-readback { margin-top: 8px; border-top: 1px dashed var(--ss-line); padding-top: 8px; }
+.ss-readback h5 { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ss-faint); margin-bottom: 4px; }
 
 /* ── how a chart is drawn: a row of kinds ────────────────────────────────────────────────────────────── */
 .ss-kindrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
@@ -360,6 +370,10 @@
 .ss-checks { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; font-size: 12px; }
 .ss-checks li { display: grid; grid-template-columns: 56px 1fr; gap: 10px; padding: 5px 0;
   border-bottom: 1px dashed var(--ss-line); }
+/* A deployment's nine steps are not a list to scroll inside a 280px window: they are what somebody reads to
+ * see that it worked, and the last three (what arrived, whether every chart draws, the record) are the ones
+ * that matter most. A validation's hundreds of checks keep the cap; a deployment's panel does not. */
+.ss-panel .ss-checks { max-height: none; overflow: visible; }
 .ss-checks b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
 .ss-checks li[data-status="pass"] b { color: var(--ss-success); }
 .ss-checks li[data-status="warn"] b { color: var(--ss-warning); }

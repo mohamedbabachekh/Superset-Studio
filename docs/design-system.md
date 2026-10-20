@@ -52,7 +52,7 @@ there is no component framework ([ADR 0014](adr/0014-no-build-step-and-no-second
 | **Builder** | the chart-kind row (`.ss-kindrow`), the device widths (`.ss-devices`), the component shelf (`.ss-cards`, `.ss-kind`, an `icon()` per chart kind, draggable), the canvas (`.ss-canvas`, `.ss-row`) in its zoomable frame (`.ss-frame`, `.ss-viewport`), a chart tile (`.ss-tile`, `.ss-shot`) with its selection chrome (`.ss-label`, `.ss-handles`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), both inspectors (`.ss-field`, `.ss-two`) | `view.js` |
 | **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`) | `view.js::copilot` |
 | **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the chart inspector's *Governance*, the dashboard inspector's *Security* (who may open it, and the row-level rules), the drawer |
-| **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action | the bar, the drawer's *Releases* |
+| **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action, the deployment sheet (`.ss-steps` — what a deployment will do, numbered, in order) and the deployment record (`.ss-panel` with its steps and `.ss-readback`, what the target answered afterwards) | the bar, the drawer's *Releases* and *Deployments* |
 
 Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()`, `tag()`, `toast()`,
 `modal()`, `palette()`, `shortcuts()` — all of `ui.js`, 174 lines.

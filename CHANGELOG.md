@@ -90,10 +90,41 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   monolith with named domains, a backend for the frontend, an adapter at every boundary, a control plane and
   an execution plane) — and the brief read section by section, each marked built, partly or not here, with
   its reason ([docs/spec-v3-coverage.md](docs/spec-v3-coverage.md)).
-- Proof: 212 engine tests, and `python studio/preview.py --check` driving the workspace in a browser against
-  a stand-in engine — thirty promises, no console error.
+- **A version is deployed to another Superset, and read back there.** `aibi/deploy.py`: the `.ssbi` package
+  that was validated — Superset's own export of the dashboard, taken when the version was committed — is
+  imported into a target, its governed connection **repointed** at that environment's warehouse (an import
+  keeps an existing URI, which is how a run environment quietly reads the development one), the audience and
+  the row-level rules SharpSight decided are granted, and then every chart is **asked for its data**, because
+  an import answers 200 for a dashboard whose charts cannot draw. Nine steps, each recorded, each shown in the
+  Studio's *Deployments* tab under the Deploy button, with what came back: « every chart arrived », « the
+  audience is the one SharpSight decided », and one line per chart. It deploys and it does not approve: a
+  version reaches a target already approved for that gate by somebody other than whoever asked for it, and an
+  unvalidated version, a changed package or a Superset outside the compatibility matrix is refused before
+  anything is imported ([ADR 0024](docs/adr/0024-a-deployment-carries-the-package-and-is-read-back.md)).
+  `bash ai-bi.sh targets` · `deploy <project> <version> --to <target> --gate UAT` · `deployments <project>`.
+  A target is five variables in the engine's own environment and is written down nowhere in this repository.
+  Asking for one opens a **sheet**, not a browser's confirm box: what is about to happen, numbered in the
+  order it happens, and a line for what you checked, which goes into the record.
+- **A run environment to try it on, on one machine.** `docker-compose.run-target.yaml` starts a **second
+  Superset** — its own metadata database, its own accounts, its own URL, and nothing of the kit's in it: no
+  SharpSight menu, no Studio, no seeded connection, so a deployment has to bring everything it needs.
+  `bash ai-bi.sh run-target` (and `--stop` / `--erase`).
+- **The whole solution, tried end to end.** `bash ai-bi.sh e2e` (`scripts/e2e.sh`) walks it on a running kit
+  and says, promise by promise, what held: the governed products are listed · a request becomes a project,
+  a run and a first version · the Studio draws from one call, keeps a layout as a draft, refuses a save
+  against an older one, validates without touching Superset, and answers all three roads (words, the
+  gallery's form, the inspector's controls) with proposals that leave the draft alone · a title and a layout
+  changed in the Studio become the next version through the pipeline, with the older one still there · a
+  reviewer approves UAT, whoever asked cannot approve PROD, and the audit chain is intact record by record ·
+  the version exports as one file carrying Superset's own export, and its checksum is the one recorded · the
+  approved version deploys, every step done, every chart read back, and the link it leaves behind answers ·
+  Superset's token opens the Studio's routes and nothing of the audit trail or the approvals · and both
+  suites run. One broken promise does not hide the twenty behind it, and the exit code is the tally.
+- Proof: 231 engine tests (2 skipped), and `python studio/preview.py --check` driving the workspace in a browser against
+  a stand-in engine — sixty-nine promises, no console error.
 - Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in
-  [docs/superset-studio.md](docs/superset-studio.md) §11.
+  [docs/superset-studio.md](docs/superset-studio.md) §11 — and `bash ai-bi.sh e2e` is now the one command
+  that answers it on a machine that has one.
 
 ## Not in a bundle yet — the AI BI engine (2026-10-03)
 

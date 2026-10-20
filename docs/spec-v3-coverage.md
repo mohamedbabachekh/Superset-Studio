@@ -97,7 +97,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 |---|---|---|
 | §46 | The product decision, the feasibility table | **built** — the staged reading is [`superset-studio.md`](superset-studio.md) |
 | §47.1 | Three panes and a drawer | **built** |
-| §47.2 | The command bar: environment, save state, undo/redo, preview, validate, commit, export, deploy | **built, less deploy** — including **Export .ssbi**, the immutable package of the latest version. Deploying is the command line's, because PROD needs a second person ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). Draft / version / package / deployment are never conflated |
+| §47.2 | The command bar: environment, save state, undo/redo, preview, validate, commit, export, deploy | **built** — including **Export .ssbi**, the immutable package of the latest version, and **Deploy**, which takes an already-approved version to another Superset and shows what was read back there ([ADR 0024](adr/0024-a-deployment-carries-the-package-and-is-read-back.md)). It deploys and never approves: PROD still needs a second person on the command line ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). Draft / version / package / deployment are never conflated |
 | §47.3 | The project and asset explorer | **built** — outline, free slots, parked charts, a **component library** of the approved chart kinds (each saying where it may go and whether it is installed), governed datasets and metrics, search. A kind **drags onto a row**, which opens the gallery on that section's free slot: what is placed is still a proposal, because a chart without a governed metric is not a chart |
 | §47.4 | The canvas | **built, less one** — grid, drag to another row, resize, reorder rows, row heights, selection, loading and empty states, keyboard equivalents for every mouse move, undo/redo, autosave, « add here » on a free slot, **zoom**, **the viewport widths the template declares**, and **preview with real data**: a *Live* mode that frames Superset's own standalone dashboard inside the workspace and draws the Studio's chrome over it ([ADR 0022](adr/0022-two-canvases-compose-and-live.md)). Not built: duplicate. Alignment guides are moot: a twelfth is a twelfth, and every drop snaps |
 | §47.1 | Small screens: collapse the panes into drawers rather than squeezing the canvas | **built** — under 1240px the side panes are drawers over the canvas, closed to begin with |
@@ -107,7 +107,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §48.1 | Create a dashboard from a prompt | **built** — on the command line (`ai-bi.sh request`), twenty-two steps. Not from the Studio: a project starts with a request |
 | §48.2 | Modify an existing dashboard with AI | **built** — select, ask, read the diff, apply or reject, validate, commit |
 | §48.3 | Manual chart creation | **built** — the gallery: a free slot, a governed metric, a type the slot accepts, and a proposal |
-| §48.4 | Deploy to production | **partly** — commit, review, package, approval by a second person, the record and the rollback version are built; importing into another environment is the deployment service's, which this kit does not run |
+| §48.4 | Deploy to production | **built** — commit, review, package, approval by a second person, the record and the rollback version, and the deployment itself: the package imported into another Superset, its connection repointed, the audience granted, and every chart asked for its data before it is called deployed (`aibi/deploy.py`, `bash ai-bi.sh deploy`, the Studio's Deployments tab). A target is named in the engine's environment and nowhere here; `docker-compose.run-target.yaml` starts one on this machine to try it |
 | §49 | The logical architecture and the responsibilities | **built** |
 | §50.1 | The canonical draft specification | **built**, with one deliberate difference: the layout is rows and widths, not `x, y, w, h`, because that is what Superset stores ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)) |
 | §50.2 | Three state types | **built** — draft, Superset assets, release manifest |
@@ -119,7 +119,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §53 | Validation levels 1–6 | **built** — Level 1 in the Studio without touching Superset; 2 to 6 in the pipeline, shown in « Last run » |
 | §54 | Collaboration | **partly** — ownership, roles, review, version history, changed assets, audit. **No comments** on a dashboard or a component, and no real-time editing (§54 itself says later) |
 | — | *Beyond the brief*: a command palette (⌘K), a dark theme, a design system written down ([`design-system.md`](design-system.md)), a navigation rail ([ADR 0023](adr/0023-a-rail-of-short-cuts-inside-the-studio.md)), the areas Design / Data / Filters / Interactions, and device widths | **built** — from the design direction of 2026-10-19 and 2026-10-20 |
-| §55 | The `.ssbi` package and promotion | **built** — with environment mapping left to the deployment service |
+| §55 | The `.ssbi` package and promotion | **built** — including the environment mapping: the governed connection is created in the target under the name the package expects and repointed at that environment's warehouse after the import, because an import keeps an existing URI (`docs/lessons.md`, [ADR 0024](adr/0024-a-deployment-carries-the-package-and-is-read-back.md)) |
 | §56 | API and service contracts | **partly** — the engine's API covers projects, drafts, proposals, validation, commits, packages, deployments-as-gates. The route names are the engine's own, not the brief's `/api/bi/...` |
 | §57 | The implementation plan, phases 0–6 | **phases 0–4 built** — see the roadmap in [`superset-studio.md` §10](superset-studio.md). Phase 5 (a model) waits on a decision; phase 6 (comments, real-time) is not started |
 | §58 | The first vertical slice | **13 of 15 steps** — the two refused are named: a site map needs tiles from outside, and UAT is not a second Superset |
@@ -135,7 +135,10 @@ measurement, or work with a known shape.
 
 **Decided against, for a reason that would have to change first**
 
-1. **A second Superset for UAT and PROD** — one kit, one engine ([ADR 0017](adr/0017-one-superset-so-promotion-is-a-gate.md)).
+1. **A second Superset as the kit's own UAT and PROD** — one kit, one engine: UAT and PROD are gates on a
+   version, not places ([ADR 0017](adr/0017-one-superset-so-promotion-is-a-gate.md)). A second Superset
+   *elsewhere* is a deployment **target**, and that is built ([ADR 0024](adr/0024-a-deployment-carries-the-package-and-is-read-back.md)):
+   `docker-compose.run-target.yaml` starts one on this machine to try the whole road.
 2. **A data preview in the Studio** — a developer's Superset account has no database in SQL Lab ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)).
 3. **Promotion from the page** — PROD needs a second person, and that cannot be enforced if a page can do it.
 4. **Free `x, y` coordinates on the canvas** — Superset stores none ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)).

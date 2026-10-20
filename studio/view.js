@@ -226,6 +226,8 @@ function bar(commands) {
       button('Validate', commands.validate, { title: 'Check the draft against the registry and the template (v)' }),
       button('Save draft', act.save, { disabled: !state.dirty || !act.editable(),
         title: state.dirty ? 'Save now (⌘S)' : 'Nothing has changed since the last save' }),
+      button('Deploy', () => { state.tab = 'deployments'; commands.deployments(); },
+        { title: 'Take a version to another Superset — the run environment' }),
       button('Export .ssbi', commands.export_, {
         disabled: !(state.payload.versions || []).some(version => version.package),
         title: (state.payload.versions || []).some(version => version.package)
@@ -954,11 +956,12 @@ function drawer(commands) {
     ['changes', 'Changes', (state.payload.diff || []).length, null],
     ['report', 'Last run', null, null],
     ['releases', 'Releases', (state.payload.versions || []).length, null],
+    ['deployments', 'Deployments', (state.deployments || []).length || null, null],
     ['about', 'What this is', null, null],
   ];
   const body = node('div', { class: 'ss-body' });
   ({ validation: validationTab, changes: changesTab, report: reportTab, releases: releasesTab,
-    about: aboutTab }[state.tab] || validationTab)(body, commands);
+    deployments: deploymentsTab, about: aboutTab }[state.tab] || validationTab)(body, commands);
   return node('section', { class: 'ss-card ss-drawer' },
     node('header', {}, node('div', { class: 'ss-tabs' }, tabs.map(([key, label, count, kind]) =>
       node('button', { type: 'button', 'aria-selected': state.tab === key,
@@ -1070,6 +1073,77 @@ function releasesTab(body) {
     + 'could do it. bash ai-bi.sh approve <project> UAT.' }));
 }
 
+/* Where a version has been, and where it may go. Deploying is not deciding: the engine refuses a version
+ * nobody else approved for that gate, which is why this is a button and the approval is elsewhere. */
+function deploymentsTab(body, commands) {
+  if (state.targets === null) {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'A deployment takes the package that was validated to another Superset — the run environment — '
+      + 'imports it, repoints its connection at that environment\u2019s warehouse, grants the audience '
+      + 'SharpSight decided, and then reads it back: every chart is asked for its data before it is called '
+      + 'deployed.' }));
+    body.appendChild(node('div', { style: 'margin-top: 10px' },
+      button('Where can this go?', commands.deployments)));
+    return;
+  }
+  const versions = (state.payload.versions || []).filter(version => version.package);
+  const latest = versions[versions.length - 1];
+  const gate = { APPROVED_FOR_UAT: 'UAT', UAT: 'UAT', APPROVED_FOR_PROD: 'PROD', PROD: 'PROD' }[
+    latest && latest.status];
+  if (!state.targets.length) {
+    body.appendChild(node('div', { class: 'ss-callout', text:
+      'No target is configured. A target is a Superset somewhere else, named in the engine\u2019s own '
+      + 'environment (AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI) and written down nowhere '
+      + 'in the repository.' }));
+  } else {
+    body.appendChild(node('table', { class: 'ss-table' },
+      node('tr', {}, ['Target', 'Where', 'Its connection', ''].map(head => node('th', { text: head }))),
+      state.targets.map(target => node('tr', {},
+        node('td', { text: target.name }), node('td', { text: target.url }),
+        node('td', { text: target.database }),
+        node('td', {}, target.from_studio
+          ? button(`Deploy ${latest ? latest.version : ''} →`,
+            () => deployment({ version: latest.version, target: target.name, gate,
+              database: target.database }, commands),
+            { 'data-weight': 'primary', disabled: !latest || !gate || state.deploying,
+              title: !latest ? 'no version has a package yet'
+                : !gate ? `${latest.version} is ${latest.status}: a deployment carries a version already `
+                  + 'approved for its gate, by someone other than whoever asked for it'
+                  : `Take ${latest.version} to ${target.name} as ${gate}` })
+          : node('span', { class: 'ss-faint', text: 'the command line only' }))))));
+  }
+  const done = state.deployments || [];
+  body.appendChild(node('h4', { style: 'margin-top: 14px', text: 'What has been deployed' }));
+  if (!done.length) {
+    body.appendChild(node('p', { class: 'ss-note', text: 'nothing yet' }));
+  }
+  done.slice().reverse().forEach(one => body.appendChild(node('div', { class: 'ss-panel' },
+    node('h4', {}, `${one.version} → ${one.target}`,
+      node('span', { class: 'ss-tag', 'data-kind': one.status === 'succeeded' ? 'good' : 'bad',
+        style: 'margin-left: 8px', text: one.status })),
+    node('p', { class: 'ss-faint', text: `by ${one.by}, ${new Date(one.started_at).toLocaleString()}` }),
+    one.error ? node('div', { class: 'ss-callout', 'data-kind': 'bad', text: one.error }) : null,
+    node('ul', { class: 'ss-checks' }, (one.steps || []).map(step =>
+      node('li', { 'data-status': step.status === 'done' ? 'pass'
+        : step.status === 'failed' ? 'fail' : 'warn' },
+      node('b', { text: step.status }),
+      node('span', {}, node('span', { text: step.title }),
+        step.detail ? node('div', { class: 'ss-note', text: step.detail }) : null)))),
+    (one.checks || []).length
+      ? node('div', { class: 'ss-readback' },
+        node('h5', { text: 'What was read back afterwards' }),
+        node('ul', { class: 'ss-checks' }, one.checks.map(check =>
+          node('li', { 'data-status': check.status },
+            node('b', { text: check.status }),
+            node('span', {}, node('span', { text: check.check }),
+              check.detail ? node('span', { class: 'ss-faint', text: ` \u2014 ${check.detail}` })
+                : null)))))
+      : null,
+    one.dashboard && one.dashboard.url
+      ? node('p', { style: 'margin-top: 8px' }, node('a', { href: one.dashboard.url, target: '_blank',
+        rel: 'noopener', text: one.dashboard.url })) : null)));
+}
+
 function aboutTab(body) {
   body.appendChild(node('div', { class: 'ss-note' },
     node('p', {}, 'This workspace edits a SPECIFICATION, not a dashboard. Superset draws every chart and '
@@ -1081,6 +1155,40 @@ function aboutTab(body) {
       + 'dashboard.'),
     node('p', {}, 'Nothing here approves and nothing here promotes. A commit goes through the engine’s '
       + 'ten quality gates like every other commit.')));
+}
+
+/* ── deploying (§55): a sheet, because a native confirm box says nothing about what is going to happen ────
+ * It is not a decision — the engine refuses a version nobody else approved for this gate before anything is
+ * sent. What the sheet is for is saying WHAT a deployment does, in the order it does it, and taking the one
+ * thing only the person can give: a note of what was checked, which goes into the record.
+ */
+export function deployment({ version, target, gate, database }, commands) {
+  const note = node('input', { placeholder: 'what was checked, in a sentence (optional)', maxlength: '500' });
+  modal({
+    title: `Deploy ${version} to ${target}`,
+    body: node('div', {},
+      node('p', { class: 'ss-note', text:
+        `What goes is the package version ${version} was cut as — Superset\u2019s own export of the `
+        + 'dashboard, taken when it was committed and checked against its checksum. Nothing is generated '
+        + 'again.' }),
+      node('ul', { class: 'ss-steps' }, [
+        `the governed connection in ${target}, called \u00ab ${database || 'the name the package expects'} \u00bb,`
+          + ' pointed at that environment\u2019s warehouse',
+        'the dashboard, its charts and its datasets, imported',
+        'the connection repointed \u2014 an import keeps the one it finds',
+        'the audience and the row-level rules SharpSight decided, granted there',
+        'and then every chart asked for its data, because an import answers 200 for a dashboard that cannot'
+          + ' draw',
+      ].map(says => node('li', { text: says }))),
+      field('Your note', note),
+      node('p', { class: 'ss-faint', text:
+        `It goes as ${gate}. A version is only carried to a gate somebody other than whoever asked for it `
+        + 'has already approved it for; this sheet cannot approve anything.' })),
+    footer: [button('Cancel', close), button(`Deploy to ${target}`, async () => {
+      close();
+      await commands.deploy(version, target, gate, note.value.trim());
+    }, { 'data-weight': 'primary' })],
+  });
 }
 
 /* ── the gallery (§48.3): the manual path, which is not a prompt ─────────────────────────────────────────── */

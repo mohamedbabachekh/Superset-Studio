@@ -16,6 +16,12 @@
 #   bash ai-bi.sh compatibility                            the compatibility matrix, beside what is running
 #   bash ai-bi.sh where                                    where to look: everything is shown in Superset
 #   bash ai-bi.sh test                                     the engine's own tests, inside its container
+#   bash ai-bi.sh e2e [--only n]                           THE WHOLE SOLUTION, TRIED: a project generated, a
+#                                                          draft saved, a version committed, approved,
+#                                                          exported and — with a target — deployed and read
+#                                                          back (scripts/e2e.sh)
+#   bash ai-bi.sh run-target [--stop|--erase]              a SECOND Superset on this machine, as the « run »
+#                                                          environment a version is deployed to
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
 #   bash ai-bi.sh --erase      stop the engine and delete ITS two volumes (the kit's are untouched)
 #
@@ -32,6 +38,9 @@ PROJECT=sharpsight-superset-devkit
 ENGINE=(aibi-db-init dbt-runner aibi-superset-init sharpsight-ai-bi)
 
 compose() { docker compose -p "$PROJECT" -f docker-compose.yaml -f docker-compose.ai-bi.yaml "$@"; }
+# the same, with the « run » environment added — the target a version is deployed TO
+compose_run() { docker compose -p "$PROJECT" -f docker-compose.yaml -f docker-compose.ai-bi.yaml \
+                               -f docker-compose.run-target.yaml "$@"; }
 # A container path inside `sh -c`, so Git Bash cannot rewrite it on the way (docs/lessons.md).
 cli() { compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.cli "$@"' cli "$@"; }
 
@@ -63,6 +72,27 @@ case "${1:-}" in
   audit)    if [ -n "${2:-}" ]; then cli audit --user lead.reviewer --project "$2"; else cli audit --user lead.reviewer; fi; exit $? ;;
   discard)  cli discard "${2:?usage: ai-bi.sh discard <project>}"; exit $? ;;
   people)   cli people --user release.manager; exit $? ;;
+  targets)  cli targets; exit $? ;;
+  deployments) cli deployments "${2:?usage: ai-bi.sh deployments <project>}"; exit $? ;;
+  deploy)
+    # Taking a version to another Superset — the « run » environment. What is deployed is the package that
+    # was validated, and only a version someone OTHER than whoever asked for it has already approved for
+    # that gate. Where the targets come from: AIBI_TARGET_<NAME>_URL and the rest, in this service's
+    # environment (services/ai-bi/aibi/config.py).
+    project="${2:?usage: ai-bi.sh deploy <project> <version> --to <target> [--gate UAT|PROD] [comment]}"
+    version="${3:?the version to deploy, e.g. 1.0.0}"
+    shift 3
+    to=""; gate="UAT"; comment=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --to) to="${2:?--to needs a target}"; shift 2 ;;
+        --gate) gate="${2:?--gate needs UAT or PROD}"; shift 2 ;;
+        *) comment="$1"; shift ;;
+      esac
+    done
+    [ -n "$to" ] || { echo "ai-bi.sh deploy needs --to <target>; ai-bi.sh targets lists them" >&2; exit 2; }
+    cli deploy "$project" "$version" --to "$to" --gate "$gate" --comment "$comment" --user release.manager
+    exit $? ;;
   compatibility) cli compatibility; exit $? ;;
   where)
     bind="$(grep -E '^DEVKIT_BIND=' .env 2>/dev/null | cut -d= -f2 || true)"
@@ -86,6 +116,43 @@ case "${1:-}" in
   check-adapter)
     compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.adapter_check "$@"' check "${2:?usage: ai-bi.sh check-adapter <project>}"; exit $? ;;
   test)     compose exec -T sharpsight-ai-bi sh -c 'cd /app && python -m pytest'; exit $? ;;
+  e2e)      shift; exec bash scripts/e2e.sh "$@" ;;
+  run-target)
+    # A SECOND SUPERSET, here, as the environment a version is deployed to — so that « create a dashboard
+    # and deploy it to the run platform » can be tried on one laptop. It is a stand-in for a real target,
+    # which is somebody else's server named in the engine's own environment and written down nowhere here.
+    command -v docker >/dev/null || { echo "Docker is not installed or not on PATH." >&2; exit 1; }
+    [ -f .env ] || { echo "the kit is not installed yet: run  bash install.sh  first." >&2; exit 1; }
+    case "${2:-}" in
+      --stop)
+        compose_run stop run-superset >/dev/null 2>&1 || true
+        compose_run rm -f run-superset run-superset-init run-db-init >/dev/null 2>&1 || true
+        echo "the run environment is stopped — what was deployed to it is kept"; exit 0 ;;
+      --erase)
+        compose_run stop run-superset >/dev/null 2>&1 || true
+        compose_run rm -f run-superset run-superset-init run-db-init >/dev/null 2>&1 || true
+        docker volume rm "${PROJECT}_run-home" >/dev/null 2>&1 || true
+        compose exec -T devkit-db psql -U devkit -d devkit -q -c 'DROP DATABASE IF EXISTS runbi' >/dev/null 2>&1 || true
+        echo "erased — the run environment's own Superset home and metadata database, and nothing of the kit's"
+        exit 0 ;;
+    esac
+    # its two secrets, written into .env ONCE, hexadecimal like the engine's (compose interpolates `$`)
+    for name in RUN_SECRET_KEY RUN_ADMIN_PASSWORD; do
+      grep -qE "^${name}=.+" .env && continue
+      printf '%s=%s\n' "$name" "$(openssl rand -hex 24)" >> .env
+      echo "$name was written into .env"
+    done
+    echo "starting the run environment — a Superset of its own, with nothing of the kit's in it…"
+    compose_run up -d run-superset sharpsight-ai-bi
+    bind="$(grep -E '^DEVKIT_BIND=' .env | cut -d= -f2 || true)"
+    port="$(grep -E '^RUN_PORT=' .env | cut -d= -f2 || true)"
+    user="$(grep -E '^RUN_ADMIN_USER=' .env | cut -d= -f2 || true)"
+    echo "the run environment:  http://${bind:-127.0.0.1}:${port:-3004}   (sign in as ${user:-run-admin}; its"
+    echo "password is RUN_ADMIN_PASSWORD in .env). It holds no connection and no dashboard until something is"
+    echo "deployed to it:  bash ai-bi.sh deploy <project> <version> --to run --gate UAT"
+    echo "The engine knows it as the target « run » for as long as it is started this way — plain"
+    echo "bash ai-bi.sh starts the engine without it. Everything at once:  bash ai-bi.sh e2e"
+    exit 0 ;;
   ""|start) ;;
   *) echo "unknown: $1 — see the top of this file" >&2; exit 2 ;;
 esac

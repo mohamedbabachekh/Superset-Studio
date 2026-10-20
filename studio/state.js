@@ -22,6 +22,9 @@ export const state = {
   lineage: {},
   changes: null,
   run: null,
+  targets: null,            // where a version may be deployed — read when the drawer asks
+  deployments: null,
+  deploying: false,
   datasets: [],
   metrics: [],
   search: '',

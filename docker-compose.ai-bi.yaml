@@ -141,6 +141,8 @@ services:
       # …and that the bundle Superset loads is the one these sources build
       - ./superset-extension:/app/superset-extension:ro
       - ./docker-compose.ai-bi.yaml:/app/docker-compose.ai-bi.yaml:ro
+      # …and that the « run » environment hands the engine the variables it actually reads
+      - ./docker-compose.run-target.yaml:/app/docker-compose.run-target.yaml:ro
       # its own state: the two git repositories, the AI's dbt workspaces, the audit log, the packages
       - aibi-state:/var/lib/ai-bi
       # a .ssbi package lands beside the dashboards you export by hand
@@ -183,7 +185,7 @@ services:
       SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
       # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
-      SHARPSIGHT_EXTENSION_SHA256: "0d073e1622af13ad39954eaeddd0880e68761773efdfbd4aea5738947efb26e2"
+      SHARPSIGHT_EXTENSION_SHA256: "6bd8afda661707a095e566df62d5704d69bb51c906e82b887de24e379807e928"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
       # the Studio's own stylesheet and script, read as they are in the repository: no build step, no Node
       SHARPSIGHT_STUDIO_DIR: /app/sharpsight/studio

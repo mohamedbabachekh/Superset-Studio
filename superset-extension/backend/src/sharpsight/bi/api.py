@@ -39,7 +39,8 @@ class SharpSightBiApi(RestApi):
                               "templates": "read", "check_draft": "read", "picture": "read",
                               "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
                               "pictures": "write", "propose": "write", "compose": "write",
-                              "report": "read", "lineage": "read", "package": "read", "alter": "write"}
+                              "report": "read", "lineage": "read", "package": "read", "alter": "write",
+                              "targets": "read", "deployments": "read", "deploy": "write"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
     # own @api for extensions does not tell it (its own APIs do, through a mixin an extension does not get).
@@ -472,3 +473,62 @@ class SharpSightBiApi(RestApi):
         body = request.get_json(silent=True) or {}
         wanted = {key: body.get(key) for key in ("slot", "type", "metric", "dimension", "dataset")}
         return self._engine("POST", f"/projects/{project_id}/alter", json=wanted)
+
+    @expose("/targets", methods=("GET",))
+    @protect()
+    @safe
+    def targets(self) -> Response:
+        """Where a version may be deployed from here: a Superset somewhere else, named in the engine's
+        environment. Nothing about a target is written in this extension.
+        ---
+        get:
+          responses:
+            200:
+              description: The targets
+        """
+        return self._engine("GET", "/targets")
+
+    @expose("/projects/<project_id>/deployments", methods=("GET",))
+    @protect()
+    @safe
+    def deployments(self, project_id: str) -> Response:
+        """What went where, when, by whom, and what was read back afterwards.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The deployments
+        """
+        if not _NAME.match(project_id):
+            return self.response(400, message="that is not a project's name")
+        return self._engine("GET", f"/projects/{project_id}/deployments")
+
+    @expose("/projects/<project_id>/versions/<version>/deploy", methods=("POST",))
+    @protect()
+    @safe
+    def deploy(self, project_id: str, version: str) -> Response:
+        """Take a version to another Superset — one a second person has already signed off for that gate,
+        and not the person who asked for it. This carries out a decision made elsewhere; it makes none.
+        ---
+        post:
+          parameters:
+          - in: path
+            name: project_id
+            schema: {type: string}
+          - in: path
+            name: version
+            schema: {type: string}
+          responses:
+            200:
+              description: What the deployment did, step by step
+        """
+        if not _NAME.match(project_id) or not re.fullmatch(r"\d+(\.\d+){0,2}", version or ""):
+            return self.response(400, message="that is not a project and a version")
+        body = request.get_json(silent=True) or {}
+        wanted = {"target": str(body.get("target") or "")[:40], "gate": str(body.get("gate") or "UAT")[:8],
+                  "comment": str(body.get("comment") or "")[:500]}
+        return self._engine("POST", f"/projects/{project_id}/versions/{version}/deploy", json=wanted)
