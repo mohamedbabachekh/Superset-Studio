@@ -197,6 +197,10 @@ SUPERSET_MAY = frozenset({
     ("POST", "/projects/{project_id}/versions/{version}/deploy"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
+    # one governed dataset, for the Studio's data-modelling screen: its registry metadata and its COLUMNS —
+    # what each is called, its type, its role, its classification, whether this person may read it. Never a
+    # row of it: the engine can sample a dataset and the Studio is given no way to ask (ADR 0013)
+    ("GET", "/datasets/{dataset_id}"),
 })
 
 

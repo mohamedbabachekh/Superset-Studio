@@ -78,7 +78,8 @@ def test_the_bundle_is_laid_out_as_superset_reads_one():
                        # the copilot, the gallery, and what the last run found
                        ("/projects/<project_id>/propose", "POST"), ("/projects/<project_id>/compose", "POST"),
                        ("/projects/<project_id>/report", "GET"),
-                       ("/datasets/<dataset_id>/lineage", "GET"),
+                       # one dataset with its columns, and where it comes from: the modelling screen
+                       ("/datasets/<dataset_id>", "GET"), ("/datasets/<dataset_id>/lineage", "GET"),
                        ("/projects/<project_id>/versions/<version>/package", "GET"),
                        ("/projects/<project_id>/alter", "POST"),
                        # where a version may go, where it has been, and taking it there
@@ -104,6 +105,7 @@ def test_the_engine_answers_superset_s_token_for_what_a_developer_does_and_no_ot
     allowed = sorted(pair for pair in routes if superset_may(*pair))
     assert allowed == [("DELETE", "/projects/{project_id}/draft"),
                        ("GET", "/datasets"),
+                       ("GET", "/datasets/{dataset_id}"),
                        ("GET", "/datasets/{dataset_id}/lineage"),
                        ("GET", "/metrics"),
                        ("GET", "/projects"),

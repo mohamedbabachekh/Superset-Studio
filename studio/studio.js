@@ -35,13 +35,30 @@ const commands = {
   gallery: (slot, kind) => view.gallery(typeof slot === 'string' ? slot : null,
     typeof kind === 'string' ? kind : null, commands),
 
+  /** Go to one of the four screens, and ask for whatever that screen reads. */
+  screen(name, tab) {
+    state.screen = name;
+    if (tab && name === 'model') state.modelTab = tab;
+    if (tab && name === 'release') state.releaseTab = tab;
+    commands.redraw();
+    if (name === 'model') {
+      commands.openAsset(state.modelAsset
+        || (state.spec.components || []).map(one => one.dataset).find(Boolean)
+        || (state.datasets[0] || {}).id);
+    }
+    if (name === 'release' && state.targets === null && state.releaseTab === 'environments') {
+      commands.deployments();
+    }
+  },
+
   select(slot) {
     state.selected = slot;
     commands.redraw();
   },
 
   async validate() {
-    state.tab = 'validation';
+    state.screen = 'release';
+    state.releaseTab = 'validation';
     if (state.dirty) await act.save();
     try {
       state.validation = await api.check();
@@ -74,7 +91,8 @@ const commands = {
     try {
       const started = await api.commit(comment);
       state.run = { id: started.run_id, status: 'running', steps: [] };
-      state.tab = 'report';
+      state.screen = 'release';
+      state.releaseTab = 'releases';
       commands.redraw();
       watch(started.run_id);
     } catch (problem) {
@@ -162,7 +180,8 @@ const commands = {
     } finally {
       waiting.remove();
       state.deploying = false;
-      state.tab = 'deployments';
+      state.screen = 'release';
+      state.releaseTab = 'environments';
       commands.redraw();
     }
   },
@@ -223,9 +242,12 @@ const commands = {
       { where: 'View', label: 'The copilot', run: () => { state.copilot = !state.copilot;
         commands.redraw(); }, when: true },
       { where: 'View', label: 'Keyboard shortcuts', keys: '?', run: commands.help, when: true },
-      ...['validation', 'changes', 'report', 'releases', 'about'].map(tab => ({
-        where: 'Drawer', label: tab === 'about' ? 'What this workspace is' : `Show ${tab}`,
-        run: () => { state.tab = tab; commands.redraw(); }, when: true })),
+      ...[['design', 'Dashboard Builder'], ['ai', 'AI Assistant'], ['model', 'Data Modeling'],
+        ['release', 'Release & Deployment']].map(([screen, label]) => ({
+        where: 'Go to', label, run: () => commands.screen(screen), when: true })),
+      ...[['versions', 'Version History'], ['validation', 'Validation'], ['environments', 'Environments'],
+        ['releases', 'Releases']].map(([tab, label]) => ({
+        where: 'Release', label, run: () => commands.screen('release', tab), when: true })),
       ...act.rows().flatMap(row => row.slots.map(place => ({
         where: 'Chart', label: act.title(place.id), run: () => commands.select(place.id), when: true }))),
       ...free.map(slot => ({ where: 'Free slot', label: `Add a ${slot.purpose} on ${slot.slot}`,
@@ -234,9 +256,10 @@ const commands = {
     palette(entries.filter(entry => entry.when));
   },
 
-  export_() {
+  export_(wanted) {
     const versions = (state.payload.versions || []).filter(version => version.package);
-    const latest = versions[versions.length - 1];
+    const latest = (typeof wanted === 'string' && versions.find(one => one.version === wanted))
+      || versions[versions.length - 1];
     if (!latest) {
       toast('No version of this project has a package yet.', { kind: 'bad' });
       return;
@@ -258,6 +281,26 @@ const commands = {
     } catch (problem) {
       toast(problem.message, { kind: 'bad', seconds: 0 });
     }
+  },
+
+  /** Open a governed dataset on the Data Modeling screen: its columns, its dbt model, its tests. Neither
+   *  call reads a row of it — one is the registry's metadata, the other is dbt's own graph. */
+  async openAsset(dataset) {
+    if (!dataset) return;
+    state.screen = 'model';
+    state.modelAsset = dataset;
+    if (!['datasets', 'metrics', 'lineage', 'tests'].includes(state.modelTab)) state.modelTab = 'overview';
+    commands.redraw();
+    if (state.schema[dataset] === undefined) {
+      try {
+        state.schema[dataset] = await api.dataset(dataset);
+      } catch (problem) {
+        state.schema[dataset] = null;
+        toast(problem.message, { kind: 'bad' });
+      }
+      commands.redraw();
+    }
+    if (state.lineage[dataset] === undefined) await commands.lineage(dataset);
   },
 
   async lineage(dataset) {
@@ -320,6 +363,11 @@ shortcuts({
   Backspace: () => state.selected && act.park(state.selected),
   a: () => commands.gallery(),
   v: () => commands.validate(),
+  // the four screens, in the rail's own order
+  '1': () => commands.screen('design'),
+  '2': () => commands.screen('ai'),
+  '3': () => commands.screen('model'),
+  '4': () => commands.screen('release'),
   '/': () => { const box = document.getElementById('ss-search'); if (box) box.focus(); },
 });
 

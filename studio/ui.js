@@ -60,6 +60,27 @@ const PATHS = {
   desktop: 'M3 5h18v11H3zM8 20h8M12 16v4',
   tablet: 'M6 3h12v18H6zM11 18h2',
   mobile: 'M8 2h8v20H8zM11 19h2',
+  // the rail and the component library of the four screens
+  metrics: 'M4 20V10M10 20V4M16 20v-8M4 20h16',
+  modeling: 'M12 3l8 4-8 4-8-4zM4 12l8 4 8-4M4 17l8 4 8-4',
+  deployments: 'M12 3l7 4v6c0 4-3 7-7 8-4-1-7-4-7-8V7zM12 9v6M9 12l3-3 3 3',
+  settings: 'M12 9a3 3 0 100 6 3 3 0 000-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.5 6.5l1.5 1.5M16 16l1.5 1.5'
+    + 'M17.5 6.5L16 8M8 16l-1.5 1.5',
+  search: 'M11 4a7 7 0 100 14 7 7 0 000-14zM16 16l4 4',
+  bell: 'M12 4a5 5 0 00-5 5v4l-2 3h14l-2-3V9a5 5 0 00-5-5zM10 19a2 2 0 004 0',
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  back: 'M15 5l-7 7 7 7',
+  gauge: 'M4 17a8 8 0 1116 0M12 17l4-5',
+  progress: 'M3 10h18v4H3zM3 12h11',
+  date: 'M4 6h16v14H4zM4 10h16M9 4v4M15 4v4',
+  dropdown: 'M4 7h16v10H4zM9 11l3 3 3-3',
+  range: 'M4 12h16M8 9v6M16 9v6',
+  row: 'M4 6h16v5H4zM4 13h16v5H4z',
+  column: 'M5 5h5v14H5zM14 5h5v14h-5z',
+  container: 'M4 4h16v16H4zM8 8h8v8H8z',
+  text: 'M5 6h14M9 6v12M7 18h4M15 11h5M17 11v7M15 18h4',
+  image: 'M4 5h16v14H4zM8 11a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM4 16l5-4 4 3 3-2 4 3',
+  divider: 'M4 12h16M7 8h10M7 16h10',
 };
 
 export function icon(kind, attrs = {}) {
@@ -224,6 +245,7 @@ export const KEYS = [
   ['Backspace', 'take the selected chart off the dashboard'],
   ['a', 'add a chart'],
   ['v', 'validate'],
-  ['/', 'search the explorer'],
+  ['1 2 3 4', 'the builder · the assistant · the data · the releases'],
+  ['/', 'search'],
   ['Escape', 'deselect, or close this'],
 ];

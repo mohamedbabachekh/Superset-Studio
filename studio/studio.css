@@ -64,7 +64,18 @@
 .ss-rail { position: fixed; top: var(--ss-bar-h, 56px); left: 0; bottom: 0; width: 196px; z-index: 40;
   background: var(--ss-surface); border-right: 1px solid var(--ss-border); padding: 12px 10px;
   overflow-y: auto; display: grid; align-content: start; gap: 14px; }
+.ss-logo { display: flex; align-items: center; gap: 9px; padding: 2px 8px 10px; }
+.ss-logo-mark { width: 22px; height: 22px; color: var(--ss-primary); flex: none; }
+.ss-logo strong { display: block; font-size: 13px; line-height: 1.2; }
+.ss-logo-sub { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ss-faint); }
 .ss-rail-group { display: grid; gap: 1px; }
+/* the rail's screen switches are buttons, and must read as its links do */
+button.ss-rail-link { all: unset; display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: var(--ss-radius-sm); color: var(--ss-muted); font-size: 12px; cursor: pointer;
+  transition: background .12s, color .12s; }
+button.ss-rail-link:hover { background: var(--ss-sunken); color: var(--ss-text); }
+button.ss-rail-link[aria-current="page"] { background: var(--ss-primary-wash); color: var(--ss-primary-dark);
+  font-weight: 600; }
 .ss-rail-head { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   color: var(--ss-faint); padding: 0 8px 4px; }
 .ss-rail-link { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: var(--ss-radius-sm);
@@ -76,8 +87,10 @@
 .ss-rail-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── the areas of the workspace ──────────────────────────────────────────────────────────────────────── */
-.ss-areas { display: flex; gap: 2px; padding: 8px 20px 0; background: var(--ss-surface);
-  border-bottom: 1px solid var(--ss-border); }
+.ss-areas { display: flex; gap: 2px; padding: 8px 20px; background: var(--ss-surface);
+  border-bottom: 1px solid var(--ss-border); align-items: center; flex-wrap: wrap; }
+.ss-areas > .ss-group, .ss-areas > div { align-self: center; }
+.ss-areas > div { display: flex; gap: 6px; align-items: center; }
 .ss-areas button { all: unset; cursor: pointer; padding: 7px 14px 9px; font-size: 12px; font-weight: 600;
   color: var(--ss-muted); border-bottom: 2px solid transparent; }
 .ss-areas button:hover { color: var(--ss-text); }
@@ -116,6 +129,11 @@
   border-bottom: 1px solid var(--ss-border); position: sticky; top: 0; z-index: 50; flex-wrap: wrap;
   box-shadow: 0 1px 2px rgba(31, 36, 48, .04); }
 /* above the drawers: on a narrow screen they slide in under it, and its buttons are what close them */
+.ss-topsearch { flex: 0 1 420px; min-width: 160px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--ss-border); background: var(--ss-sunken); font: inherit; color: var(--ss-text); }
+.ss-topsearch:focus { border-color: var(--ss-primary); background: var(--ss-surface); outline: none;
+  box-shadow: 0 0 0 3px var(--ss-primary-wash); }
+.ss-back { padding: 6px; }
 .ss-crumb { font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 6px; }
 .ss-crumb .ss-dim { color: var(--ss-faint); font-weight: 400; }
 .ss-spacer { flex: 1 1 auto; }
@@ -154,6 +172,52 @@
 .ss-panes[data-copilot="closed"] { grid-template-columns: 268px minmax(0, 1fr); }
 .ss-panes[data-explorer="closed"] { grid-template-columns: minmax(0, 1fr) 380px; }
 .ss-panes[data-explorer="closed"][data-copilot="closed"] { grid-template-columns: minmax(0, 1fr); }
+
+/* the assistant's screen: the conversation, and the dashboard it would make */
+.ss-ai { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: var(--ss-gap);
+  padding: var(--ss-gap); align-items: start; }
+.ss-chatpane { position: sticky; top: 64px; max-height: calc(100vh - 150px); overflow: auto; }
+.ss-said-mark { width: 16px; height: 16px; color: var(--ss-primary); flex: none; margin-top: 2px; }
+.ss-plan { margin: 4px 0 12px; padding: 0 0 0 2px; list-style: none; display: grid; gap: 2px; }
+.ss-plan li { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; font-size: 12px;
+  border: 1px solid var(--ss-line); border-radius: var(--ss-radius-sm); background: var(--ss-raised); }
+.ss-plan-mark { color: var(--ss-success); font-weight: 700; }
+.ss-tile[data-new="true"] { border-style: dashed; border-color: var(--ss-primary-line); }
+.ss-tile-empty { display: grid; place-items: center; gap: 6px; height: 100%; min-height: 60px;
+  color: var(--ss-faint); }
+
+/* the data-modelling screen */
+.ss-lineage { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.ss-lineage li { border: 1px solid var(--ss-line); border-left: 3px solid var(--ss-primary-line);
+  border-radius: var(--ss-radius-sm); padding: 7px 10px; font-size: 12px; }
+.ss-lineage li[data-kind="source"] { border-left-color: var(--ss-warning); }
+.ss-lineage .ss-name { font-weight: 600; margin-right: 6px; }
+
+/* the release screen: the pipeline is a picture of where a version stands, not a set of buttons */
+.ss-pipeline { display: flex; align-items: stretch; gap: 8px; }
+.ss-stage { flex: 1; display: grid; gap: 3px; justify-items: center; padding: 12px 8px;
+  border-radius: var(--ss-radius-sm); border: 1px solid var(--ss-border); background: var(--ss-sunken);
+  text-align: center; }
+.ss-stage[data-kind="now"] { background: var(--ss-primary-wash); border-color: var(--ss-primary-line); }
+.ss-stage[data-kind="done"] { background: var(--ss-success-wash); border-color: var(--ss-success-line); }
+.ss-stage[data-kind="waiting"] { background: var(--ss-warning-wash); border-color: var(--ss-warning-line); }
+.ss-stage strong { font-size: 13px; letter-spacing: .04em; }
+.ss-stage-state { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ss-muted); }
+.ss-stage-version { font-size: 12px; font-weight: 600; color: var(--ss-primary-dark); }
+.ss-arrow { align-self: center; color: var(--ss-faint); }
+.ss-versions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ss-versions li { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--ss-line); border-radius: var(--ss-radius-sm); background: var(--ss-raised); }
+.ss-version-body { flex: 1 1 auto; min-width: 0; }
+.ss-version-body strong { font-size: 13px; }
+
+/* a group of component cards, in the left pane */
+.ss-group-head { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ss-faint); margin: 14px 0 6px; }
+.ss-add { all: unset; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--ss-primary);
+  padding: 4px 0 0; display: inline-block; }
+.ss-add:disabled { color: var(--ss-faint); cursor: not-allowed; }
+.ss-check { display: flex; gap: 8px; align-items: center; font-size: 12px; }
 
 .ss-card { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius);
   box-shadow: var(--ss-shadow); }
@@ -317,6 +381,10 @@
 
 /* ── the inspector and the copilot (§47.5, §47.6) ────────────────────────────────────────────────────────── */
 .ss-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+/* a pane's own tabs: three words in a 268px column, so they stay on one line */
+.ss-pane > header { padding: 9px 10px; }
+.ss-pane > header .ss-tabs { flex-wrap: nowrap; }
+.ss-pane > header .ss-tabs button { padding: 4px 7px; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
 .ss-tabs button { all: unset; cursor: pointer; padding: 5px 10px; border-radius: var(--ss-radius-sm);
   font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ss-muted); }
 .ss-tabs button:hover { background: var(--ss-sunken); }
@@ -448,8 +516,9 @@
 @media (max-width: 1240px) {
   #sharpsight-studio { padding-left: 52px; }
   .ss-rail { width: 52px; padding: 12px 6px; }
-  .ss-rail-label, .ss-rail-head { display: none; }
-  .ss-rail-link { justify-content: center; padding: 8px 0; }
+  .ss-rail-label, .ss-rail-head, .ss-logo span { display: none; }
+  .ss-rail-link, button.ss-rail-link { justify-content: center; padding: 8px 0; }
+  .ss-logo { justify-content: center; padding: 2px 0 10px; }
   .ss-panes, .ss-panes[data-copilot="closed"], .ss-panes[data-explorer="closed"],
   .ss-panes[data-explorer="closed"][data-copilot="closed"] { grid-template-columns: minmax(0, 1fr); }
   .ss-pane { position: fixed; top: var(--ss-bar-h, 56px); bottom: 0; left: 0; width: min(340px, 88vw);
@@ -458,8 +527,12 @@
   .ss-card.ss-pane { background: var(--ss-surface); }
   .ss-stack.ss-pane { left: auto; right: 0; background: var(--ss-sunken); padding: 12px;
     border-left: 1px solid var(--ss-border); }
-  .ss-drawer, .ss-panes { padding-left: 12px; padding-right: 12px; margin-left: 0; margin-right: 0; }
+  .ss-drawer, .ss-panes, .ss-ai { padding-left: 12px; padding-right: 12px; margin-left: 0; margin-right: 0; }
+  .ss-ai { grid-template-columns: minmax(0, 1fr); }
+  .ss-chatpane { position: static; max-height: none; }
   .ss-bar { gap: 6px; padding: 8px 12px; }
+  .ss-topsearch { flex: 1 1 140px; order: 9; }
+  .ss-pipeline { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

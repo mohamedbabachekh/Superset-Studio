@@ -47,12 +47,12 @@ there is no component framework ([ADR 0014](adr/0014-no-build-step-and-no-second
 
 | Group | Here | Where |
 |---|---|---|
-| **Navigation** | the rail (`.ss-rail`), the areas of the workspace (`.ss-areas`: Design, Data, Filters, Interactions), the command bar (`.ss-bar`, `.ss-crumb`, `.ss-group`), the command palette (`.ss-palette`), the explorer tree (`.ss-tree`), tabs (`.ss-tabs`) | `view.js` · `ui.js::palette` |
-| **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the filter picker, the lineage panel | the gallery, the explorer, the dashboard inspector's *Filters*, the inspector's *Data & dbt* |
+| **Navigation** | the rail with its logo (`.ss-rail`, `.ss-logo`) — four screens and the addresses around them, the screen's tab row and its actions (`.ss-areas`), the top bar with its search (`.ss-bar`, `.ss-crumb`, `.ss-topsearch`, `.ss-group`), the command palette (`.ss-palette`), the explorer tree (`.ss-tree`), tabs (`.ss-tabs`) | `view.js` · `ui.js::palette` |
+| **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the filter picker, the columns table, the lineage graph (`.ss-lineage`) | the gallery, the left pane, the dashboard inspector's *Filters*, the **Data Modeling** screen |
 | **Builder** | the chart-kind row (`.ss-kindrow`), the device widths (`.ss-devices`), the component shelf (`.ss-cards`, `.ss-kind`, an `icon()` per chart kind, draggable), the canvas (`.ss-canvas`, `.ss-row`) in its zoomable frame (`.ss-frame`, `.ss-viewport`), a chart tile (`.ss-tile`, `.ss-shot`) with its selection chrome (`.ss-label`, `.ss-handles`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), both inspectors (`.ss-field`, `.ss-two`) | `view.js` |
-| **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`) | `view.js::copilot` |
-| **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the chart inspector's *Governance*, the dashboard inspector's *Security* (who may open it, and the row-level rules), the drawer |
-| **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action, the deployment sheet (`.ss-steps` — what a deployment will do, numbered, in order) and the deployment record (`.ss-panel` with its steps and `.ss-readback`, what the target answered afterwards) | the bar, the drawer's *Releases* and *Deployments* |
+| **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the plan (`.ss-plan`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`), and the dashboard a proposal would make (`.ss-ai`, `.ss-tile[data-new]`) | `view.js::copilot` · `view.js::assistant` |
+| **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | *Chart Properties ▸ Governance*, the dashboard inspector's *Security* (who may open it, and the row-level rules), the release screen's *Validation* |
+| **Lifecycle** | the environment and gate tags, the version list (`.ss-versions`), the release pipeline (`.ss-pipeline`, `.ss-stage`), the draft state in the top bar, the export action, the deployment sheet (`.ss-steps` — what a deployment will do, numbered, in order) and the deployment record (`.ss-panel` with its steps and `.ss-readback`, what the target answered afterwards) | the top bar, the **Release & Deployment** screen |
 
 Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()`, `tag()`, `toast()`,
 `modal()`, `palette()`, `shortcuts()` — all of `ui.js`, 174 lines.
@@ -99,32 +99,48 @@ rectangles says nothing about whether the workspace around it reads well.
 
 ## 4 · The layout
 
+Four screens on one page, switched from the rail and by `1` `2` `3` `4`
+([ADR 0025](adr/0025-four-screens-on-one-page.md)). The top bar and the rail never change; the tab row and
+the actions under it belong to the screen.
+
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ command bar · project / dashboard · env · version · gate · draft state · actions│
-├──────────────┬────────────────────────────────────────┬────────────────────────┤
-│ explorer     │ canvas                                  │ inspector              │
-│ outline      │ sections, rows, tiles, free slots       │ content / chart /      │
-│ free slots   │                                         │ governance / data      │
-│ parked       │                                         ├────────────────────────┤
-│ datasets     │                                         │ copilot                │
-│ metrics      │                                         │ chips · proposal       │
-├──────────────┴────────────────────────────────────────┴────────────────────────┤
-│ drawer · validation · changes · last run · releases · what this is              │
-└────────────────────────────────────────────────────────────────────────────────┘
+┌──────┬─────────────────────────────────────────────────────────────────────────┐
+│ rail │ ‹ project · env · version · gate · draft state   search   ⌘K ◧ ◨ ◐ ?  AA │
+│      ├─────────────────────────────────────────────────────────────────────────┤
+│ Home │ the screen's tabs                            the screen's own actions   │
+│ Proj ├──────────────┬───────────────────────────────┬──────────────────────────┤
+│ Data │ 1 BUILDER    │                               │                          │
+│ Metr │ components   │ canvas                        │ chart properties         │
+│ Char │ templates    │ sections · rows · tiles       │ data / style /           │
+│ DASH │ outline      │ compose ⇄ live · zoom · widths│ interactions/ governance │
+│ SQL  │              │                               ├──────────────────────────┤
+│ Mode │              │                               │ copilot · chips          │
+│ AI   ├──────────────┴───────────────────────────────┴──────────────────────────┤
+│ Depl │ 2 ASSISTANT  the conversation, the plan │ the dashboard it would make    │
+│ Set  ├─────────────────────────────────────────┴────────────────────────────────┤
+│      │ 3 DATA       models │ columns · lineage · tests · documentation │ details │
+│      ├──────────────────────────────────────────────────────────────────────────┤
+│      │ 4 RELEASES   versions · validation · environments │ pipeline · validation │
+└──────┴──────────────────────────────────────────────────────────────────────────┘
 ```
 
-268px / flexible / 380px, each side pane collapsible. **Under 1240px the side panes become drawers over the
-canvas** rather than columns squeezed beside it, and they start closed: a canvas in a third of a laptop's
-width is worse than no canvas.
+196px rail; 268px / flexible / 380px inside a screen, each side pane collapsible. **Under 1240px the rail
+becomes a strip of icons and the side panes become drawers over the canvas** rather than columns squeezed
+beside it, and they start closed: a canvas in a third of a laptop's width is worse than no canvas.
+
+Where the actions live, because that is the question a layout answers: **Save** is the builder's (it saves
+the draft), **Apply** is the assistant's (it takes a proposal into the draft), and **+ New Release** and
+**Export (.ssbi)** are the release screen's — « + New Release » *is* the commit. Everything else is one
+keystroke away in the palette (⌘K), which the builder's `⋯` opens.
 
 ## 5 · What to build against
 
-- `studio/studio.css` — the tokens and every class above, 310 lines, one file on purpose.
+- `studio/studio.css` — the tokens and every class above, 540 lines, one file on purpose.
 - `studio/ui.js` — the primitives. If a pane needs something new, it goes here, not into the pane.
 - `studio/preview.py --check` — the workspace driven in a browser against a stand-in engine. A new component
-  with a behaviour gets a promise there; it is nine seconds, and it is what caught a rule for text fields
-  stretching radio buttons and a focus handler cancelling its own click.
+  with a behaviour gets a promise there; it is under a minute for eighty-two promises, and it is what caught
+  a rule for text fields stretching radio buttons, a focus handler cancelling its own click, and a check list
+  capped at 280px hiding the last three steps of a deployment.
 
 ## 6 · Where this departs from the references
 
@@ -132,6 +148,7 @@ width is worse than no canvas.
 |---|---|
 | **The canvas is not Figma's** | it edits a specification, not pixels, and it supports what Superset's own dashboard model can store — rows and twelfths, not free coordinates ([ADR 0007](adr/0007-the-layout-belongs-to-the-specification.md)). There are no alignment guides because there is nothing to align: a twelfth is a twelfth, and every drop snaps by construction. Zoom and the template's own viewport widths are there, because *how wide it will be read* is a real question |
 | **The library is not a component palette** | it offers the **kinds of chart the registry approves**, each saying which of this template's slots accept it and whether it is installed in this BI engine — not buttons, inputs and containers. Dragging one onto a row does not place a component: it opens the gallery on the free slot of that row's section, because a chart without a governed metric is not a chart |
+| **The pipeline is a picture, not a wizard** | DEV → UAT → PROD on the release screen says where each version stands; it has no button, because promoting needs a second person on the command line ([ADR 0010](adr/0010-a-commit-goes-through-the-pipeline.md)). For the same reason a model's page has « Open dbt docs » where a modelling tool would have Run / Test / Build, and a table of **columns** where it would have a preview of rows ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)) |
 | **The rail is a short cut, not a router** | the owner chose to have one ([ADR 0023](adr/0023-a-rail-of-short-cuts-inside-the-studio.md)); its SharpSight half is built server-side from the same rule the menu obeys, and nothing in it is a page only the rail can reach |
 | **The inspector's controls propose** | dataset, kind, metric and dimension are dropdowns, as the reference has them — and changing one asks for a proposal with its validation rather than editing the draft, because those four are the registry's to allow ([ADR 0012](adr/0012-the-copilot-is-deterministic-and-proposes.md)) |
 | **The inspector has little style** | a colour, a legend, an axis has no place in a specification, so the Style tab a design tool would have is a sentence explaining that Explore owns them and a commit sets them back |

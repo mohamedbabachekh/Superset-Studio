@@ -40,6 +40,7 @@ class SharpSightBiApi(RestApi):
                               "save_draft": "write", "drop_draft": "write", "commit_draft": "write",
                               "pictures": "write", "propose": "write", "compose": "write",
                               "report": "read", "lineage": "read", "package": "read", "alter": "write",
+                              "dataset": "read",
                               "targets": "read", "deployments": "read", "deploy": "write"}
     allow_browser_login = True
     # Flask-AppBuilder exempts an API's blueprint from CSRF protection unless told otherwise, and Superset's
@@ -408,6 +409,26 @@ class SharpSightBiApi(RestApi):
         if not _NAME.match(project_id):
             return self.response(400, message="that is not a project's name")
         return self._engine("GET", f"/projects/{project_id}/report")
+
+    @expose("/datasets/<dataset_id>", methods=("GET",))
+    @protect()
+    @safe
+    def dataset(self, dataset_id: str) -> Response:
+        """One governed dataset: its registry metadata and its columns — their names, types, roles and
+        classifications. No row of data is read or returned.
+        ---
+        get:
+          parameters:
+          - in: path
+            name: dataset_id
+            schema: {type: string}
+          responses:
+            200:
+              description: The dataset
+        """
+        if not _NAME.match(dataset_id):
+            return self.response(400, message="that is not a dataset's name")
+        return self._engine("GET", f"/datasets/{dataset_id}")
 
     @expose("/datasets/<dataset_id>/lineage", methods=("GET",))
     @protect()
