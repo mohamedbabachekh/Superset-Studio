@@ -29,6 +29,39 @@ export const button = (label, onClick, attrs = {}) =>
 
 export const tag = (text, kind) => node('span', { class: 'ss-tag', 'data-kind': kind, text });
 
+/* ── icons ───────────────────────────────────────────────────────────────────────────────────────────────
+ * One line of SVG per kind of chart, drawn from the same 24-grid so a shelf of them reads as one set. They
+ * are what a kind looks like, not what a chart looks like: the chart itself is a photograph of the real one
+ * (aibi/picture.py). Inline, because this page loads no icon font and no second asset.
+ */
+const PATHS = {
+  big_number: 'M4 17h4V7H4zM11 17h3V11h-3zM17 17h3V4h-3z',
+  line: 'M3 17l5-6 4 3 5-8 4 5',
+  area: 'M3 17l5-6 4 3 5-8 4 5v6H3z',
+  bar: 'M4 19V9h4v10zM10 19V5h4v14zM16 19v-7h4v7z',
+  pie: 'M12 3a9 9 0 109 9h-9z',
+  histogram: 'M3 19V13h3v6zM7 19V9h3v10zM11 19V5h3v14zM15 19V11h3v8zM19 19v-4h2v4z',
+  table: 'M3 5h18v14H3zM3 10h18M9 10v9M15 10v9',
+  map: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z M9 4v14 M15 6v14',
+  other: 'M4 4h16v16H4zM4 9h16M9 9v11',
+};
+
+export function icon(kind, attrs = {}) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.6');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  Object.entries(attrs).forEach(([key, value]) => svg.setAttribute(key, String(value)));
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', PATHS[kind] || PATHS.other);
+  svg.appendChild(path);
+  return svg;
+}
+
 export const field = (label, control) => node('label', { class: 'ss-field' }, node('span', { text: label }), control);
 
 export const pair = (name, value) => node('li', {}, node('span', { text: name }),

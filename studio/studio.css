@@ -128,12 +128,19 @@
 
 /* ── the canvas (§47.4) ──────────────────────────────────────────────────────────────────────────────────── */
 .ss-canvas { padding: 14px; background: var(--ss-sunken); border-radius: var(--ss-radius);
-  border: 1px solid var(--ss-line); }
+  border: 1px solid var(--ss-line); position: relative;
+  /* the grain of a drawing surface — 16px dots, the same in both themes */
+  background-image: radial-gradient(circle, var(--ss-border) 1px, transparent 1px);
+  background-size: 16px 16px; background-position: -1px -1px; }
+/* while something is being moved or resized, the twelve columns it snaps to are shown */
+.ss-canvas[data-guides="true"]::after { content: ""; position: absolute; inset: 14px; pointer-events: none;
+  border-radius: 6px; background: repeating-linear-gradient(to right, var(--ss-primary-line) 0 1px,
+  transparent 1px calc(100% / 12)); opacity: .5; }
 .ss-section-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   color: var(--ss-faint); margin: 18px 2px 8px; display: flex; gap: 8px; align-items: center; }
 .ss-section-title:first-child { margin-top: 0; }
 .ss-section-title::after { content: ""; flex: 1; height: 1px; background: var(--ss-border); }
-.ss-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 10px; margin-bottom: 10px;
+.ss-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; margin-bottom: 14px;
   position: relative; border-radius: 8px; transition: outline-color .12s; outline: 2px dashed transparent;
   outline-offset: 5px; }
 .ss-row[data-over="true"] { outline-color: var(--ss-primary); }
@@ -141,10 +148,25 @@
 .ss-frame { transform-origin: top left; transition: width .12s; }
 .ss-mini { font: inherit; font-size: 11px; padding: 3px 6px; border: 1px solid var(--ss-border);
   border-radius: var(--ss-radius-sm); background: var(--ss-surface); color: var(--ss-muted); }
-.ss-kind { cursor: grab; }
+/* The library is a shelf of what may be drawn, not a list of words: an icon says what a kind IS faster than
+   its name does, and a card is a thing to pick up. Three to a row, because the pane is 268px. */
+.ss-shelf { display: block; padding: 2px 0 6px; }
+.ss-shelf:hover { background: none; }
+.ss-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ss-kind { all: unset; box-sizing: border-box; display: grid; justify-items: center; gap: 3px;
+  padding: 9px 4px 7px; border: 1px solid var(--ss-border); border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface); cursor: grab; text-align: center;
+  transition: border-color .12s, background .12s, color .12s; }
+.ss-kind:hover { border-color: var(--ss-primary-line); background: var(--ss-primary-wash);
+  color: var(--ss-primary-dark); }
 .ss-kind:active { cursor: grabbing; }
-.ss-kind .ss-name { font-variant-numeric: tabular-nums; }
-.ss-kind[draggable="true"] .ss-name::before { content: "⠿"; color: var(--ss-faint); margin-right: 6px; }
+.ss-kind[data-state="full"], .ss-kind[data-state="absent"] { cursor: not-allowed; opacity: .55; }
+.ss-kind[data-state="absent"] { border-style: dashed; }
+.ss-kind-icon { width: 22px; height: 22px; color: var(--ss-primary); }
+.ss-kind[data-state="full"] .ss-kind-icon, .ss-kind[data-state="absent"] .ss-kind-icon { color: var(--ss-faint); }
+.ss-kind-name { font-size: 10px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%; white-space: nowrap; }
+.ss-kind-state { font-size: 9px; color: var(--ss-faint); }
 
 .ss-rowbar { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ss-faint);
   margin: 0 2px 4px; opacity: 0; transition: opacity .12s; }
@@ -153,10 +175,13 @@
 .ss-rowbar button:hover { color: var(--ss-primary); background: var(--ss-primary-wash); }
 
 .ss-tile { grid-column: span var(--w); background: var(--ss-surface); border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius); overflow: hidden; display: flex; flex-direction: column; min-width: 0;
+  border-radius: var(--ss-radius); display: flex; flex-direction: column; min-width: 0;
   position: relative; transition: border-color .12s, box-shadow .12s; }
+.ss-tile > header { border-radius: var(--ss-radius) var(--ss-radius) 0 0; }
+.ss-tile .ss-shot, .ss-tile .ss-shot-missing { border-radius: 0 0 var(--ss-radius) var(--ss-radius); }
 .ss-tile:hover { border-color: var(--ss-primary-line); }
-.ss-tile[aria-selected="true"] { border-color: var(--ss-primary); box-shadow: 0 0 0 2px var(--ss-primary-line); }
+.ss-tile[aria-selected="true"] { border-color: var(--ss-primary); border-style: dashed;
+  box-shadow: 0 0 0 2px var(--ss-primary-line); }
 .ss-tile[data-dragging="true"] { opacity: .35; }
 .ss-tile > header { display: flex; align-items: center; gap: 6px; padding: 7px 10px; cursor: grab;
   border-bottom: 1px solid var(--ss-line); background: linear-gradient(var(--ss-surface), var(--ss-raised)); }
@@ -169,7 +194,27 @@
 .ss-shot-missing { flex: 1; display: grid; place-items: center; text-align: center; padding: 14px;
   color: var(--ss-faint); font-size: 11px; background: repeating-linear-gradient(45deg, var(--ss-raised), var(--ss-raised) 8px,
   var(--ss-sunken) 8px, var(--ss-sunken) 16px); }
-.ss-grip { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; }
+.ss-label { position: absolute; top: -9px; left: 8px; z-index: 3; font-size: 9px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
+  background: var(--ss-primary); color: #fff; opacity: 0; transition: opacity .12s; pointer-events: none; }
+.ss-tile[aria-selected="true"] .ss-label, .ss-tile:hover .ss-label { opacity: 1; }
+.ss-tile:hover .ss-label { background: var(--ss-faint); }
+.ss-tile[aria-selected="true"] .ss-label { background: var(--ss-primary); }
+
+.ss-handles { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .12s; }
+.ss-tile[aria-selected="true"] .ss-handles { opacity: 1; }
+.ss-handle { position: absolute; width: 7px; height: 7px; background: var(--ss-surface);
+  border: 1.5px solid var(--ss-primary); border-radius: 2px; }
+.ss-handle[data-at="nw"] { top: -4px; left: -4px; }
+.ss-handle[data-at="n"] { top: -4px; left: calc(50% - 3.5px); }
+.ss-handle[data-at="ne"] { top: -4px; right: -4px; }
+.ss-handle[data-at="w"] { top: calc(50% - 3.5px); left: -4px; }
+.ss-handle[data-at="e"] { top: calc(50% - 3.5px); right: -4px; }
+.ss-handle[data-at="sw"] { bottom: -4px; left: -4px; }
+.ss-handle[data-at="s"] { bottom: -4px; left: calc(50% - 3.5px); }
+.ss-handle[data-at="se"] { bottom: -4px; right: -4px; }
+
+.ss-grip { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; z-index: 2; }
 .ss-grip::after { content: ""; position: absolute; top: 50%; right: 4px; width: 3px; height: 26px;
   margin-top: -13px; border-radius: 2px; background: var(--ss-border); opacity: 0;
   transition: opacity .12s, background .12s; }

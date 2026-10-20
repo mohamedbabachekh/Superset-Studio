@@ -49,7 +49,7 @@ there is no component framework ([ADR 0014](adr/0014-no-build-step-and-no-second
 |---|---|---|
 | **Navigation** | the command bar (`.ss-bar`, `.ss-crumb`, `.ss-group`), the command palette (`.ss-palette`), the explorer tree (`.ss-tree`), tabs (`.ss-tabs`) | `view.js` · `ui.js::palette` |
 | **Data** | the metric picker (`.ss-pick`), the dataset and metric lists with certification marks (`.ss-cert`), the filter picker, the lineage panel | the gallery, the explorer, the dashboard inspector's *Filters*, the inspector's *Data & dbt* |
-| **Builder** | the component library (`.ss-kind`, draggable), the canvas (`.ss-canvas`, `.ss-row`) in its zoomable frame (`.ss-frame`, `.ss-viewport`), a chart tile (`.ss-tile`, `.ss-shot`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), both inspectors (`.ss-field`, `.ss-two`) | `view.js` |
+| **Builder** | the component shelf (`.ss-cards`, `.ss-kind`, an `icon()` per chart kind, draggable), the canvas (`.ss-canvas`, `.ss-row`) in its zoomable frame (`.ss-frame`, `.ss-viewport`), a chart tile (`.ss-tile`, `.ss-shot`) with its selection chrome (`.ss-label`, `.ss-handles`), the resize grip (`.ss-grip`), a free slot (`.ss-empty`), both inspectors (`.ss-field`, `.ss-two`) | `view.js` |
 | **AI** | the prompt composer, the suggestion chips (`.ss-chip`), the proposal card with its changes and its validation (`.ss-proposal`, `.ss-changes`) | `view.js::copilot` |
 | **Governance** | the governance list (`.ss-gov`), status tags (`.ss-tag`), check lists (`.ss-checks`), callouts (`.ss-callout`) | the chart inspector's *Governance*, the dashboard inspector's *Security* (who may open it, and the row-level rules), the drawer |
 | **Lifecycle** | the environment and gate tags, the version table (`.ss-table`), the draft state in the bar, the export action | the bar, the drawer's *Releases* |
@@ -77,8 +77,11 @@ Shared: `node()` (the element maker), `button()`, `field()`, `select()`, `pair()
    behind its own tab rather than spread over the page.
 8. **The canvas never claims more than it supports.** What it cannot do, Superset's own editor does, and the
    drawer says so in plain words.
-9. **Motion is 120ms or nothing**, and `prefers-reduced-motion` turns it off.
-10. **A toast is not a log.** It says what happened and offers the one action that answers it (*Undo*,
+9. **The canvas says what it is doing.** A tile under the pointer names itself; a selected one is dashed,
+   carries eight handles and its slot's label; and the twelve columns a drop will snap to are drawn while
+   something is being moved or resized, and only then.
+10. **Motion is 120ms or nothing**, and `prefers-reduced-motion` turns it off.
+11. **A toast is not a log.** It says what happened and offers the one action that answers it (*Undo*,
     *Reload*); anything longer belongs in the drawer.
 
 ## 4 · The layout
@@ -119,4 +122,6 @@ width is worse than no canvas.
 | **The inspector has little style** | a colour, a legend, an axis has no place in a specification, so the Style tab a design tool would have is a sentence explaining that Explore owns them and a commit sets them back |
 | **The drawer shows no data** | the brief asks for a permission-checked sample; a developer's Superset account is given no database in SQL Lab, and this page is not a way round that decision ([ADR 0013](adr/0013-no-data-preview-in-the-studio.md)) — **the owner can overrule this in one tab and one route** |
 | **The AI proposes, never applies** | Retool and Figma edit live; here every AI change is a proposal with a diff and an explicit Apply ([ADR 0012](adr/0012-the-copilot-is-deterministic-and-proposes.md)) |
+| **There are no live charts on the canvas** | a tile is a photograph of the real chart, because the alternative is a second renderer ([ADR 0008](adr/0008-a-tile-is-a-photograph.md)). What the reference gets from live charts — tooltips, hover, cross-filtering — is one click away in Preview, where Superset itself draws them |
+| **No document tabs** | the reference opens several things at once; a Studio page is one project's dashboard, reached from the projects page, and the browser's own tabs do the rest |
 | **No component library is published** | these classes serve one workspace. If a second SharpSight surface needs them, that is when they become a package — not before |

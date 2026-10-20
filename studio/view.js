@@ -7,7 +7,8 @@
  */
 import * as act from './state.js';
 import { state } from './state.js';
-import { KEYS, button, close, field, modal, node, pair, select, tag, theme, themeNow, toast } from './ui.js';
+import { KEYS, button, close, field, icon, modal, node, pair, select, tag, theme, themeNow, toast }
+  from './ui.js';
 
 export function draw(el, client, commands) {
   const where = window.scrollY;
@@ -186,25 +187,29 @@ function explorer(commands) {
       const shown = kinds.filter(kind => match(kind.id) || match(purpose));
       if (!shown.length) return;
       tree.appendChild(node('li', { class: 'ss-section-head' }, purpose));
-      shown.forEach(kind => {
-        const free = (state.payload.free_slots || []).filter(slot => (slot.accepts || []).includes(kind.id));
-        const ready = kind.status === 'available' && free.length && act.editable();
-        tree.appendChild(node('li', { class: 'ss-sub ss-kind', draggable: ready, title: ready
-          ? `Drag onto a row, or click: it goes on ${free.map(slot => slot.slot).join(' or ')}`
-          : kind.status !== 'available'
-            ? `${kind.id} is approved but not installed in this BI engine: a dashboard asking for it is refused`
-            : `every slot that accepts a ${kind.id} already holds a chart`,
-        on: {
-          dragstart: event => { event.dataTransfer.setData('text/plain', `type:${kind.id}`); },
-          click: () => (ready ? commands.gallery(free[0].slot, kind.id)
-            : toast(kind.status !== 'available'
-              ? `${kind.id} is approved but not installed in this BI engine.`
-              : `Every slot that accepts a ${kind.id} already holds a chart.`, { kind: 'bad' })),
-        } },
-        node('span', { class: 'ss-name', 'data-kind': kind.id, text: kind.id }),
-        node('span', { class: 'ss-faint', text: kind.status === 'available'
-          ? (free.length ? `${free.length} free` : 'full') : 'not installed' })));
-      });
+      tree.appendChild(node('li', { class: 'ss-shelf' }, node('div', { class: 'ss-cards' },
+        shown.map(kind => {
+          const free = (state.payload.free_slots || []).filter(slot => (slot.accepts || []).includes(kind.id));
+          const ready = kind.status === 'available' && free.length && act.editable();
+          const state_ = kind.status !== 'available' ? 'absent' : free.length ? 'free' : 'full';
+          return node('button', { class: 'ss-kind', type: 'button', 'data-kind': kind.id,
+            'data-state': state_, draggable: ready, title: ready
+              ? `Drag onto a row, or click: it goes on ${free.map(slot => slot.slot).join(' or ')}`
+              : kind.status !== 'available'
+                ? `${kind.id} is approved but not installed in this BI engine: a dashboard asking for it is refused`
+                : `every slot that accepts a ${kind.id} already holds a chart`,
+            on: {
+              dragstart: event => { event.dataTransfer.setData('text/plain', `type:${kind.id}`); },
+              click: () => (ready ? commands.gallery(free[0].slot, kind.id)
+                : toast(kind.status !== 'available'
+                  ? `${kind.id} is approved but not installed in this BI engine.`
+                  : `Every slot that accepts a ${kind.id} already holds a chart.`, { kind: 'bad' })),
+            } },
+          icon(kind.id, { class: 'ss-kind-icon' }),
+          node('span', { class: 'ss-kind-name', text: kind.id }),
+          node('span', { class: 'ss-kind-state', text: state_ === 'absent' ? 'not installed'
+            : state_ === 'free' ? `${free.length} free` : 'full' }));
+        }))));
     });
   }
 
@@ -332,6 +337,8 @@ function rowNode(row, client, commands) {
   return made;
 }
 
+const slotOf = slot => (state.payload.template.slots || {})[slot] || {};
+
 function tile(place, row, client, commands) {
   const taken = state.payload.pictures;
   const shot = taken && taken.slots && taken.slots[place.id];
@@ -345,8 +352,19 @@ function tile(place, row, client, commands) {
       // Enter or Space on a focused tile selects it; focus alone does not, or a redraw would move the
       // focus out from under the keyboard.
       keydown: event => { if (event.key === 'Enter' || event.key === ' ') commands.select(place.id); },
-      dragstart: event => { event.dataTransfer.setData('text/plain', `slot:${place.id}`); },
+      dragstart: event => {
+        event.dataTransfer.setData('text/plain', `slot:${place.id}`);
+        const canvasNode = event.target.closest('.ss-canvas');
+        if (canvasNode) canvasNode.dataset.guides = 'true';
+      },
+      dragend: event => {
+        const canvasNode = event.target.closest('.ss-canvas');
+        if (canvasNode) delete canvasNode.dataset.guides;
+      },
     } },
+    node('div', { class: 'ss-label', text: `${place.id} · ${slotOf(place.id).purpose || ''}` }),
+    node('div', { class: 'ss-handles' }, ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se']
+      .map(where => node('i', { class: 'ss-handle', 'data-at': where }))),
     node('header', {},
       node('strong', { text: act.title(place.id) }),
       node('span', { class: 'ss-spacer' }),
@@ -382,6 +400,8 @@ function grip(place) {
     const wasOther = other ? other.width : 0;
     const spare = columns - line.slots.reduce((sum, s) => sum + s.width, 0);
     let wanted = was;
+    const canvasNode = rowNode_.closest('.ss-canvas');
+    if (canvasNode) canvasNode.dataset.guides = 'true';
     const move = inner => {
       const by = Math.round((inner.clientX - from) / column);
       const most = other ? was + wasOther - act.minWidth(other.id) : was + spare;
@@ -392,6 +412,7 @@ function grip(place) {
     const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
+      if (canvasNode) delete canvasNode.dataset.guides;
       if (wanted !== was) {
         act.change(() => {
           place.width = wanted;

@@ -50,6 +50,10 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
   palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
   become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **It looks like an editor now.** The library is a shelf of cards, each with an icon drawn for that kind of
+  chart; the canvas has the grain of a drawing surface; a tile under the pointer names itself, and a selected
+  one is dashed, carries eight handles and wears its slot's label; and while a chart is dragged or resized,
+  the twelve columns it will snap to are drawn across the canvas, and only then.
 - **A component library, and the dashboard's own inspector.** The explorer now offers every chart kind the
   registry approves, grouped by what it is for, each saying which of this template's slots accept it and
   whether it is installed in this BI engine — what is approved but not installed is shown, not hidden. A kind

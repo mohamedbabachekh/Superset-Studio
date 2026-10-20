@@ -408,6 +408,7 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
            page.evaluate(ROW)[0] == "kpis: kpi_2 3, kpi_1 2, kpi_3 4, kpi_4 3"
            and "as narrow as" in page.inner_text(".ss-toasts"))
 
+    page.locator('[data-slot="kpi_3"]').scroll_into_view_if_needed()
     grip = page.eval_on_selector('[data-slot="kpi_3"] .ss-grip',
                                  "n => { const r = n.getBoundingClientRect();"
                                  "  return {x: r.x + r.width / 2, y: r.y + r.height / 2}; }")
@@ -565,15 +566,38 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
                              "n => n.getAttribute('aria-pressed') !== 'true'"):
         page.click('.ss-bar button[aria-label="The explorer"]')
         time.sleep(0.3)
-    expect("the explorer offers the chart kinds, grouped by what they are for",
-           page.eval_on_selector_all(".ss-kind", "n => n.length") >= 6)
+    expect("the explorer offers the chart kinds, grouped by what they are for, each with its own icon",
+           page.eval_on_selector_all(".ss-kind", "n => n.length") >= 6
+           and page.eval_on_selector_all(".ss-kind-icon", "n => n.length") >= 6)
     expect("and says which are approved but not installed, rather than hiding them",
            "not installed" in page.inner_text(".ss-card.ss-pane"))
-    page.click('.ss-kind [data-kind="map"]')
+    page.click('.ss-kind[data-kind="map"]')
     page.wait_for_selector(".ss-modal")
     expect("clicking one opens the gallery on the slot that accepts it, with the kind chosen",
            "map_1" in page.inner_text(".ss-modal"))
     page.click(".ss-modal >> text=Cancel")
+
+    # ── the chrome of a drawing tool: a label, handles, and the columns while something moves ──────────────
+    page.click('[data-slot="trend_1"]')
+    time.sleep(0.2)
+    expect("a selected chart wears a label and eight handles",
+           page.eval_on_selector_all('[data-slot="trend_1"] .ss-handle', "n => n.length") == 8
+           and page.eval_on_selector('[data-slot="trend_1"] .ss-label',
+                                     "n => getComputedStyle(n).opacity") == "1")
+    page.locator('[data-slot="kpi_3"]').scroll_into_view_if_needed()
+    time.sleep(0.2)
+    grip = page.eval_on_selector('[data-slot="kpi_3"] .ss-grip',
+                                 "n => { const r = n.getBoundingClientRect();"
+                                 "  return {x: r.x + r.width / 2, y: r.y + r.height / 2}; }")
+    page.mouse.move(grip["x"], grip["y"])
+    page.mouse.down()
+    page.mouse.move(grip["x"] + 40, grip["y"], steps=4)
+    expect("and the twelve columns are shown while a width is dragged",
+           page.eval_on_selector(".ss-canvas", "n => n.dataset.guides") == "true")
+    page.mouse.up()
+    time.sleep(0.2)
+    expect("and are gone when it is let go",
+           page.eval_on_selector(".ss-canvas", "n => n.dataset.guides") is None)
 
     # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
     if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',
