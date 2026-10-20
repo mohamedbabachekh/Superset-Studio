@@ -29,13 +29,126 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
 - **A tile is a photograph of the real chart**, cut out of one picture of the real dashboard taken in the
   engine's own browser; *Preview* opens Superset's own dashboard for the live thing. There is no second chart
   renderer anywhere, which is the brief's own first rule.
-- **The AI panel is there and answers nothing**, on purpose: no language model has been chosen. It says what
-  it will do when one is — a proposal with a diff, and Preview / Apply / Reject.
+- **A copilot that invents nothing.** It reads a request with the planner's own governed vocabulary and
+  answers with a **proposal**: the changes, what they touch, whether validation would pass, and the
+  specification as it would be — never a change. Add a view, take one off, rename, a top N, a time grain, an
+  order, a number format, a width, a height, a row moved, « what is … ». What it does not understand, it says
+  it does not understand, and proposes nothing. No language model has been chosen for this kit, which calls
+  nobody; one plugs into `aibi/llm.py` and produces the same proposal.
+- **A chart is added without a prompt too** (the brief's « do not force users to use AI »): a gallery of the
+  template's free slots and the governed metrics, answered by the same proposal.
+- **A workspace with a keyboard.** Thirteen shortcuts, a card that lists them, four inspector tabs
+  (content, chart, governance, data and dbt), five drawer tabs (validation, what a draft changes, what the
+  last run found, the releases, what this workspace is), toasts that say why something was refused,
+  skeletons while it loads, and a reason on every control that is disabled.
 - **Looked at without Superset**: `python studio/preview.py` serves the workspace against a stand-in engine,
   and `--check` drives it in a browser and holds it to thirteen promises. The engine's own rules are held by
   24 new tests against the real registry (194 in all).
+- **A design system, written down** ([docs/design-system.md](docs/design-system.md)): one source for the
+  values (`registry/design/tokens.yaml`), six component groups, ten rules, and where the workspace departs
+  from the references it was drawn against. Every colour in the stylesheet is a token, which is what made the
+  rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
+  palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
+  become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **The style pass.** Softer corners and shadows, more air, buttons that read as actions; the canvas is a
+  white surface whose grain appears only while something is being placed; the dashboard is shown as a reader
+  will meet it — its title, its description, and the filters it carries as the chips they become; and the
+  person signed in is in the bar. What a chart looks like is still Superset's, and the stand-in charts
+  `studio/preview.py` draws (SVG, invented numbers) now look like what Superset draws, because a canvas of
+  flat rectangles says nothing about whether the workspace around it reads well.
+- **It is navigated like a workspace.** A rail on the left — SharpSight's own pages, the ones this person
+  may open (built server-side from the same rule the menu obeys), and Superset's own — and four areas under
+  the breadcrumb: **Design** (the canvas), **Data** (what the dashboard reads, with its lineage), **Filters**
+  (the columns the template allows, with its limit) and **Interactions** (what a specification carries about
+  scope, and what is Superset's own). The canvas gained device widths; the inspector gained a row of the
+  chart kinds its slot accepts.
+- **The inspector's controls propose.** Dataset, metric, dimension and kind are dropdowns, as a visual
+  builder has them — and changing one asks the engine for a **proposal** with its validation rather than
+  editing the draft, because those four are the registry's to allow. One road in, checked once.
+- **The canvas has two modes.** *Compose* is the draft — tiles that can be dragged, resized and reordered.
+  *Live* frames **Superset's own standalone dashboard inside the workspace**, with the Studio's chrome drawn
+  over it: a box per chart, read from that page's own DOM by the same chart id the engine's visual QA reads,
+  following its scrolling, clicking through to the inspector. Real charts, real data, and still no second
+  renderer — the one thing the brief forbids outright. A draft is not in what Superset holds until it is
+  committed, and Live says so rather than letting it look applied.
+- **It looks like an editor now.** The library is a shelf of cards, each with an icon drawn for that kind of
+  chart; the canvas has the grain of a drawing surface; a tile under the pointer names itself, and a selected
+  one is dashed, carries eight handles and wears its slot's label; and while a chart is dragged or resized,
+  the twelve columns it will snap to are drawn across the canvas, and only then.
+- **A component library, and the dashboard's own inspector.** The explorer now offers every chart kind the
+  registry approves, grouped by what it is for, each saying which of this template's slots accept it and
+  whether it is installed in this BI engine — what is approved but not installed is shown, not hidden. A kind
+  drags onto a row and opens the gallery on that section's free slot. And with nothing selected, the
+  inspector is the dashboard's: its title and owner, its **filters** (the columns the template allows, on
+  datasets it already uses, with the limit it allows), its **security** (who may open the dashboard this
+  becomes, and the row-level rules that follow it), and its layout. The canvas gained **zoom** and **the
+  viewport widths the template declares**.
+- **Export .ssbi from the bar** — the immutable package of the latest version, through the same gateway with
+  the same identity. Reading a package is not promoting it: PROD still needs a second person.
+- **Twenty-one architecture decision records** ([docs/adr/](docs/adr/)) — everything this architecture rests
+  on, including the decisions taken before the Studio and the platform patterns underneath it (a modular
+  monolith with named domains, a backend for the frontend, an adapter at every boundary, a control plane and
+  an execution plane) — and the brief read section by section, each marked built, partly or not here, with
+  its reason ([docs/spec-v3-coverage.md](docs/spec-v3-coverage.md)).
+- **A version is deployed to another Superset, and read back there.** `aibi/deploy.py`: the `.ssbi` package
+  that was validated — Superset's own export of the dashboard, taken when the version was committed — is
+  imported into a target, its governed connection **repointed** at that environment's warehouse (an import
+  keeps an existing URI, which is how a run environment quietly reads the development one), the audience and
+  the row-level rules SharpSight decided are granted, and then every chart is **asked for its data**, because
+  an import answers 200 for a dashboard whose charts cannot draw. Nine steps, each recorded, each shown in the
+  Studio's *Deployments* tab under the Deploy button, with what came back: « every chart arrived », « the
+  audience is the one SharpSight decided », and one line per chart. It deploys and it does not approve: a
+  version reaches a target already approved for that gate by somebody other than whoever asked for it, and an
+  unvalidated version, a changed package or a Superset outside the compatibility matrix is refused before
+  anything is imported ([ADR 0024](docs/adr/0024-a-deployment-carries-the-package-and-is-read-back.md)).
+  `bash ai-bi.sh targets` · `deploy <project> <version> --to <target> --gate UAT` · `deployments <project>`.
+  A target is five variables in the engine's own environment and is written down nowhere in this repository.
+  Asking for one opens a **sheet**, not a browser's confirm box: what is about to happen, numbered in the
+  order it happens, and a line for what you checked, which goes into the record.
+- **A run environment to try it on, on one machine.** `docker-compose.run-target.yaml` starts a **second
+  Superset** — its own metadata database, its own accounts, its own URL, and nothing of the kit's in it: no
+  SharpSight menu, no Studio, no seeded connection, so a deployment has to bring everything it needs.
+  `bash ai-bi.sh run-target` (and `--stop` / `--erase`).
+- **The whole solution, tried end to end.** `bash ai-bi.sh e2e` (`scripts/e2e.sh`) walks it on a running kit
+  and says, promise by promise, what held: the governed products are listed · a request becomes a project,
+  a run and a first version · the Studio draws from one call, keeps a layout as a draft, refuses a save
+  against an older one, validates without touching Superset, and answers all three roads (words, the
+  gallery's form, the inspector's controls) with proposals that leave the draft alone · a title and a layout
+  changed in the Studio become the next version through the pipeline, with the older one still there · a
+  reviewer approves UAT, whoever asked cannot approve PROD, and the audit chain is intact record by record ·
+  the version exports as one file carrying Superset's own export, and its checksum is the one recorded · the
+  approved version deploys, every step done, every chart read back, and the link it leaves behind answers ·
+  Superset's token opens the Studio's routes and nothing of the audit trail or the approvals · and both
+  suites run. One broken promise does not hide the twenty behind it, and the exit code is the tally.
+- **Four screens, drawn from the owner's own layouts** ([ADR 0025](docs/adr/0025-four-screens-on-one-page.md)).
+  One page still — the project being edited is the same on all four — switched from the rail and by `1` `2`
+  `3` `4`:
+  **① Dashboard Builder** — a left pane of components grouped as a builder groups them (charts, KPIs, the
+  governed columns that may become filters, the template's rows, and what a specification does not carry,
+  said rather than hidden), beside Templates and Outline; the canvas; and **Chart Properties** on the right:
+  Data, Style, Interactions, Governance.
+  **② AI Copilot** — the conversation given room, the plan it answers with, and beside it the dashboard that
+  plan would make, with what is new marked; *Apply* is the tab row's own button and is still an ordinary
+  draft save.
+  **③ Data Modeling & Assets** — the governed models by domain, the **columns** of the one being read (name,
+  type, role, classification, and whether you may read it), dbt's own lineage graph as it was built, the
+  tests it declares, the metrics valid on it, and its documentation. No row of the data anywhere, and the
+  page says why ([ADR 0013](docs/adr/0013-no-data-preview-in-the-studio.md)).
+  **④ Release & Deployment** — Version History, Validation, Environments and Releases beside a **release
+  pipeline** (DEV → UAT → PROD) that shows where each version stands. The pipeline is a picture, not a set
+  of buttons: *« + New Release »* is the commit, *« Run Validation »* is the validation, and promoting still
+  needs a second person on the command line.
+  The bar splits in two — identity, search and the quiet icons on top, the screen's tabs and actions below —
+  and the drawer is gone, its six tabs now the release screen's four. Nothing that could be done before was
+  dropped; what left the bar is on the screen it belongs to, or one keystroke away in ⌘K.
+- **Typing works properly now**: a redraw puts focus and the caret back where they were, so the search box
+  in the bar can actually be typed in.
+- Proof: 231 engine tests (2 skipped), and `python studio/preview.py --check` driving the workspace in a
+  browser against a stand-in engine — **eighty-two promises**, no console error, including that no row of
+  data appears on any of the four screens.
 - Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in
-  [docs/superset-studio.md](docs/superset-studio.md) §11.
+  [docs/superset-studio.md](docs/superset-studio.md) §11 — and `bash ai-bi.sh e2e` is now the one command
+  that answers it on a machine that has one.
 
 ## Not in a bundle yet — the AI BI engine (2026-10-03)
 

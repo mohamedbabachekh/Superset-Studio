@@ -32,6 +32,7 @@ calls Superset makes for its own menu — so a Superset upgrade does not have to
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -58,6 +59,9 @@ LINKS = (
 )
 # dbt's site is one file that reads these two from beside it; nothing else in the volume is served
 _DOCS_FILES = ("index.html", "manifest.json", "catalog.json")
+# the Studio's own files, served as they are in the repository — named here, so that nothing else in that
+# folder (its preview server, anything a developer leaves there) is reachable from Superset
+STUDIO_FILES = ("studio.js", "view.js", "state.js", "api.js", "ui.js", "studio.css")
 # Superset's own extensions API, and the one sharpsight-bi.supx contributes (superset-extension/)
 EXTENSION_APIS = ("ExtensionsRestApi", "SharpSightBiApi")
 
@@ -204,9 +208,12 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         from superset.views.base import get_spa_template_context
 
         context = get_spa_template_context(os.environ.get("SHARPSIGHT_PAGE_ENTRY", "spa"), None)
+        # the Studio's own rail shows the SharpSight entries this person may open — the same rule the menu
+        # obeys, applied once here rather than copied into the page
+        links = json.dumps([{"name": name, "href": href} for name, _, href, _ in LINKS if may(name)])
         return render_template("sharpsight/studio.html", **context, appbuilder=appbuilder,
                                sharpsight_user=current_user.username, sharpsight_project=project_id,
-                               sharpsight_assets="/sharpsight/studio-assets")
+                               sharpsight_links=links, sharpsight_assets="/sharpsight/studio-assets")
 
     @pages.route("/studio-assets/<name>")
     def studio_assets(name: str):  # noqa: ANN202
@@ -214,7 +221,7 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         (studio/), which is why the kit needs no Node to ship a workspace."""
         if not current_user.is_authenticated:
             abort(403)
-        if name not in ("studio.js", "studio.css"):
+        if name not in STUDIO_FILES:
             abort(404)
         if not (studio_dir / name).is_file():
             return ("the Studio's files are not mounted: ./studio is bind-mounted at /app/sharpsight/studio "

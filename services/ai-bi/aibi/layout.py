@@ -41,6 +41,24 @@ def resolve(spec: DashboardSpec, template: TemplateDef) -> list[LayoutRow]:
     return spec.layout or template.layout
 
 
+def materialise(spec: DashboardSpec, template: TemplateDef) -> list[LayoutRow]:
+    """The layout in force, with only the slots that HOLD a chart — the rows as they are drawn.
+
+    A template's rows name every slot it offers; a dashboard fills some of them. Writing the template's rows
+    into a specification as they are would carry placeholders for charts that do not exist, so what is
+    written is what is drawn. Widths are the template's; an empty slot's columns are given away by
+    `dashboard_agent._widths` when the template says to collapse them, exactly as before."""
+    if spec.layout:
+        return [row.model_copy(deep=True) for row in spec.layout]
+    held = {component.slot for component in spec.components}
+    rows = []
+    for row in template.layout:
+        slots = [placement.model_copy() for placement in row.slots if placement.id in held]
+        if slots:
+            rows.append(LayoutRow(row=row.row, height=row.height, slots=slots))
+    return rows
+
+
 def source(spec: DashboardSpec) -> str:
     return "specification" if spec.layout else "template"
 

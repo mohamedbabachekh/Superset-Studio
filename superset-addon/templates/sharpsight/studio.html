@@ -25,6 +25,7 @@
   </style>
   <div id="app" data-bootstrap="{{ bootstrap_data }}"></div>
   <main id="sharpsight-studio" data-project="{{ sharpsight_project }}" data-user="{{ sharpsight_user }}"
+        data-links='{{ sharpsight_links | safe }}'
         data-csrf="{{ csrf_token() if csrf_token is defined else '' }}">
     <div style="padding: 24px; color: #5B6472;">Opening {{ sharpsight_project }}…</div>
   </main>

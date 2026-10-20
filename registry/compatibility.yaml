@@ -49,6 +49,36 @@ components:
     tested: ["6.1"]
     through: superset-addon/sharpsight_bi.py — /sharpsight/studio/<project>/, and studio/ served as it is
     verified_by: python studio/preview.py --check
+    # the Studio's Live canvas frames Superset's own standalone dashboard and reads its DOM for the chart
+    # holders. Two things to look at again at every upgrade, and the first time this runs on a server:
+    #   · ?standalone=1 rendering inside a frame as it does in a tab (the address visual QA already loads);
+    #   · same-origin framing — this kit runs with TALISMAN_ENABLED = False, so nothing sets X-Frame-Options;
+    #     a Superset that turns Talisman on must still allow 'self' as a frame ancestor.
+    frames: Superset's standalone dashboard, same origin (docs/adr/0022-two-canvases-compose-and-live.md)
+    # the Studio's rail links to Superset's own pages by address (/superset/welcome/, /tablemodelview/list/,
+    # /chart/list/, /dashboard/list/, /sqllab/). If an upgrade moves one, the rail points at nothing while
+    # Superset's own menu is right: check them with the rest (docs/adr/0023)
+    links_to: Superset's own list pages, by address
+
+# WHERE A VERSION MAY BE DEPLOYED — the Superset at the OTHER end, which is a different server and may run a
+# different version. It is not in `components` above on purpose: those are read live out of this machine, and
+# a target's version is only known when it is called. A deployment reads it then, and refuses to carry a
+# package across a Superset version it was not built against (aibi/deploy.py, step 2 of nine — before
+# anything is imported). This section is what to read before naming a target.
+deployment_targets:
+  superset:
+    tested: ["6.1"]
+    through: |
+      the REST API only: database, import, dashboard, roles, row-level security, chart data
+      (aibi/deploy.py through aibi/superset_adapter.py) — never its metadata database
+    verified_by: bash ai-bi.sh e2e   # with bash ai-bi.sh run-target, which starts one on this machine
+    carries: a .ssbi package's superset/dashboard_export.zip, as Superset's own importer reads it
+    # three things an upgrade AT THE TARGET can break, each paid for already (docs/lessons.md):
+    #   · an import keeps an existing connection's URI, so the connection is repointed afterwards;
+    #   · a catalog is recorded per dataset, and for PostgreSQL the catalog is the database — the governed
+    #     connection must be called there what the package expects;
+    #   · an import answers 200 for a dashboard whose charts cannot draw, so every chart is asked for data.
+    named_by: AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI in the engine's own environment
 
 # Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
 connectors:
