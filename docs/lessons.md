@@ -649,3 +649,13 @@ two rules that live outside the root say so, and set their own type and colours.
 **Selecting on click and selecting on focus cancel each other.** A tile that selected itself on `focus` and
 toggled on `click` ended up deselected by a single click: the focus handler had already selected it. → focus
 selects nothing; Enter or Space on a focused tile does, and the arrow keys move the selection.
+
+**The canvas could show the real dashboard all along.** A tile is a photograph because a second renderer is
+forbidden — and that was read as « no live charts », which it never was. Superset will render the dashboard
+in a frame inside the workspace: `?standalone=1` is the address the engine's own browser already loads to
+photograph it, the page is the same origin as the Studio, and this kit sets no `X-Frame-Options`
+(`TALISMAN_ENABLED = False`). Same origin also means the frame's own DOM can be read, so the chrome over it
+is positioned from the real chart holders — the same `data-test-chart-id` visual QA reads — rather than from
+arithmetic of ours. → two modes, Compose and Live (docs/adr/0022). To be confirmed the first time this runs
+on a server: that a framed standalone dashboard behaves as it does in a tab, and that a Superset with
+Talisman on still allows `self` as a frame ancestor.

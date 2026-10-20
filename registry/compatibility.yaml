@@ -49,6 +49,12 @@ components:
     tested: ["6.1"]
     through: superset-addon/sharpsight_bi.py — /sharpsight/studio/<project>/, and studio/ served as it is
     verified_by: python studio/preview.py --check
+    # the Studio's Live canvas frames Superset's own standalone dashboard and reads its DOM for the chart
+    # holders. Two things to look at again at every upgrade, and the first time this runs on a server:
+    #   · ?standalone=1 rendering inside a frame as it does in a tab (the address visual QA already loads);
+    #   · same-origin framing — this kit runs with TALISMAN_ENABLED = False, so nothing sets X-Frame-Options;
+    #     a Superset that turns Talisman on must still allow 'self' as a frame ancestor.
+    frames: Superset's standalone dashboard, same origin (docs/adr/0022-two-canvases-compose-and-live.md)
 
 # Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
 connectors:

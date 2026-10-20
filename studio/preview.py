@@ -106,7 +106,7 @@ def payload() -> dict:
                     "created_by": "dev.user", "dashboard_title": spec["dashboard"]["title"],
                     "description": spec["dashboard"]["description"], "owner": "cem-team",
                     "version": "1.0.0", "gate": "READY_FOR_REVIEW", "environment": "DEV", "held": False,
-                    "dashboard": "http://127.0.0.1:3002/superset/dashboard/7/", "may_edit": True},
+                    "dashboard": "/dashboard", "may_edit": True},
         "template": TEMPLATE, "spec": spec, "layout": rows,
         "layout_of": "specification" if spec.get("layout") else "template",
         "components": [{
@@ -218,6 +218,46 @@ def proposal(body: dict) -> dict:
                            "has been chosen for this kit — so it understands a short list."]}
 
 
+# What Superset's own standalone dashboard looks like to the page that frames it: holders carrying the chart
+# id, which is all the overlay reads. The real one is Superset's; this is enough to hold the mechanism to
+# account without starting it.
+DASHBOARD = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CEM QoE Overview</title><style>
+body { margin: 0; font: 13px Inter, sans-serif; background: #fff; padding: 16px; }
+.row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; margin-bottom: 12px; }
+.dashboard-component-chart-holder { border: 1px solid #E3E6EC; border-radius: 8px; padding: 8px;
+  min-height: 120px; }
+.t { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.b { height: 86px; border-radius: 4px; }
+</style></head><body>
+<h2>CEM QoE Overview</h2>
+<div class="row">
+  <div class="dashboard-component-chart-holder" style="grid-column: span 3">
+    <div class="t">QoE Score</div><div data-test-chart-id="100" data-test-viz-type="big_number_total"
+      class="b" style="background:#0972BC"></div></div>
+  <div class="dashboard-component-chart-holder" style="grid-column: span 3">
+    <div class="t">Active users</div><div data-test-chart-id="101" class="b" style="background:#26ABA8"></div></div>
+  <div class="dashboard-component-chart-holder" style="grid-column: span 3">
+    <div class="t">Degraded users</div><div data-test-chart-id="102" class="b" style="background:#F2B72D"></div></div>
+  <div class="dashboard-component-chart-holder" style="grid-column: span 3">
+    <div class="t">Degraded rate</div><div data-test-chart-id="103" class="b" style="background:#37A15E"></div></div>
+</div>
+<div class="row">
+  <div class="dashboard-component-chart-holder" style="grid-column: span 8">
+    <div class="t">QoE Score, daily trend</div>
+    <div data-test-chart-id="104" class="b" style="height:220px;background:#0972BC"></div></div>
+  <div class="dashboard-component-chart-holder" style="grid-column: span 4">
+    <div class="t">QoE Score, distribution</div>
+    <div data-test-chart-id="105" class="b" style="height:220px;background:#26ABA8"></div></div>
+</div>
+<div class="row">
+  <div class="dashboard-component-chart-holder" style="grid-column: span 6">
+    <div class="t">Top regions by QoE</div>
+    <div data-test-chart-id="106" class="b" style="height:200px;background:#5B6472"></div></div>
+</div>
+</body></html>
+"""
+
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>SharpSight Studio — preview</title>
 <link rel="stylesheet" href="/studio.css">
@@ -249,6 +289,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(204, b"", "image/x-icon")
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+        if path == "/dashboard":
+            return self._send(200, DASHBOARD.encode(), "text/html; charset=utf-8")
         if path.lstrip("/") in FILES:
             kind = "text/javascript" if path.endswith(".js") else "text/css"
             return self._send(200, (HERE / path.lstrip("/")).read_bytes(), f"{kind}; charset=utf-8")
@@ -598,6 +640,27 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     time.sleep(0.2)
     expect("and are gone when it is let go",
            page.eval_on_selector(".ss-canvas", "n => n.dataset.guides") is None)
+
+    # ── live: Superset's own dashboard, inside the workspace, with the chrome over it ──────────────────────
+    page.click('.ss-switch >> text=Live')
+    page.wait_for_selector(".ss-live-frame")
+    page.wait_for_function("() => document.querySelector('.ss-overlay')"
+                           " && Number(document.querySelector('.ss-overlay').dataset.boxes) > 0")
+    expect("live shows the dashboard Superset draws, not a photograph",
+           page.eval_on_selector_all(".ss-live-frame", "n => n.length") == 1)
+    expect("and a box over every chart it holds, read from that dashboard's own DOM",
+           int(page.eval_on_selector(".ss-overlay", "n => n.dataset.boxes")) == 7)
+    page.click('.ss-overlay [data-slot="trend_1"]')
+    time.sleep(0.3)
+    expect("clicking one selects that chart in the inspector",
+           "trend_1" in page.inner_text(".ss-stack > .ss-card:first-child header").lower())
+    expect("and the Studio says the draft is not in what is shown",
+           page.eval_on_selector_all(".ss-callout",
+                                     "ns => ns.some(n => n.textContent.includes('until it is committed'))"))
+    page.click('.ss-switch >> text=Compose')
+    time.sleep(0.3)
+    expect("compose comes back to the layout that can be moved",
+           page.eval_on_selector_all(".ss-tile", "n => n.length") > 0)
 
     # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
     if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',

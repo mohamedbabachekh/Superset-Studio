@@ -50,6 +50,12 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   rest possible: **a dark theme** (light is the default, dark is one button, kept per person), **a command
   palette** at ⌘K listing everything the workspace can do and every chart it holds, and **side panes that
   become drawers** under 1240px instead of squeezing the canvas into a third of a laptop.
+- **The canvas has two modes.** *Compose* is the draft — tiles that can be dragged, resized and reordered.
+  *Live* frames **Superset's own standalone dashboard inside the workspace**, with the Studio's chrome drawn
+  over it: a box per chart, read from that page's own DOM by the same chart id the engine's visual QA reads,
+  following its scrolling, clicking through to the inspector. Real charts, real data, and still no second
+  renderer — the one thing the brief forbids outright. A draft is not in what Superset holds until it is
+  committed, and Live says so rather than letting it look applied.
 - **It looks like an editor now.** The library is a shelf of cards, each with an icon drawn for that kind of
   chart; the canvas has the grain of a drawing surface; a tile under the pointer names itself, and a selected
   one is dashed, carries eight handles and wears its slot's label; and while a chart is dragged or resized,

@@ -333,7 +333,7 @@ is no second renderer, no second chart editor, no second SQL Lab here.
 
 | | |
 |---|---|
-| the canvas | the rows in force, each tile a photograph of that chart — cut out of one picture of the real dashboard (`aibi/picture.py`), because Superset's own screenshot endpoints cannot work in this image. *Preview* opens the live dashboard, with its filters and its tooltips |
+| the canvas, two modes | **Compose** — the draft's rows, each tile a photograph of that chart — cut out of one picture of the real dashboard (`aibi/picture.py`), because Superset's own screenshot endpoints cannot work in this image. *Preview* opens it in a tab. **Live** — Superset's own standalone dashboard framed inside the workspace, with a box over each chart read from that page's own DOM: real charts, real data, no second renderer. A draft is not in it until it is committed, and the mode says so |
 | what may be moved | the rows, in order; a chart's place on its row; a chart's width, taking from its neighbour, never below the template's minimum; a row's height. A chart may not leave its section — it has an owner and filters of its own — and with every template today being one row per section, that means it stays on its row |
 | the inspector | what a specification carries for that chart (a title, what it is for, a top N, a time grain, an order, a number format) and its governance: the metric, its definition, its owner, whether it is certified; the dataset, its owner, its domain, its grain; the slot's purpose and what it accepts |
 | the draft | the third state (§50.2): what a person is editing, kept with the project, saved a moment after each change, carrying a token so that two people with the page open cannot overwrite each other silently (§50.3) |

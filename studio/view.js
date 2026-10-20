@@ -239,6 +239,92 @@ function explorer(commands) {
 
 /* ── the canvas (§47.4) ──────────────────────────────────────────────────────────────────────────────────── */
 function canvas(client, commands) {
+  return state.mode === 'live' ? liveCanvas(commands) : composeCanvas(client, commands);
+}
+
+/* LIVE: the dashboard Superset is drawing, inside the workspace, with the Studio's own chrome over it.
+ *
+ * There is no second renderer here and no second copy of anything: the frame is Superset's own standalone
+ * dashboard (the address visual QA photographs), and the boxes drawn over it are read from ITS OWN DOM —
+ * same origin, so the holders can be measured rather than guessed. Clicking one selects that chart in the
+ * inspector; what the inspector then changes is the draft, which is not in this frame until it is committed,
+ * and the banner says so.
+ */
+function liveCanvas(commands) {
+  const dashboard = state.payload.project.dashboard;
+  if (!dashboard) {
+    return node('section', { class: 'ss-card' }, node('header', {}, 'Canvas — live'),
+      node('div', { class: 'ss-body' }, node('div', { class: 'ss-callout', text:
+        'This project has no dashboard in Superset yet: there is nothing live to show.' })));
+  }
+  const overlay = node('div', { class: 'ss-overlay' });
+  const frame = node('iframe', { class: 'ss-live-frame', src: `${dashboard.split('?')[0]}?standalone=1`,
+    title: 'The dashboard, as Superset draws it', loading: 'eager' });
+  const byChart = {};
+  (state.payload.components || []).forEach(component => {
+    if (component.chart_id) byChart[component.chart_id] = component.slot;
+  });
+
+  const sync = () => {
+    let holders = [];
+    try {
+      const inside = frame.contentDocument;
+      if (!inside) return;
+      holders = Array.from(inside.querySelectorAll('.dashboard-component-chart-holder'));
+    } catch (error) {
+      overlay.textContent = '';
+      return;                                   // another origin one day: the frame still shows the dashboard
+    }
+    overlay.textContent = '';
+    holders.forEach(holder => {
+      const slice = holder.querySelector('[data-test-chart-id]');
+      const slot = slice && byChart[Number(slice.getAttribute('data-test-chart-id'))];
+      if (!slot) return;
+      const box = holder.getBoundingClientRect();
+      overlay.appendChild(node('button', { class: 'ss-box', type: 'button', 'data-slot': slot,
+        'aria-selected': state.selected === slot, 'aria-label': `${act.title(slot)}, select it`,
+        style: `left: ${box.left}px; top: ${box.top}px; width: ${box.width}px; height: ${box.height}px`,
+        on: { click: () => commands.select(slot) } },
+      node('span', { class: 'ss-label', text: `${slot} · ${slotOf(slot).purpose || ''}` }),
+      state.selected === slot ? node('span', { class: 'ss-handles' },
+        ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'].map(where =>
+          node('i', { class: 'ss-handle', 'data-at': where }))) : null));
+    });
+    overlay.dataset.boxes = String(overlay.children.length);
+  };
+
+  frame.addEventListener('load', () => {
+    sync();
+    [400, 1200, 2500].forEach(wait => setTimeout(sync, wait));   // charts settle after their own queries
+    try {
+      frame.contentWindow.addEventListener('scroll', sync, { passive: true });
+      frame.contentWindow.addEventListener('resize', sync, { passive: true });
+    } catch (error) { /* another origin: the boxes simply do not follow */ }
+  });
+
+  // a draft exists the moment one is saved in this session, even if the payload was read before it
+  const stale = state.payload.editing === 'draft' || state.dirty || Boolean(state.savedAt);
+  return node('section', { class: 'ss-card', style: 'padding: 6px' },
+    node('header', {},
+      node('span', { text: 'Canvas — the dashboard Superset is drawing' }),
+      node('span', { class: 'ss-spacer' }),
+      mode(commands),
+      button('Open in Superset', () => window.open(dashboard, '_blank', 'noopener'), { 'data-weight': 'quiet' })),
+    node('div', { class: 'ss-body', style: 'padding: 8px' },
+      stale ? node('div', { class: 'ss-callout', style: 'margin-bottom: 8px', text:
+        'This is what Superset holds. Your draft is not in it until it is committed — Compose shows the '
+        + 'draft.' }) : null,
+      node('div', { class: 'ss-live' }, frame, overlay)));
+}
+
+const mode = commands => node('div', { class: 'ss-switch', role: 'group', 'aria-label': 'How the canvas shows it' },
+  ['compose', 'live'].map(which => node('button', { type: 'button', 'data-weight': 'quiet',
+    class: 'ss-btn', 'aria-pressed': (state.mode || 'compose') === which,
+    title: which === 'compose' ? 'The draft, as a layout you can move' : 'The dashboard, as Superset draws it',
+    text: which === 'compose' ? 'Compose' : 'Live',
+    on: { click: () => { state.mode = which; commands.redraw(); } } })));
+
+function composeCanvas(client, commands) {
   const sections = state.payload.template.sections || [];
   const inner = node('div', { class: 'ss-canvas' });
   const announced = new Set();
@@ -271,6 +357,7 @@ function canvas(client, commands) {
         ? 'Canvas — the layout this project placed' : `Canvas — the template's own layout` }),
       node('span', { class: 'ss-spacer' }),
       node('span', { class: 'ss-faint', text: tilesTaken() }),
+      mode(commands),
       select(String(viewport), viewports.map(([width, label]) => [String(width), label]),
         value => { state.viewport = Number(value); commands.redraw(); },
         { class: 'ss-mini', 'aria-label': 'The width it is read at' }),
