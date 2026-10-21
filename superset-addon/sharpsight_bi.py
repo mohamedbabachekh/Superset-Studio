@@ -47,9 +47,13 @@ DBT_DOCS = "Data models (dbt)"
 # The entry into the Studio: the projects of SharpSight, each opening its own workspace. A page of ours,
 # not a dashboard — so its audience is stated here and nowhere else.
 PROJECTS = "Projects"
+# The visual builder itself — a page of SharpSight's, self-contained (studio/builder.html), under Superset's
+# own top bar and session. Its audience is the one that may author a dashboard.
+BUILDER = "BI Studio"
 # name, French label, where it leads, the capabilities it is for (None: the documentation's own rule)
 LINKS = (
     (PROJECTS, "Projets", "/sharpsight/projects/", FACTORY),
+    (BUILDER, "Studio BI", "/sharpsight/builder/", FACTORY),
     ("BI Factory", "Fabrique BI", "/superset/dashboard/sharpsight-bi-factory/", FACTORY),
     ("Data Quality", "Qualité des données", "/superset/dashboard/sharpsight-data-quality/", FACTORY),
     ("Impact Analysis", "Analyse d’impact", "/superset/dashboard/sharpsight-impact-analysis/", FACTORY),
@@ -214,6 +218,22 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
         return render_template("sharpsight/studio.html", **context, appbuilder=appbuilder,
                                sharpsight_user=current_user.username, sharpsight_project=project_id,
                                sharpsight_links=links, sharpsight_assets="/sharpsight/studio-assets")
+
+    @pages.route("/builder/")
+    @pages.route("/builder/<project_id>/")
+    def builder_page(project_id: str = "cem-qoe-analytics"):  # noqa: ANN202
+        """The BI Studio's visual builder: one self-contained page (studio/builder.html), no build step and
+        no second application — the same pattern as the Studio's own files, read as they are in the repository.
+        Superset's session authenticates; this route states the audience, as the other pages of ours do."""
+        _ = project_id  # the page is self-contained; the id is accepted for a per-project URL
+        if not current_user.is_authenticated:
+            return redirect(f"{appbuilder.get_url_for_login}?next={request.path}")
+        if not may(BUILDER):
+            abort(403)
+        if not (studio_dir / "builder.html").is_file():
+            return ("the Studio builder is not mounted: ./studio is bind-mounted at /app/sharpsight/studio "
+                    "by docker-compose.ai-bi.yaml", 404, {"Content-Type": "text/plain; charset=utf-8"})
+        return send_from_directory(studio_dir, "builder.html", max_age=0)
 
     @pages.route("/studio-assets/<name>")
     def studio_assets(name: str):  # noqa: ANN202

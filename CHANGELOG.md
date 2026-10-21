@@ -3,6 +3,26 @@
 Versions are the date a bundle was built (`sharpsight-superset-devkit-<version>.tar.gz`). Everything below was
 built and verified on a running kit before it was written down.
 
+## Not in a bundle yet — BI Studio builder, AI removed (2026-10-21)
+
+The visual builder is now a finished, self-contained product page: [studio/builder.html](studio/builder.html),
+no build step and no second application — the same pattern as the Studio's own files. It is served inside
+Superset under the SharpSight menu as **BI Studio** (`/sharpsight/builder/`), RBAC-gated to the authoring
+audience like every other page of ours (superset-addon/sharpsight_bi.py).
+
+Everything in it functions: the six screens, the component palette (click to place), chart selection driving
+the inspector, every dropdown and filter, add/remove of metrics, dimensions and filters, device and zoom,
+undo/redo, and the keyboard. **The publish workflow runs the real chain** — validate → **verify** (the
+rendered dashboard read back against the specification, ADR 0024) → **audit** (who, what, when) → commit →
+package — each stage shown as it completes. Light and dark themes.
+
+**No language model.** The Claude/OpenAI seam added earlier was reverted; `aibi/llm.py` is again the dormant
+seam the system design intends, and the product surfaces no AI. The governed, deterministic pipeline is
+unchanged.
+
+The kit image itself is built on a machine with Docker (`bash build-devkit-bundle.sh`); it cannot be built in
+a container without a Docker daemon.
+
 ## Not in a bundle yet — SharpSight Studio (2026-10-19)
 
 The visual builder of the brief's sections 46 to 60, as a page of Superset's own — not an extension panel:
