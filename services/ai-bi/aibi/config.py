@@ -36,12 +36,7 @@ class Settings:
 
     api_token: str
     superset_gateway_token: str
-    # The model in front of the deterministic planner, if any. `none` (the default) calls nobody and needs no
-    # key or dependency; `claude` and `openai` are wired in aibi/llm.py and are opt-in per deployment.
     llm_provider: str
-    llm_model: str = ""
-    llm_api_key: str = ""
-    llm_base_url: str = ""
 
     @property
     def reader_dsn(self) -> str:
@@ -86,8 +81,7 @@ class Settings:
     def secrets(self) -> list[str]:
         """Every value that must never appear in a log, an audit record or an API answer."""
         return [s for s in (self.reader_password, self.records_reader_password, self.dbt_dev_password,
-                            self.superset_password, self.api_token, self.superset_gateway_token,
-                            self.llm_api_key)
+                            self.superset_password, self.api_token, self.superset_gateway_token)
                 if s]
 
 
@@ -124,9 +118,6 @@ def get_settings() -> Settings:
         api_token=_env("AIBI_API_TOKEN", ""),
         superset_gateway_token=_env("AIBI_SUPERSET_GATEWAY_TOKEN", ""),
         llm_provider=_env("AIBI_LLM_PROVIDER", "none"),
-        llm_model=_env("AIBI_LLM_MODEL", ""),
-        llm_api_key=_env("AIBI_LLM_API_KEY", ""),
-        llm_base_url=_env("AIBI_LLM_BASE_URL", ""),
     )
 
 

@@ -125,12 +125,8 @@ services:
       AIBI_SUPERSET_PASSWORD: "${AIBI_SUPERSET_PASSWORD}"
       AIBI_API_TOKEN: "${AIBI_API_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       AIBI_SUPERSET_GATEWAY_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
-      # Which model reads a request. `none` (the default) is the deterministic planner — it calls nobody.
-      # `claude` or `openai` put a model in front of it (aibi/llm.py); the key stays here, out of the image.
+      # Which model drives the planner is an open decision. `none` is the deterministic planner (aibi/llm.py).
       AIBI_LLM_PROVIDER: "${AIBI_LLM_PROVIDER:-none}"
-      AIBI_LLM_MODEL: "${AIBI_LLM_MODEL:-}"
-      AIBI_LLM_API_KEY: "${AIBI_LLM_API_KEY:-}"
-      AIBI_LLM_BASE_URL: "${AIBI_LLM_BASE_URL:-}"
     ports:
       # Loopback, and not negotiable the way the kit's own port is: the API trusts the user named in a header
       # because the caller holds the gateway's token. It is the portal's backend, not something to browse to.

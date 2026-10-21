@@ -14,7 +14,3 @@ dbt-postgres==1.11.0
 playwright==1.63.0
 Pillow==11.3.0
 pytest==8.4.2
-# A language model is OPTIONAL and off by default (AIBI_LLM_PROVIDER=none calls nobody). Install the one SDK
-# for the provider a deployment chooses — neither is needed to build, ship or run the kit offline:
-#   claude  → pip install anthropic
-#   openai  → pip install openai

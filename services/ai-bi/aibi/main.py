@@ -87,8 +87,7 @@ class Service:
         self.deployer = Deployer(self.store, self.audit, self.lifecycle, self.policy, self.registry)
         self.targets = config_targets()
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
-        self.parser = get_parser(settings.llm_provider, self.registry, model=settings.llm_model,
-                                 api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+        self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
         # Superset is the interface: the engine's own records are shown there — tables, two dashboards, the
         # gate of each project as a tag (superset_view.py). A Superset session of its own: it runs beside a
