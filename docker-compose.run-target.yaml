@@ -1,7 +1,7 @@
 # A SECOND SUPERSET on the same machine: the « run » environment a version is DEPLOYED TO.
 #
 # This exists so that « create a dashboard here and deploy it to the run platform » can be TRIED, on one
-# laptop, without a second server — and so scripts/e2e.sh can prove it: the package that was validated is
+# laptop, without a second server — and so tools/e2e.sh can prove it: the package that was validated is
 # imported there, its connection is repointed at that environment's warehouse, the audience SharpSight
 # decided is granted, and every chart is asked for its data before it is called deployed.
 #
@@ -94,7 +94,7 @@ services:
       - "${DEVKIT_BIND:-127.0.0.1}:${RUN_PORT:-3004}:8088"
     volumes:
       - run-home:/app/superset_home
-      - ./driver-jars:/app/driver-jars:ro
+      - ./kit/driver-jars:/app/driver-jars:ro
     depends_on:
       run-superset-init:
         condition: service_completed_successfully

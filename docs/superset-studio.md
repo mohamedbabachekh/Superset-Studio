@@ -21,7 +21,7 @@ V3 is two briefs in one file.
 
 | | |
 |---|---|
-| **§0–§45** — « Superset-native revision » | the brief this kit already implements. Its proof-of-concept list (§38) is scored item by item in [`docs/ai-bi.md` §3](ai-bi.md); its rule « check every extension API against the pinned version first » (§45) is why `registry/compatibility.yaml` records what `apache-superset-core 0.1.0rc3` actually offers |
+| **§0–§45** — « Superset-native revision » | the brief this kit already implements. Its proof-of-concept list (§38) is scored item by item in [`docs/ai-bi.md` §3](ai-bi.md); its rule « check every extension API against the pinned version first » (§45) is why `governance/registry/compatibility.yaml` records what `apache-superset-core 0.1.0rc3` actually offers |
 | **§46–§60** — « AI Visual Builder » | **new.** A visual authoring workspace: project explorer, dashboard canvas with drag/drop and resize, contextual inspector, a persistent AI copilot that answers with a reviewable diff, a validation drawer — and the draft → commit → package → UAT → PROD lifecycle around it |
 
 So the expansion is not a new engine. The engine, the registries, the policies, the validation, the versions,
@@ -69,7 +69,7 @@ by a link of the bar takes the page away. No fork, no second application, no sec
 
 ```
 Superset's top bar  (its own spa.html, its own application)
-└── /sharpsight/studio/<project>          ← the workspace, a blueprint route of superset-addon/
+└── /sharpsight/studio/<project>          ← the workspace, a blueprint route of studio/addon/
       ├── project / asset explorer        → /extensions/sharpsight/bi/…  (the person's session)
       ├── canvas                          → the draft specification, and pictures of its charts
       ├── contextual inspector            → the registry: datasets, metrics, dimensions, templates
@@ -79,7 +79,7 @@ Superset's top bar  (its own spa.html, its own application)
 
 Everything the page asks goes through the extension's gateway (`/extensions/sharpsight/bi/…`), which is where
 **who is asking** is already settled correctly: read from Superset's session on the server, never from the
-request, and handed to the engine, which applies `registry/security/rbac.yaml` to that person. The expansion
+request, and handed to the engine, which applies `governance/registry/security/rbac.yaml` to that person. The expansion
 adds routes to a gateway that already has the hard part right.
 
 Three things about that page are **spikes** before anything is built on it:
@@ -130,7 +130,7 @@ Three ways to put something truthful in a tile, measured against what this kit h
 
 | | How | Good for | Cost |
 |---|---|---|---|
-| **a picture** | the engine's Playwright + headless Chromium — already in `services/ai-bi/Dockerfile`, already used by `visual_qa_agent.py`. Superset's own screenshot endpoints **cannot** work here: its image carries no browser (measured) | every chart kind, with no renderer of ours | static; a cache and an invalidation rule; seconds per chart |
+| **a picture** | the engine's Playwright + headless Chromium — already in `engine/Dockerfile`, already used by `visual_qa_agent.py`. Superset's own screenshot endpoints **cannot** work here: its image carries no browser (measured) | every chart kind, with no renderer of ours | static; a cache and an invalidation rule; seconds per chart |
 | **numbers** | `POST /api/v1/chart/data`, which `superset_adapter.py` already calls | KPI tiles, tables, a sparkline — drawn from values, not from a chart library | nothing new, for simple kinds only |
 | **the real thing** | an iframe of the dashboard Superset renders (`?standalone=`) | **Preview**: what the reader will see, filters and cross-filters included | not editable; one dashboard, not one tile |
 
@@ -201,7 +201,7 @@ Re-checked from what was measured on 2026-10-04 — to be re-measured at the nex
 | a chat contribution (§14) | **yes** — it is in Superset's unreleased documentation only |
 | an MCP tool (§38 item 14) | the decorator exists (`superset_core.mcp`); `fastmcp` is not in the image |
 | a semantic-layer extension (§12, §25) | documented for 6.1.0, absent from the package the image ships |
-| a custom telecom visualization (§17) | compiling Superset's frontend. `registry/visualizations.yaml` lists `TelecomQoEChart` as approved-but-not-installed, and a specification asking for it is refused |
+| a custom telecom visualization (§17) | compiling Superset's frontend. `governance/registry/visualizations.yaml` lists `TelecomQoEChart` as approved-but-not-installed, and a specification asking for it is refused |
 | Superset's own screenshots (§31, §53.2) | no browser in Superset's image; the engine's Playwright does it |
 
 None of these blocks the expansion. Each is a reason the workspace is a page and not a panel.
@@ -288,7 +288,7 @@ session has no Docker daemon — what that leaves owed is the last table.
 
 ### Inside Superset
 
-`superset-addon/sharpsight_bi.py` serves `/sharpsight/studio/<project>/` from Superset's own page template,
+`studio/addon/sharpsight_bi.py` serves `/sharpsight/studio/<project>/` from Superset's own page template,
 and the Studio's two files as they are in the repository — **no build step, so the kit still needs no Node**.
 A *Projects* entry joins the SharpSight menu (the projects page was reachable by typing its address only),
 and each project there opens in the Studio.
@@ -297,9 +297,9 @@ and each project there opens in the Studio.
 
 | | |
 |---|---|
-| `services/ai-bi/tests/` | 194 pass, of which 24 are new: the layout's rules against the real registry and the real templates, the round trip, and the draft — its token, its refusals, what the workspace is given |
-| `python studio/preview.py --check` | the workspace driven in a browser against a stand-in engine: 13 promises, no console errors |
-| `python studio/preview.py` | the same page to look at, and `--shot` to photograph it |
+| `engine/tests/` | 194 pass, of which 24 are new: the layout's rules against the real registry and the real templates, the round trip, and the draft — its token, its refusals, what the workspace is given |
+| `python studio/web/preview.py --check` | the workspace driven in a browser against a stand-in engine: 13 promises, no console errors |
+| `python studio/web/preview.py` | the same page to look at, and `--shot` to photograph it |
 
 ### The second sitting, the same day
 
@@ -314,7 +314,7 @@ and each project there opens in the Studio.
 | `docs/spec-v3-coverage.md` | the brief's sixty sections, each marked built, partly or not here, with the reason |
 
 Proof after the second sitting: **212 engine tests** (18 more, for the copilot), and
-`python studio/preview.py --check` driving the workspace in a browser against a stand-in engine — **thirty
+`python studio/web/preview.py --check` driving the workspace in a browser against a stand-in engine — **thirty
 promises**, no console error.
 
 ### The third sitting, 2026-10-20 — deploying it, and trying the whole thing
@@ -329,11 +329,11 @@ platform, with everything it needs?* and *can all of it be tested?*
 | `config.targets()` | a target is five variables in the engine's own environment (`AIBI_TARGET_<NAME>_URL`, `_USER`, `_PASSWORD`, `_DB_NAME`, `_DB_URI`), plus `_FROM_STUDIO=false` to make it the command line's alone, `_GATE=UAT` when one reviewer's approval is enough to go there (a target that does not say is held to PROD, whatever gate a request names) and `_PUBLIC_URL` where a person reaches it. Nothing is deployed anywhere that is not named there, and nothing there is written down in this repository |
 | the engine, the extension, the CLI, the Studio | `GET /targets`, `GET /projects/{id}/deployments`, `POST /projects/{id}/versions/{v}/deploy` — on the gateway's allowlist, so the Studio may deploy and still cannot approve. `bash ai-bi.sh targets · deploy · deployments`. In the Studio: a **Deploy** button and a *Deployments* drawer tab showing the steps and what was read back |
 | `docker-compose.run-target.yaml` | a **second Superset** on this machine as the « run » environment: its own metadata database (`runbi`), its own accounts, its own Redis database, its own URL — and nothing of the kit's in it. `bash ai-bi.sh run-target` |
-| `scripts/e2e.sh` | the whole walk on a running kit, as eleven sections of promises: the machine · what is governed · a project from a request · the Studio's payload, draft, token refusal, validation and three roads to a proposal · a modification committed as the next version · the second person and the audit chain · the package and its checksum · the deployment and its read-back · the package as Superset's own importable export · what Superset's token may and may not open · both suites. `bash ai-bi.sh e2e`, `--only <n>` for one section |
+| `tools/e2e.sh` | the whole walk on a running kit, as eleven sections of promises: the machine · what is governed · a project from a request · the Studio's payload, draft, token refusal, validation and three roads to a proposal · a modification committed as the next version · the second person and the audit chain · the package and its checksum · the deployment and its read-back · the package as Superset's own importable export · what Superset's token may and may not open · both suites. `bash ai-bi.sh e2e`, `--only <n>` for one section |
 
 Proof after the third sitting: **231 engine tests** (nineteen more: the deployment's refusals and its read-back, the
 link a person can open, and the run-target overlay's handover to `config.targets`), and
-`python studio/preview.py --check` — **sixty-nine promises**, no console error.
+`python studio/web/preview.py --check` — **sixty-nine promises**, no console error.
 
 ### The fourth sitting, 2026-10-20 — the owner's four layouts, applied
 
@@ -355,7 +355,7 @@ given no way to ask); Run / Test / Build on a dbt model is **Open dbt docs** (a 
 before a dashboard asks for it); and the release pipeline is a **picture**, because promoting needs a second
 person on the command line (ADR 0010, ADR 0017). Each says so on the page itself.
 
-Proof after the fourth sitting: **231 engine tests**, and `python studio/preview.py --check` —
+Proof after the fourth sitting: **231 engine tests**, and `python studio/web/preview.py --check` —
 **eighty-two promises**, no console error, including that no row of data appears on any of the four screens.
 
 ### What is owed before this can be called done

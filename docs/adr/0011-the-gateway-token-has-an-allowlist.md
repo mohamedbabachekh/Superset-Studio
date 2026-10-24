@@ -17,7 +17,7 @@ the tool layer, people. The list is what a developer DOES: the projects, the Stu
 validation, a commit, a run, and the governed lists the explorer shows.
 
 Who is asking is read from Superset's session, on the server, never from the request; the engine applies
-`registry/security/rbac.yaml` to that person.
+`governance/registry/security/rbac.yaml` to that person.
 
 ## Consequences
 

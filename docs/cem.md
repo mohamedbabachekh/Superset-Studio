@@ -25,7 +25,7 @@ CEM_SCHEMA=dc_run
   `JDBC_URL`, `DRIVER_CLASS`, `JDBC_USER`, `JDBC_PASSWORD`, `KRB_PRINCIPAL`.
 
 **Kerberos**, if the cluster asks for a ticket: `CEM_KERBEROS=1`, `CEM_KRB_PRINCIPAL`, `CEM_KRB_KEYTAB`, and
-`krb5.conf` + the keytab in `./krb5/`. `cem_to_mart.py` then runs `kinit -kt` before the JVM opens the
+`krb5.conf` + the keytab in `./kit/krb5/`. `cem_to_mart.py` then runs `kinit -kt` before the JVM opens the
 connection, and reuses a ticket already in the cache.
 
 ## Prove it before blaming anything else
@@ -70,7 +70,7 @@ Aggregate **on the cluster** for anything you will chart: the helper refuses an 
 | `Name or service not known` | the JVM started and the driver loaded — only the hostname is wrong |
 | `HTTP 403 … user name or password is incorrect, or the account is locked` | the cluster heard you and refused; check the account, not the plumbing |
 | `Class … is not found` | wrong `CEM_JDBC_DRIVER`, or a jar that is not the Yacht driver |
-| `the JDBC driver is not where CEM_JDBC_JARS says` | the jar is not in `./driver-jars/` |
+| `the JDBC driver is not where CEM_JDBC_JARS says` | the jar is not in `./kit/driver-jars/` |
 | `/run/cem/cem.env does not exist in this container` | `cem.env` was never handed over — restart the kit |
 
 A password holding `$`, `#`, `/` or `!` is safe in `cem.env` (it is read as a file, byte for byte) and in

@@ -30,15 +30,15 @@ SharpSight_BI_Studio_Spec_Updated.md
 *.log
 
 # The customer's JDBC driver, and anything else dropped in to be mounted.
-driver-jars/*.jar
-krb5/*
-!krb5/README.txt
+kit/driver-jars/*.jar
+kit/krb5/*
+!kit/krb5/README.txt
 
 # What the kit produces: bundles, dashboard exports, mart archives.
 dist/
 # …except the built panel of the Superset extension: it is what the bundle is made of, and the kit has no Node
-!superset-extension/frontend/dist/
-superset-extension/frontend/node_modules/
+!studio/extension/frontend/dist/
+studio/extension/frontend/node_modules/
 exports/*
 !exports/.keep
 *.tgz

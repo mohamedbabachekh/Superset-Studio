@@ -10,8 +10,8 @@ engine is a governed pipeline with a warehouse role of its own, dbt, a browser, 
 
 ## Decision
 
-The engine is an **overlay**: `services/ai-bi/`, `docker-compose.ai-bi.yaml`, its own volumes and its own
-configuration layer (`superset-addon/`). The kit's `docker-compose.yaml` is never edited by it. The kit starts
+The engine is an **overlay**: `engine/`, `docker-compose.ai-bi.yaml`, its own volumes and its own
+configuration layer (`studio/addon/`). The kit's `docker-compose.yaml` is never edited by it. The kit starts
 without the engine and knows nothing about it.
 
 ## Consequences

@@ -50,7 +50,7 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - devkit-db:/var/lib/postgresql/data
-      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ./kit/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devkit -d devkit"]
       interval: 10s
@@ -175,7 +175,7 @@ services:
     volumes:
       - devkit-home:/app/superset_home
       # The JDBC driver is MOUNTED, never baked — the same rule the platform follows for the Yacht jar.
-      - ./driver-jars:/app/driver-jars:ro
+      - ./kit/driver-jars:/app/driver-jars:ro
       # AND THE CEM'S SETTINGS AS A FILE — through a VOLUME, not a bind mount. env_file above is a
       # convenience; it is NOT safe for a password, because compose interpolates those values too (measured
       # 2026-09-28: `p$aS#sw0rd${NOPE}end` in the file arrived as `p#sw0rded`, and the cluster refused an
@@ -187,7 +187,7 @@ services:
       - devkit-cem:/run/cem:ro
       # krb5.conf and the keytab for a Kerberised cluster. The folder is empty until you put them there, and an
       # empty mount costs nothing; /etc/krb5.conf is read by kinit and by the JVM.
-      - ./krb5:/run/krb5:ro
+      - ./kit/krb5:/run/krb5:ro
       # Dashboards you export land here, ready to be committed into a product repo.
       - ./exports:/app/exports
     depends_on:
@@ -310,7 +310,7 @@ services:
       - "${DEVKIT_BIND:-127.0.0.1}:${DEVKIT_TLS_PORT:-3443}:8443"
     volumes:
       # the image renders every *.template in this folder at start, replacing ONLY the variables set above
-      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./kit/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ${DEVKIT_TLS_DIR:-devkit-certs}:/etc/nginx/certs:ro
     depends_on:
       devkit-cert:

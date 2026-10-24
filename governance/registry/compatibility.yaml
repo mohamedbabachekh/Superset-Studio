@@ -1,0 +1,90 @@
+# The compatibility matrix (section 25): what this version of the AI BI service was built and run against.
+#
+# `tested` is a STATEMENT, made by whoever ran the kit's verification against those versions. What is actually
+# running is read live and put beside it by GET /compatibility (bash ai-bi.sh compatibility); a component
+# outside its tested versions is reported as untested — the service still starts, and says so in /health.
+#
+# A version is matched by prefix: "6.1" covers 6.1.0 and 6.1.3, "16" covers every PostgreSQL 16.
+sharpsight_ai_bi: "0.3"
+
+components:
+  superset:
+    tested: ["6.1"]
+    through: REST API only (aibi/superset_adapter.py); never its metadata database
+    verified_by: bash ai-bi.sh check-adapter <project>
+  dbt_core:
+    tested: ["1.12"]
+    through: the dbt command line, in the project's own workspace and branch
+  dbt_postgres:
+    tested: ["1.11"]
+  python:
+    tested: ["3.12"]
+  postgresql:
+    tested: ["16"]
+    through: the read-only data gateway (role bi_reader) and dbt
+  playwright:
+    tested: ["1.63"]
+    through: headless Chromium, for screenshots and visual QA
+  sqlglot:
+    tested: ["27"]
+    through: the policy engine's reading of every SQL statement
+  airflow:
+    status: not_used
+    note: this kit has no scheduler; the governed dbt project is built by the dbt-runner one-shot
+  # Superset's own extension system, which sharpsight-bi.supx is loaded by. It has no version of its own to ask
+  # for over the API: it is the one that came inside that Superset — apache-superset-core 0.1.0rc3 in 6.1.0, a
+  # release candidate, behind ENABLE_EXTENSIONS — so « tested » is said of the Superset version. What it offers in
+  # 6.1.0 was read from the image on 2026-10-04 (docs/ai-bi.md, chapter 3): panels in SQL Lab only, commands, a
+  # backend API; nothing on dashboards, Explore or datasets; no chat; no semantic-layer module; no fastmcp.
+  superset_extensions:
+    tested: ["6.1"]
+    through: sharpsight-bi.supx — a backend API, two commands, one panel in SQL Lab (studio/extension/)
+    verified_by: bash ai-bi.sh check-adapter <project>
+  # The Studio is a PAGE of Superset's, not an extension panel: 6.1.0 contributes to SQL Lab only. So it
+  # rests on three things of Superset's own, to be looked at again at every upgrade — its page template
+  # (superset/spa.html, its `body` and `tail_js` blocks), the context that template needs
+  # (superset.views.base.get_spa_template_context), and Flask's own csrf_token() in a template, because the
+  # Studio writes. What it ASKS is the extension's API, which is where its permissions are.
+  superset_studio:
+    tested: ["6.1"]
+    through: studio/addon/sharpsight_bi.py — /sharpsight/studio/<project>/, and studio/web/ served as it is
+    verified_by: python studio/web/preview.py --check
+    # the Studio's Live canvas frames Superset's own standalone dashboard and reads its DOM for the chart
+    # holders. Two things to look at again at every upgrade, and the first time this runs on a server:
+    #   · ?standalone=1 rendering inside a frame as it does in a tab (the address visual QA already loads);
+    #   · same-origin framing — this kit runs with TALISMAN_ENABLED = False, so nothing sets X-Frame-Options;
+    #     a Superset that turns Talisman on must still allow 'self' as a frame ancestor.
+    frames: Superset's standalone dashboard, same origin (docs/adr/0022-two-canvases-compose-and-live.md)
+    # the Studio's rail links to Superset's own pages by address (/superset/welcome/, /tablemodelview/list/,
+    # /chart/list/, /dashboard/list/, /sqllab/). If an upgrade moves one, the rail points at nothing while
+    # Superset's own menu is right: check them with the rest (docs/adr/0023)
+    links_to: Superset's own list pages, by address
+
+# WHERE A VERSION MAY BE DEPLOYED — the Superset at the OTHER end, which is a different server and may run a
+# different version. It is not in `components` above on purpose: those are read live out of this machine, and
+# a target's version is only known when it is called. A deployment reads it then, and refuses to carry a
+# package across a Superset version it was not built against (aibi/deploy.py, step 2 of nine — before
+# anything is imported). This section is what to read before naming a target.
+deployment_targets:
+  superset:
+    tested: ["6.1"]
+    through: |
+      the REST API only: database, import, dashboard, roles, row-level security, chart data
+      (aibi/deploy.py through aibi/superset_adapter.py) — never its metadata database
+    verified_by: bash ai-bi.sh e2e   # with bash ai-bi.sh run-target, which starts one on this machine
+    carries: a .ssbi package's superset/dashboard_export.zip, as Superset's own importer reads it
+    # three things an upgrade AT THE TARGET can break, each paid for already (docs/lessons.md):
+    #   · an import keeps an existing connection's URI, so the connection is repointed afterwards;
+    #   · a catalog is recorded per dataset, and for PostgreSQL the catalog is the database — the governed
+    #     connection must be called there what the package expects;
+    #   · an import answers 200 for a dashboard whose charts cannot draw, so every chart is asked for data.
+    named_by: AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI in the engine's own environment
+
+# Where governed data may come from. Only what a dataset of the registry was actually built on is « tested ».
+connectors:
+  postgresql: {status: tested, through: dbt-postgres and the data gateway}
+  trino: {status: not_tested}
+  spark: {status: not_tested}
+  oracle: {status: not_tested}
+  sqlserver: {status: not_tested}
+  hadoop: {status: not_tested}

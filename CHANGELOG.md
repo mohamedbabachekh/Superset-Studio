@@ -3,6 +3,34 @@
 Versions are the date a bundle was built (`sharpsight-superset-devkit-<version>.tar.gz`). Everything below was
 built and verified on a running kit before it was written down.
 
+## Not in a bundle yet — the repository grouped by role (2026-10-24)
+
+The layout below (`superset/`, `scripts/bundle/`…) was rejected: a folder per kind of file still left eleven
+folders at the root, and nothing said which of them was Superset, which the engine and which what a person
+sees. The checkout is now grouped by ROLE, each a single folder, every move a `git mv`. The root keeps what a
+person runs and what Docker and the installer look for there — the compose files and the `Dockerfile` stay, so
+every documented `docker compose …` command works as written.
+
+- **`kit/`** — Superset itself: `kit/superset/` (its modules and `templates/`), `kit/nginx/`, `kit/krb5/`,
+  `kit/initdb/`, `kit/driver-jars/`. The image still copies Superset's modules FLAT into `/app/pythonpath`.
+- **`engine/`** — the AI BI engine, everything that was `services/ai-bi/`; `services/` is gone. Its compose
+  build context is `./engine`.
+- **`studio/`** — everything shown inside Superset: `studio/web/` (the Studio's page, was `studio/`),
+  `studio/addon/` (was `superset-addon/`), `studio/extension/` (was `superset-extension/`). The extension's
+  bundle was rebuilt because a docstring in it names the new path; its checksum in `docker-compose.ai-bi.yaml`
+  is the rebuilt one.
+- **`governance/`** — `governance/registry/` (was `registry/`) and `governance/dbt/` (was `dbt/`, with
+  `cem_to_mart.py`). The engine mounts them at the same relative path under `/app` (`/app/governance/…`), and
+  `AIBI_REGISTRY_DIR` / `AIBI_DBT_PROJECT_DIR` default there, so a test finds a file the same way in the
+  container and in a checkout.
+- **`tools/`** — was `scripts/`: `tools/e2e.sh`, `tools/bundle/`, `tools/rehearse/`. Each finds the root from
+  its own location.
+- **`docs/brand/`** — was `brand/`.
+- **A bundle** carries `kit/initdb/`, `kit/nginx/`, `kit/driver-jars/`, `kit/krb5/` and `tools/bundle/` at the
+  same paths as the checkout; `verify-bundle.sh` asks for them there and still refuses the overlay under its old
+  names and its new ones. `install.sh --upgrade` looks for the driver and krb5 files of the old install under
+  `kit/` and, for a kit installed before this change, at its root.
+
 ## Not in a bundle yet — the repository's layout (2026-10-24)
 
 The root held thirty files; it now holds what a person opens first and the files Docker and the installer

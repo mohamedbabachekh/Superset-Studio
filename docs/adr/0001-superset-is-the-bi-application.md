@@ -26,7 +26,7 @@ Anything a person can already do in Superset is done in Superset.
   package, the record. None of it draws a chart.
 - Where SharpSight needs a surface of its own, it is for its own objects (a project, a draft, a version) —
   never for a chart or a dashboard.
-- An upgrade of Superset is an upgrade, not a port. What it can break is listed in `registry/compatibility.yaml`
+- An upgrade of Superset is an upgrade, not a port. What it can break is listed in `governance/registry/compatibility.yaml`
   and checked by `ai-bi.sh check-adapter`.
 - The cost is that what Superset cannot do, this platform cannot do either, until Superset can — or until a
   thin, documented fork is justified (ADR 0002).

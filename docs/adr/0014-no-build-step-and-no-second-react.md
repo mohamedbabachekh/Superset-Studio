@@ -24,7 +24,7 @@ bundler, no committed build output.
 - What a framework would have given — a virtual DOM — is not missed at this size: a redraw rebuilds a dozen
   tiles, and the two places where it would be felt are handled without one (a resize drag moves CSS variables
   and commits once; a text field commits on `change`).
-- The files are named in `superset-addon/sharpsight_bi.py` (`STUDIO_FILES`), so nothing else in that folder is
+- The files are named in `studio/addon/sharpsight_bi.py` (`STUDIO_FILES`), so nothing else in that folder is
   reachable from Superset.
 - If the workspace grows past what plain DOM carries well, this is the first decision to revisit — and the
   split into `api.js` / `state.js` / `view.js` / `ui.js` is already the shape a framework would want.

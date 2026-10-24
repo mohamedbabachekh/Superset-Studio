@@ -63,21 +63,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends unixodbc odbcin
       echo 'Setup = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so'; \
       echo 'FileUsage = 1'; } > /etc/odbcinst.ini
 
-# The checkout keeps Superset's own files in superset/ and the CEM's landing script beside the dbt project it
-# feeds (dbt/), but the image keeps them FLAT in /app/pythonpath: superset_config.py imports devkit_drivers,
-# devkit_forms, devkit_refresh and (through the drivers) yacht_dialect by bare name, and every command in the
-# compose files and the docs says /app/pythonpath/<file>.py. Only the sources moved; the image did not.
-COPY --chown=superset:superset superset/superset_config.py superset/devkit_drivers.py superset/devkit_forms.py superset/yacht_dialect.py superset/devkit_seed.py superset/devkit_refresh.py /app/pythonpath/
+# The checkout keeps Superset's own files in kit/superset/ and the CEM's landing script beside the dbt project it
+# feeds (governance/dbt/), but the image keeps them FLAT in /app/pythonpath: superset_config.py imports
+# devkit_drivers, devkit_forms, devkit_refresh and (through the drivers) yacht_dialect by bare name, and every
+# command in the compose files and the docs says /app/pythonpath/<file>.py. Only the sources moved; the image did not.
+COPY --chown=superset:superset kit/superset/superset_config.py kit/superset/devkit_drivers.py kit/superset/devkit_forms.py kit/superset/yacht_dialect.py kit/superset/devkit_seed.py kit/superset/devkit_refresh.py /app/pythonpath/
 # The sign-in page: FAB looks templates up by path, so ours only has to come FIRST in the search order
 # (superset_config.py puts this folder ahead of the stock one).
-COPY --chown=superset:superset superset/templates/ /app/pythonpath/templates/
-COPY --chown=superset:superset dbt/cem_to_mart.py /app/pythonpath/
+COPY --chown=superset:superset kit/superset/templates/ /app/pythonpath/templates/
+COPY --chown=superset:superset governance/dbt/cem_to_mart.py /app/pythonpath/
 # Its own copy of the brand — the dev kit must LOOK like the product, and copying beats reaching into
 # services/superset at build time (this folder builds on a machine that has only this folder).
-COPY --chown=superset:superset brand/ /app/superset/static/assets/images/sharpsight/
+COPY --chown=superset:superset docs/brand/ /app/superset/static/assets/images/sharpsight/
 
 # The French interface, compiled exactly as the product compiles it (the base image ships .po files only).
-COPY superset/sharpsight_translations.py /tmp/sharpsight_translations.py
+COPY kit/superset/sharpsight_translations.py /tmp/sharpsight_translations.py
 RUN /app/.venv/bin/python /tmp/sharpsight_translations.py fr && rm /tmp/sharpsight_translations.py
 
 USER superset

@@ -11,4 +11,4 @@
 *.zip binary
 *.supx binary
 # the built panel: what the bundle's checksum is taken over — byte for byte
-superset-extension/frontend/dist/* -text
+studio/extension/frontend/dist/* -text

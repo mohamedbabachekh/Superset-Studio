@@ -30,7 +30,7 @@ It is deliberately quiet — 196px, muted, icons at 16px — and it collapses to
   a router, and nothing in it is a page only the rail can reach.
 - The SharpSight half stays correct by construction (one rule, applied server-side). The Superset half is a
   static list, and is **the thing to check at an upgrade**: if Superset moves `/chart/list/`, the rail points
-  at nothing while its own menu is right. It is listed in `registry/compatibility.yaml` with the rest.
+  at nothing while its own menu is right. It is listed in `governance/registry/compatibility.yaml` with the rest.
 - The rail does not know what Superset's menu holds for this person, so an entry they cannot open still
   appears (Superset then refuses it). Reading Superset's own menu to filter it would be reading an internal
   structure, which [ADR 0002](0002-native-first-then-the-extension-no-fork.md) is wary of.

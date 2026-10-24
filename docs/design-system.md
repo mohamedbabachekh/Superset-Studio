@@ -12,7 +12,7 @@ Where this departs from them, §6 says so and why.
 
 ## 1 · One source for the values
 
-Every colour comes from `registry/design/tokens.yaml`, which is also what the generated dashboards and
+Every colour comes from `governance/registry/design/tokens.yaml`, which is also what the generated dashboards and
 Superset's own theme wear. The stylesheet restates them as CSS custom properties and **never writes a colour
 anywhere else** — which is what makes a second theme possible at all.
 
@@ -92,7 +92,7 @@ A tile shows what **Superset drew** — a photograph in Compose, the live chart 
 stylesheet styles a chart, and nothing should: a KPI that reads as a big number with a delta and a sparkline
 reads that way because Superset's `big_number_total` draws it that way.
 
-`studio/preview.py` draws stand-ins, in SVG, so the workspace can be looked at without a Superset — a line
+`studio/web/preview.py` draws stand-ins, in SVG, so the workspace can be looked at without a Superset — a line
 with its area, a histogram, a ranking with its values, a KPI with its delta. They are **invented numbers**,
 and they are drawn to look like what Superset draws for the same slot, because a canvas full of flat
 rectangles says nothing about whether the workspace around it reads well.
@@ -135,9 +135,9 @@ keystroke away in the palette (⌘K), which the builder's `⋯` opens.
 
 ## 5 · What to build against
 
-- `studio/studio.css` — the tokens and every class above, 540 lines, one file on purpose.
-- `studio/ui.js` — the primitives. If a pane needs something new, it goes here, not into the pane.
-- `studio/preview.py --check` — the workspace driven in a browser against a stand-in engine. A new component
+- `studio/web/studio.css` — the tokens and every class above, 540 lines, one file on purpose.
+- `studio/web/ui.js` — the primitives. If a pane needs something new, it goes here, not into the pane.
+- `studio/web/preview.py --check` — the workspace driven in a browser against a stand-in engine. A new component
   with a behaviour gets a promise there; it is under a minute for eighty-two promises, and it is what caught
   a rule for text fields stretching radio buttons, a focus handler cancelling its own click, and a check list
   capped at 280px hiding the last three steps of a deployment.

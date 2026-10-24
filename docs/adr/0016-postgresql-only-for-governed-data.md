@@ -11,7 +11,7 @@ dialect, and talks to a warehouse through a read-only role.
 ## Decision
 
 The engine's governed data is **PostgreSQL only** — the dbt profile, the SQL policy's dialect and the data
-gateway. `registry/compatibility.yaml` lists Trino, Spark, Oracle, SQL Server and Hadoop as `not_tested`, and
+gateway. `governance/registry/compatibility.yaml` lists Trino, Spark, Oracle, SQL Server and Hadoop as `not_tested`, and
 `/health` reports any component outside its tested versions.
 
 ## Consequences

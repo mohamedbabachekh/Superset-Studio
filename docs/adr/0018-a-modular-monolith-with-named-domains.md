@@ -11,7 +11,7 @@ contract and a failure mode per split — paid every day, by a team that does no
 
 ## Decision
 
-**One backend, with domains that are separate in the code and not on the network.** `services/ai-bi/aibi/` is
+**One backend, with domains that are separate in the code and not on the network.** `engine/aibi/` is
 one FastAPI application and one process; inside it, each domain is its own module with its own vocabulary:
 
 | Domain | Module |

@@ -28,7 +28,7 @@ bash install.sh --stop
 ## 2 · Build it
 
 ```bash
-bash scripts/bundle/build-devkit-bundle.sh
+bash tools/bundle/build-devkit-bundle.sh
 ```
 
 → `dist/sharpsight-superset-devkit-<today>.tar.gz` and its `.sha256`.
@@ -41,7 +41,7 @@ bash scripts/bundle/build-devkit-bundle.sh
 | `DEVKIT_WITH_JDBC` | `1` | `0` builds a smaller image with no Java and no CEM helper |
 
 ```bash
-INCLUDE_CEM=1 VERSION=20261003b bash scripts/bundle/build-devkit-bundle.sh
+INCLUDE_CEM=1 VERSION=20261003b bash tools/bundle/build-devkit-bundle.sh
 ```
 
 > **Never build twice under the same name.** Two tarballs called `…-20261003.tar.gz` with different contents is
@@ -49,7 +49,7 @@ INCLUDE_CEM=1 VERSION=20261003b bash scripts/bundle/build-devkit-bundle.sh
 > spends an hour on a "corrupt download". Bump `VERSION` — `20261003b`, `20261003c` — every time you rebuild on
 > the same day.
 
-**`INCLUDE_CEM=1` and secrets.** It always carries the driver jar from `driver-jars/`. It carries `cem.env`
+**`INCLUDE_CEM=1` and secrets.** It always carries the driver jar from `kit/driver-jars/`. It carries `cem.env`
 **only if that file is non-empty**, it says so out loud, and the manifest then reads `contains_secrets=yes`.
 Such a tarball holds an account and its password: treat it like a password file — not on a shared drive, not
 attached to a ticket. Without a `cem.env`, the kit installs with `cem.env.example`, which names everything but
@@ -60,7 +60,7 @@ the secrets.
 ## 3 · Verify it — before it leaves the machine
 
 ```bash
-bash scripts/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
+bash tools/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
 ```
 
 It checks the checksum (and that the checksum file names *this* tarball), that every file `install.sh` needs is
@@ -71,7 +71,7 @@ not execute on Linux at all.
 For a full rehearsal — unpack into a scratch folder, install, and sign in:
 
 ```bash
-INSTALL=1 bash scripts/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
+INSTALL=1 bash tools/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
 ```
 
 > `INSTALL=1` **removes the kit currently on this machine** (containers and volumes) before installing the
@@ -152,4 +152,4 @@ the container` (or that the CEM is not configured), `ready — http://…`, and 
 | the install hangs at `loading images` | it is 565 MB being unpacked; on a slow disk give it a few minutes |
 | upgrade installs but behaves like the old version | the images were not reloaded (see §5) |
 | `FileNotFoundError: C:/Users/.../Temp/…zip` while scripting on Windows | Git Bash rewrote a container path; put it inside a `sh -c '…'` string |
-| the build says `INCLUDE_CEM=1 but driver-jars/ holds no .jar` | the Yacht driver is not in `driver-jars/`; the kit will install without it |
+| the build says `INCLUDE_CEM=1 but kit/driver-jars/ holds no .jar` | the Yacht driver is not in `kit/driver-jars/`; the kit will install without it |

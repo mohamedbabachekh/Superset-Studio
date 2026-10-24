@@ -46,7 +46,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §14 | AI assistant inside the interface | **built, deterministic** — the Studio's copilot ([ADR 0012](adr/0012-the-copilot-is-deterministic-and-proposes.md)). Superset's own chat contribution does not exist in 6.1.0, which is moot on a page of ours |
 | §15 | The AI workflow | **partly** — discovery, plan, specification, validation, preview, commit are all built. « dbt if required » exists in the pipeline but not from the copilot: it proposes only what a specification can carry |
 | §16 | AI fills a template's slots | **built** — a template's slots are what both the planner and the copilot fill |
-| §17 | Custom telecom visualizations | **not here** — a visualization plugin is compiled into Superset's frontend; this kit does not rebuild it. `registry/visualizations.yaml` lists `TelecomQoEChart` as approved-but-not-installed, and a specification asking for it is refused rather than silently redrawn |
+| §17 | Custom telecom visualizations | **not here** — a visualization plugin is compiled into Superset's frontend; this kit does not rebuild it. `governance/registry/visualizations.yaml` lists `TelecomQoEChart` as approved-but-not-installed, and a specification asking for it is refused rather than silently redrawn |
 | §18 | Advanced JS/CSS, safely | **built** — the AI never writes CSS: a template names design tokens, and the generator turns a token into a rule scoped to one dashboard. No `<script>`, no Python, no shell from a prompt |
 
 ## §19–§25 · Governance, git, review, release, the extension API
@@ -74,7 +74,7 @@ that leaves owed is [`superset-studio.md` §11](superset-studio.md).
 | §32 | Separate DEV/UAT/PROD Supersets | **not here** — one Superset and one warehouse; promotion is a gate, a package and a record ([ADR 0017](adr/0017-one-superset-so-promotion-is-a-gate.md)) |
 | §33 | The `.ssbi` package | **built** — cut from the committed version, with its manifest, its checksums and what it was built with |
 | §34 | On-prem deployment | **partly** — Docker Compose, the kit plus the overlay. No Keycloak, RabbitMQ, MinIO or git server: the slice needs none of them |
-| §35 | Versioning strategy | **built** — `registry/compatibility.yaml`, with what is actually running put beside it, and `/health` saying when something is untested |
+| §35 | Versioning strategy | **built** — `governance/registry/compatibility.yaml`, with what is actually running put beside it, and `/health` saying when something is untested |
 | §36 | Security | **partly** — Superset RBAC, SharpSight RBAC, RLS, read-only AI SQL, timeouts and limits, extension checksums, audit. **Keycloak SSO is not built**; the extension bundle is checksummed, not signed |
 | §37 | Performance | **built** — the workspace loads one payload and then the lists; the tiles are one page load; long work is the engine's, with a run id |
 

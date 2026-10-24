@@ -1,0 +1,53 @@
+# The governed vocabulary the planner reads a request with.
+#
+# This is what the deterministic planner understands today. When a language model is wired in (aibi/llm.py),
+# it produces the SAME structured requirement from freer wording, and everything downstream is unchanged —
+# so this file is also the list of intents a model is allowed to return.
+intents:
+  trend:
+    purpose: trend
+    phrases: [daily trend, weekly trend, monthly trend, trend, over time, evolution, time series, timeline]
+  ranking:
+    purpose: ranking
+    phrases: [regional ranking, ranking, rank, top, league table, comparison by, breakdown by]
+  distribution:
+    purpose: distribution
+    phrases: [distribution, histogram, spread]
+  # A part-to-whole view. It PREFERS a pie, and gets one only where the template's slot accepts it and the
+  # metric's parts add up (metric.additive); otherwise it is drawn as the slot's next approved type, and
+  # the run says so.
+  share:
+    purpose: distribution
+    prefers: pie
+    phrases: [share by, share of, share, split by, split, composition, mix]
+  # A trend read as a quantity, drawn from zero: an area.
+  volume:
+    purpose: trend
+    prefers: area
+    phrases: [volume over time, volume trend, area chart, cumulative trend]
+  geo:
+    purpose: geo
+    phrases: [geographic view, geographical view, geographic, geography, map, territorial view]
+  detail:
+    purpose: detail
+    phrases: [detail table, details, detail, table of]
+
+# whose colours the dashboard should wear, when the request says so (governance/registry/design/tokens.yaml, `brands`).
+# Without one of these, a dashboard wears SharpSight's.
+brands:
+  inwi: ["inwi's colours", "inwi's colors", inwi colours, inwi colors, inwi brand, inwi branding, inwi theme]
+
+# words that name a column. Checked as whole words, longest first.
+dimensions:
+  date: [date, daily, day, days]
+  region: [region, regional, regions]
+  rat: [rat, radio access technology, technology, technologies]
+  site_id: [site, sites]
+
+# a ranking with no dimension named ranks by the first of these the dataset has
+default_ranking_dimensions: [region, rat]
+
+time_grains:
+  P1D: [daily, day]
+  P1W: [weekly, week]
+  P1M: [monthly, month]

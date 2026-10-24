@@ -72,7 +72,7 @@ bash ai-bi.sh where                      # where to look in Superset: the menu's
 | Memory | under 0.1 GB idle, about 0.5 GB while a dashboard is being rendered (measured: 77 and 479 MiB) |
 | Time | the request below takes 60 to 145 seconds, most of it dbt and three page loads (over three minutes once, right after an image build, on a machine short of memory) |
 
-The CEM data in this kit is **synthetic** (`services/ai-bi/sql/bootstrap.sql`): sixteen regions, four sites each,
+The CEM data in this kit is **synthetic** (`engine/sql/bootstrap.sql`): sixteen regions, four sites each,
 four technologies, ninety days ending yesterday, every value a pure function of site, technology and day. With
 a real cluster the same table is what `cem_to_mart.py` lands, and only the dbt variable `cem_source_schema`
 changes.
@@ -83,7 +83,7 @@ changes.
 
 | # | Step | What actually happens here |
 |---|---|---|
-| 1 | Parse the requirement | the request is read against the governed vocabulary (`registry/lexicon.yaml`) into a `Requirement`: a template, metrics, filters, and views — trend, ranking, distribution, share (a pie), volume over time (an area), geographic view, detail. A template is what its phrase **ends** with: « the CEM Executive template » is `executive`, and the run says it read it so. What is not recognised is **reported**, never guessed |
+| 1 | Parse the requirement | the request is read against the governed vocabulary (`governance/registry/lexicon.yaml`) into a `Requirement`: a template, metrics, filters, and views — trend, ranking, distribution, share (a pie), volume over time (an area), geographic view, detail. A template is what its phrase **ends** with: « the CEM Executive template » is `executive`, and the run says it read it so. What is not recognised is **reported**, never guessed |
 | 2 | Find certified datasets | only what the requester may read; certified first |
 | 3 | Find certified metrics | registered metrics only — a metric that is not in the registry is refused, not improvised |
 | 4 | Identify missing data | each view is laid into a template slot and asked: which dataset serves it? Here the map needs a region **code**, and the certified mart has only the region's name |
@@ -204,10 +204,10 @@ commit took — chart by chart, what was specified and what it is now, what was 
 the dashboard, by whom and with which comment (`bi_factory.version_changes`, from the audit record of the
 commit).
 
-### The menu, and dbt's documentation — `superset-addon/`
+### The menu, and dbt's documentation — `studio/addon/`
 
 Two files, mounted into the kit's Superset by the engine's compose overlay. The kit's image and its
-`superset/superset_config.py` are not edited: `superset-addon/superset_config_ai_bi.py` imports the kit's
+`kit/superset/superset_config.py` are not edited: `studio/addon/superset_config_ai_bi.py` imports the kit's
 configuration whole and extends one hook, and `SUPERSET_CONFIG_PATH` points at it. Without the overlay Superset
 starts exactly as the kit ships it.
 
@@ -265,7 +265,7 @@ These five dashboards are plain Superset charts over a table — a count, a tabl
 form data, without a template or a specification. They show records; they are not BI projects, and nothing of a
 project's own is made this way.
 
-### The extension — `superset-extension/`, `sharpsight-bi-0.1.0.supx`
+### The extension — `studio/extension/`, `sharpsight-bi-0.1.0.supx`
 
 A Superset extension of the kind Superset's own extension system loads: one bundle, a `.supx`. It is what the
 revised brief asks for, in the one place Superset 6.1.0 has for it.
@@ -303,14 +303,14 @@ is granted with it.
 
 **How it is built, recorded and loaded.**
 
-- `superset-extension/build.py` makes the bundle: `manifest.json`, the backend's Python, the built panel. The
+- `studio/extension/build.py` makes the bundle: `manifest.json`, the backend's Python, the built panel. The
   zip is made so that the same sources give the same bytes on any machine — sorted names, one date, stored not
   deflated, one « made on » — and its `sha256` is written into `docker-compose.ai-bi.yaml`, not only beside the
   bundle: whoever could replace the bundle in its folder could replace a checksum lying there with it. A test
   rebuilds the bundle and compares.
 - The panel is plain JavaScript built by webpack alone (module federation), with Node, on a developer's
   machine: `npm install && npm run build` in `frontend/`. The kit has no Node, so what was built
-  (`frontend/dist/`, 12 KB) is in the repository — and `python superset-extension/build.py --check-frontend`
+  (`frontend/dist/`, 12 KB) is in the repository — and `python studio/extension/build.py --check-frontend`
   builds it again elsewhere and says whether the two are the same. React and Ant Design are not in it: they are
   the page's own, so the panel wears Superset's theme.
 - **Superset's loader checks nothing about a bundle** — no checksum, no signature. The kit's configuration
@@ -326,7 +326,7 @@ is granted with it.
 The visual builder of the brief's sections 46 to 60, added 2026-10-19. Superset 6.1.0 contributes a panel in
 SQL Lab and nowhere else, so the Studio is **a page of Superset's own**: its page template, its application —
 which draws the top bar — its session, its theme, and the workspace below. No fork, no second application, no
-second React on the page (`studio/studio.js` is plain DOM).
+second React on the page (`studio/web/studio.js` is plain DOM).
 
 What it edits is a **specification**, not a dashboard. That is what keeps the brief's first five rules: there
 is no second renderer, no second chart editor, no second SQL Lab here.
@@ -352,8 +352,8 @@ That is the first of the three decisions this chapter used to leave to the owner
 because a canvas whose work the next build undoes is a lie. What a template still owns is everything else:
 which slots exist, what each accepts, what is mandatory, the minimum widths, the grid, the sections.
 
-Looked at without Superset: `python studio/preview.py` (the same page, against a stand-in for the extension's
-API) and `python studio/preview.py --check`, which drives it in a browser and holds it to thirteen promises.
+Looked at without Superset: `python studio/web/preview.py` (the same page, against a stand-in for the extension's
+API) and `python studio/web/preview.py --check`, which drives it in a browser and holds it to thirteen promises.
 
 ### Where the brief's proof-of-concept list stands
 
@@ -413,7 +413,7 @@ kit's image and from Superset's 6.1.0 documentation on 2026-10-04:
 
 The package is `apache-superset-core 0.1.0rc3`, behind `ENABLE_EXTENSIONS`, off by default. Upstream, the pull
 request that adds dashboards and Explore to the extension API was still open on 2026-10-04, and adds calls, not
-places to put a panel. `registry/compatibility.yaml` records this beside the versions.
+places to put a panel. `governance/registry/compatibility.yaml` records this beside the versions.
 
 So, following the brief's own order (extension API, else a supported API, else do not build — a fork only when
 essential), the decision taken on 2026-10-04 was **native first, then the extension** — and both are here:
@@ -428,11 +428,11 @@ are what would notice.
 
 | | Where | What it relies on |
 |---|---|---|
-| a configuration layer over the kit's | `SUPERSET_CONFIG_PATH`, `superset-addon/superset_config_ai_bi.py` | Superset loading the file that variable names |
+| a configuration layer over the kit's | `SUPERSET_CONFIG_PATH`, `studio/addon/superset_config_ai_bi.py` | Superset loading the file that variable names |
 | the hook | `FLASK_APP_MUTATOR` | being called with the application, before Superset adds its own views |
 | menu entries and their permissions | `appbuilder.add_link`, `sm.add_permissions_menu`, `sm.add_permission_role` | Flask-AppBuilder's public API; Superset building its AppBuilder with `update_perms=False` is why the permissions are created by hand |
 | the entries placed last | `appbuilder.menu.menu`, reordered at the first request | Flask-AppBuilder keeping its menu as a list |
-| who sees which entry | `cond=` on each link and on the category; `current_user.roles` | Flask-AppBuilder asking `cond` when it lists the menu; `registry/security/rbac.yaml` mounted read-only, and a role of it being the Superset role `sharpsight_<role>` |
+| who sees which entry | `cond=` on each link and on the category; `current_user.roles` | Flask-AppBuilder asking `cond` when it lists the menu; `governance/registry/security/rbac.yaml` mounted read-only, and a role of it being the Superset role `sharpsight_<role>` |
 | the route for dbt's documentation | a Flask blueprint, `/sharpsight/dbt-docs/` | Flask, and `flask_login.current_user` |
 | tags on a dashboard | `POST`/`DELETE /api/v1/tag/3/<id>/` | object type 3 being a dashboard (`superset.tags.models.ObjectType`); the `TAGGING_SYSTEM` flag, which the kit sets |
 | a dashboard's audience | `roles` on `PUT /api/v1/dashboard/<id>` | the `DASHBOARD_RBAC` flag, which the kit sets |
@@ -441,13 +441,13 @@ are what would notice.
 | what the page gives an extension | `window.superset.views`, `.commands`, `.authentication`; the location `sqllab.rightSidebar` | read from the 6.1.0 frontend bundle, not from a package |
 | React and Ant Design, shared | module federation's share scope: react 17.0.2, antd 5.27.6 | Superset's page offering them as singletons to an extension |
 | the extension's API path | `/extensions/sharpsight/bi/…` — not under `/api/v1` | where `@api` puts an extension's endpoints in 6.1.0 |
-| the kit's own, older than the engine | `superset/templates/head_custom_extra.html`, the brand CSS, the header that keeps images local | Superset's page template and class names |
+| the kit's own, older than the engine | `kit/superset/templates/head_custom_extra.html`, the brand CSS, the header that keeps images local | Superset's page template and class names |
 
 ---
 
 ## 4 · The pieces
 
-### The registries — `registry/`
+### The registries — `governance/registry/`
 
 Files, read at start and **checked against each other**; a registry that does not hold together stops the
 service.
@@ -473,7 +473,7 @@ Two things worth knowing about the metrics, because they are what "governed" buy
 - `cem.active_users` is a **daily mean** over the period, not a sum: the same subscriber is active on Monday
   and on Tuesday, and summing a month would print thirty times the customer base.
 
-### dbt — `dbt/`
+### dbt — `governance/dbt/`
 
 A real dbt Core project: sources → staging → intermediate → marts, a seed, macros, generic and singular tests.
 The profile reads everything from the environment.
@@ -556,7 +556,7 @@ SharpSight's RBAC is the only place this is decided; Superset is told, and then 
 is refused it by `get_metric`, and a specification naming it fails validation. A dashboard is for the roles
 granted every one of its datasets **and** cleared for every one of its metrics.
 
-**What leaves as a file** is in `registry/policies.yaml` (`security.export`): a dashboard's *data* may be
+**What leaves as a file** is in `governance/registry/policies.yaml` (`security.export`): a dashboard's *data* may be
 exported by the roles it is granted to — the rows their policy gives them, counted against the data gateway's —
 and by nobody else; its *definition* leaves through the `.ssbi` package only. Both are asked of Superset: of
 the account with no role during validation, of every role at publication.
@@ -585,11 +585,11 @@ What Superset 6.1 does not offer, and what the engine does instead:
 | no dashboard version history, no restore | every version is a git commit of the specification and the export; restore re-applies a specification (`POST /projects/<id>/restore`) |
 | no browser in the image, so its screenshot endpoints cannot work | the engine renders with its own headless browser |
 
-Nothing above the adapter says "slice" or "form_data": `registry/visualizations.yaml` and two files
+Nothing above the adapter says "slice" or "form_data": `governance/registry/visualizations.yaml` and two files
 (`chart_agent.py`, `superset_adapter.py`) are what replacing Superset would rewrite. The registries, the
 specifications, git and dbt would not notice.
 
-### The compatibility matrix — `registry/compatibility.yaml`, `aibi/compatibility.py`
+### The compatibility matrix — `governance/registry/compatibility.yaml`, `aibi/compatibility.py`
 
 What this version of the service was built and run against — Superset, dbt-core, dbt-postgres, Python,
 PostgreSQL, Playwright, sqlglot — and the connectors a governed dataset was actually built on (PostgreSQL;
@@ -611,7 +611,7 @@ The list is the brief's section 27, name for name.
 | **SQL** | syntax, allowed database, read-only, timeout, result size, forbidden operations — over every statement the run executed — plus **probes**: nine hostile statements the guard must refuse |
 | **BI** | dataset exists, saved metrics match the registry's expression, each chart's query succeeds, the dashboard's own requests succeed, no empty mandatory chart. **Dependencies exist**: each component followed down — its chart on the dashboard, the chart's dataset in Superset on the read-only connection, the dbt model behind it — each filter's target column, and no chart on the dashboard that the specification does not name. **Filters twice**: each one through Superset's query API, and all of them on the dashboard itself — it is opened with the filters set, and every chart in scope must receive something else than it does unfiltered |
 | **Security** | RBAC, row-level policies applied, a user with no grant is refused every dataset, tenant isolation (the same roles in another tenant are refused), the BI connection is read-only — and **in Superset itself**: the dashboard's roles and row-level rules are the ones SharpSight grants, and an account with no SharpSight role is refused the dashboard and its data. **Export permissions**: that account can take out neither the dashboard's definition nor its data as a file. **Direct URL access**: the dashboard's page, a chart, the chart's data, the chart in the editor, the dataset and SQL Lab, each asked for outright — signed in with no role, and not signed in at all |
-| **Performance** | query duration, dashboard load duration, query count, result size, and **concurrency** — every chart's query, uncached, by four people in the same instant — against `registry/policies.yaml` |
+| **Performance** | query duration, dashboard load duration, query count, result size, and **concurrency** — every chart's query, uncached, by four people in the same instant — against `governance/registry/policies.yaml` |
 | **Visual** | screenshot produced, every component on the page, no overlap, layout follows the template, nothing empty, no clipped text, no text under 9 px, labels have room. **Every section is announced**: each titled section the specification names has its header on the page. **Excessive whitespace**: the cards cover the grid and rows follow each other — a section's header between two rows is not a hole — (a failure), and a chart reaches across its card (a warning under 30 %). **Template violations**: each card has its slot's width in grid columns and its row's height, shows a chart its slot accepts, and the dashboard's stylesheet is the template's own. A clipped dashboard title is a warning |
 
 The visual checks are measurements too: DOM geometry, pixel statistics of each chart's body, and the network
@@ -718,9 +718,9 @@ holds nothing that can change a governed table.
 
 ## 7 · Add a dataset, a metric, a template
 
-All three are a YAML file in `registry/` and a restart of the service.
+All three are a YAML file in `governance/registry/` and a restart of the service.
 
-- **A dataset** — its dbt model must exist in `dbt/`; give every column a `classification`, name the grain, and
+- **A dataset** — its dbt model must exist in `governance/dbt/`; give every column a `classification`, name the grain, and
   set `role` on what can be a time axis (`time`), a breakdown (`dimension`), a number (`measure`) or a map key
   (`geo_region`, with `geo: {standard, country}`). A `label` is what people read in a table header or a filter.
 - **A metric** — an expression over a dataset's columns, the datasets and columns it is valid on (`lineage`),
@@ -775,11 +775,11 @@ platform that was not touched:
 | **What a commit does not take from Superset** | only what a specification carries, of the charts it has a place for: kind, metric, dimension, dataset, top N, order, time grain, bins, title — and, since the Studio, the layout, which a specification now carries and a commit keeps. The rest of what Explore offers — number formats, colours, a legend, a chart's own filters, ECharts options — is named per chart and set back. On the dashboard itself, a chart added by hand, a row moved in Superset's dashboard editor, a filter changed there are named, and undone: the layout is the template's and is applied again at every build. So Superset's dashboard editor is open, and what is done in it does not last. And a dashboard built from nothing in Superset is not adopted as a project: a project starts with a request |
 | **Two decisions that are the owner's**, put to them, not taken here | (the first of three is now taken: a layout placed IN THE STUDIO is kept, carried in the specification — what is still open is the layout a person moves in Superset's OWN dashboard editor, which is still named and undone; `aibi/layout.py::from_positions` is the reading it would need to be adopted instead.) How a project that stands in UAT or PROD gets a next version in a kit that has one Superset — today neither a request nor a commit is accepted on it; and whether a developer may QUERY in SQL Lab — their account opens its page, where the panel is, and is given no database there: granting the governed schemas would need Superset's row-level rules applied in SQL Lab too |
 | **The records' dashboards, per workspace** | this kit has one workspace, so no row-level rule is set on `bi_factory`; every row carries its tenant for the day there are several |
-| **Branding, the parts not done** | SharpSight's colours lead the interface and the dashboards (2026-10-04). Not done: the five system dashboards have English titles under a French menu; the application is still named « SharpSight Superset — atelier », where the brief says « SharpSight BI Studio powered by Apache Superset »; a client's brand changes a dashboard's accent and series, not Superset's page around it (6.1 can give one dashboard a theme of its own — not used); the brand values are written in three places kept alike by hand (`superset_config.py`, `registry/design/tokens.yaml`, the sign-in page's template) |
+| **Branding, the parts not done** | SharpSight's colours lead the interface and the dashboards (2026-10-04). Not done: the five system dashboards have English titles under a French menu; the application is still named « SharpSight Superset — atelier », where the brief says « SharpSight BI Studio powered by Apache Superset »; a client's brand changes a dashboard's accent and series, not Superset's page around it (6.1 can give one dashboard a theme of its own — not used); the brand values are written in three places kept alike by hand (`superset_config.py`, `governance/registry/design/tokens.yaml`, the sign-in page's template) |
 | **The portal** (`sharp-sight-web`, `sharp-sight-api`) and **Keycloak** | not built. The API is what the portal would call; identity arrives as a header behind a shared token; RBAC is a file, and people reach Superset through a command an administrator runs |
 | **Airflow** | not running, and listed as not used in the compatibility matrix. The `dbt-runner` one-shot builds the governed models at each start |
 | **Separate UAT and PROD environments** | one Superset, one warehouse: promotion is the gate, the package and the record |
-| **`TelecomQoEChart`** (the custom visualization) | not built. It is listed in `registry/visualizations.yaml` as approved-but-not-installed, and a specification asking for it is refused. Building it means compiling Superset's frontend with the plugin |
+| **`TelecomQoEChart`** (the custom visualization) | not built. It is listed in `governance/registry/visualizations.yaml` as approved-but-not-installed, and a specification asking for it is refused. Building it means compiling Superset's frontend with the plugin |
 | **RabbitMQ, MinIO, a reverse proxy** | not needed by the slice; generations run one at a time in-process, packages are files |
 | **An MCP server** | the tool layer has the shape (names, schemas, one audited entry point); nothing serves it over MCP yet. Superset 6.1.0 carries an MCP service whose dependency (`fastmcp`) is not in its image |
 | **The offline bundle** | `build-devkit-bundle.sh` does not carry the engine's image yet |

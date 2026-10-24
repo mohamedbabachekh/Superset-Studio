@@ -56,7 +56,7 @@ person may open.
 
 - A person can be on a screen where the draft is not visible (the data, the releases) while it is unsaved.
   The draft state is therefore in the **top bar**, on every screen, and the beforeunload guard is unchanged.
-- Four screens are four things to keep right; the browser harness (`studio/preview.py --check`) grew to
+- Four screens are four things to keep right; the browser harness (`studio/web/preview.py --check`) grew to
   eighty-two promises, and holds each screen to what it must show — including that **no row of data appears
   anywhere**, which is the easiest of these to lose by accident.
 - Nothing new is asked of the engine except one route that already existed —

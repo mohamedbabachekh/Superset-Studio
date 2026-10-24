@@ -43,4 +43,4 @@ Live shows what Superset holds. A draft is not in it until it is committed, and 
   only the boxes are lost. The code says so and does not break.
 - **To verify against a running Superset**: that `?standalone=1` renders inside a frame as it does in a tab,
   and that the product's own Superset (where Talisman may be on) allows same-origin framing. Both are in
-  `registry/compatibility.yaml`.
+  `governance/registry/compatibility.yaml`.

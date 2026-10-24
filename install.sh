@@ -52,11 +52,15 @@ if [ ! -f .env ] && docker volume inspect "${PROJECT}_devkit-db" >/dev/null 2>&1
     cp -p "$previous/.env" .env && chmod 600 .env
     brought=".env"
     if [ -s "$previous/cem.env" ] && [ ! -s cem.env ]; then cp -p "$previous/cem.env" cem.env && chmod 600 cem.env; brought="$brought, cem.env"; fi
-    for folder in driver-jars krb5 exports; do
-      [ -d "$previous/$folder" ] || continue
+    for folder in kit/driver-jars kit/krb5 exports; do
+      source="$previous/$folder"
+      # A kit installed before its folders were grouped by role (2026-10-24) kept the driver and krb5 at its
+      # root. They are looked for there too, or an upgrade from it would leave the CEM without its driver.
+      [ -d "$source" ] || source="$previous/$(basename "$folder")"
+      [ -d "$source" ] || continue
       mkdir -p "$folder"
       n=0
-      for file in "$previous/$folder"/* "$previous/$folder"/.[!.]*; do
+      for file in "$source"/* "$source"/.[!.]*; do
         [ -e "$file" ] || continue
         [ -e "$folder/$(basename "$file")" ] && continue          # what this bundle ships is not overwritten
         cp -pr "$file" "$folder/" && n=$((n + 1))

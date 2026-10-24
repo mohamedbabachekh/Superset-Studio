@@ -51,7 +51,7 @@ services:
              -v records_pw="$$RECORDS_PW" \
              -f /sql/bootstrap.sql
     volumes:
-      - ./services/ai-bi/sql:/sql:ro
+      - ./engine/sql:/sql:ro
     depends_on:
       devkit-db:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
   # What Airflow triggers in the target architecture. Here: once, at every start.
   dbt-runner:
     build:
-      context: ./services/ai-bi
+      context: ./engine
     image: sharpsight-ai-bi:0.2.0
     command: ["python", "-m", "aibi.dbt_build"]
     environment:
@@ -70,7 +70,7 @@ services:
       DBT_PASSWORD: "${AIBI_BUILDER_PASSWORD}"
       DBT_SCHEMA: bi
     volumes:
-      - ./dbt:/app/dbt:ro
+      - ./governance/dbt:/app/governance/dbt:ro
       - aibi-dbt-prod:/var/lib/dbt-prod
       - aibi-dbt-docs:/var/lib/dbt-docs
     depends_on:
@@ -107,7 +107,7 @@ services:
 
   sharpsight-ai-bi:
     build:
-      context: ./services/ai-bi
+      context: ./engine
     image: sharpsight-ai-bi:0.2.0
     environment:
       AIBI_WAREHOUSE_HOST: devkit-db
@@ -136,14 +136,16 @@ services:
       # because the caller holds the gateway's token. It is the portal's backend, not something to browse to.
       - "127.0.0.1:${AIBI_PORT:-3003}:8080"
     volumes:
-      # the governed registries and the governed dbt project: read-only. The service cannot edit either.
-      - ./registry:/app/registry:ro
-      - ./dbt:/app/dbt:ro
+      # the governed registries and the governed dbt project: read-only. The service cannot edit either. Each is
+      # mounted at the path it has in the repository, under /app, so a test finds a file the same way in the
+      # container as in a checkout.
+      - ./governance/registry:/app/governance/registry:ro
+      - ./governance/dbt:/app/governance/dbt:ro
       - aibi-dbt-prod:/var/lib/dbt-prod:ro
       # read by the engine's own tests only: the rule of who sees what in Superset is stated there too
-      - ./superset-addon:/app/superset-addon:ro
+      - ./studio/addon:/app/studio/addon:ro
       # …and that the bundle Superset loads is the one these sources build
-      - ./superset-extension:/app/superset-extension:ro
+      - ./studio/extension:/app/studio/extension:ro
       - ./docker-compose.ai-bi.yaml:/app/docker-compose.ai-bi.yaml:ro
       # …and that the « run » environment hands the engine the variables it actually reads
       - ./docker-compose.run-target.yaml:/app/docker-compose.run-target.yaml:ro
@@ -174,7 +176,7 @@ services:
 
   # WHAT SHARPSIGHT ADDS TO SUPERSET ITSELF. Superset is the interface: the engine has no page of its own. This
   # extends the kit's Superset service — compose merges it with the one in docker-compose.yaml — with a
-  # configuration layer over the kit's own (superset-addon/), and dbt's documentation to serve, read-only.
+  # configuration layer over the kit's own (studio/addon/), and dbt's documentation to serve, read-only.
   superset-devkit:
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config_ai_bi.py
@@ -188,21 +190,21 @@ services:
       SHARPSIGHT_ENGINE_URL: "http://sharpsight-ai-bi:8080"
       SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
-      # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
-      SHARPSIGHT_EXTENSION_SHA256: "2452dbd90e224bbaa886f53becf18d6da5ecc7d23c22b86a75568c834e77e979"
+      # could replace the bundle there could replace a checksum beside it (written by studio/extension/build.py)
+      SHARPSIGHT_EXTENSION_SHA256: "4bdb7169cc9653829c759a33d7c7873740ce1fd7a4249b900fdf444c2e6a12bb"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
       # the Studio's own stylesheet and script, read as they are in the repository: no build step, no Node
       SHARPSIGHT_STUDIO_DIR: /app/sharpsight/studio
     volumes:
       # Superset's own extension system: the built bundle and its recorded checksum, read-only
-      - ./superset-extension/bundle:/app/sharpsight/extensions:ro
-      - ./superset-addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
-      - ./superset-addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
-      - ./superset-addon/templates:/app/sharpsight/templates:ro
-      - ./studio:/app/sharpsight/studio:ro
+      - ./studio/extension/bundle:/app/sharpsight/extensions:ro
+      - ./studio/addon/superset_config_ai_bi.py:/app/pythonpath/superset_config_ai_bi.py:ro
+      - ./studio/addon/sharpsight_bi.py:/app/pythonpath/sharpsight_bi.py:ro
+      - ./studio/addon/templates:/app/sharpsight/templates:ro
+      - ./studio/web:/app/sharpsight/studio:ro
       - aibi-dbt-docs:/app/sharpsight/dbt-docs:ro
       # who may see which entry of the SharpSight menu, and read dbt's documentation: the same file the engine reads
-      - ./registry/security/rbac.yaml:/app/sharpsight/rbac.yaml:ro
+      - ./governance/registry/security/rbac.yaml:/app/sharpsight/rbac.yaml:ro
 
 volumes:
   aibi-state:

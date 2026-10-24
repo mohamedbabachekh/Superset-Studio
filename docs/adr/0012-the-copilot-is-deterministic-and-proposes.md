@@ -10,7 +10,7 @@ is the seam where one plugs in.
 
 ## Decision
 
-The copilot reads a request with the **same governed vocabulary the planner reads** (`registry/lexicon.yaml`,
+The copilot reads a request with the **same governed vocabulary the planner reads** (`governance/registry/lexicon.yaml`,
 the registered metrics, the template's slots), narrowed to the instructions a person gives an existing
 dashboard: add a view, take one off, rename, a top N, a time grain, an order, a number format, a width, a
 height, an order of rows, and « what is … ».

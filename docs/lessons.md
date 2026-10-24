@@ -174,7 +174,7 @@ connection and a dashboard made in it, then the new bundle from a new folder —
 two faults nothing else would have: an empty variable made `[ "" -lt 2 ]` fail quietly, so the one settings
 change the upgrade existed for was skipped; and the bundle's `.env.example` still carried the AI BI engine's
 section, so « add the settings this version knows » wrote seven `AIBI_` lines into a kit with no engine.
-→ `scripts/rehearse/rehearse-upgrade.sh <old bundle> <new bundle>` is the test for any change to `install.sh`: old bundle, real content, new bundle, then
+→ `tools/rehearse/rehearse-upgrade.sh <old bundle> <new bundle>` is the test for any change to `install.sh`: old bundle, real content, new bundle, then
 ask for the content THROUGH Superset (a query through the saved connection proves its password still decrypts;
 a row count does not).
 
@@ -225,7 +225,7 @@ the container may be refused. It must not fail the operation around it.
 ## The AI BI engine, and what Superset's API really does
 
 All of these were met on 2026-10-03 while running the engine ([ai-bi.md](ai-bi.md)) against this kit's Superset
-6.1. Each has a test in `services/ai-bi/tests/` so it cannot quietly come back.
+6.1. Each has a test in `engine/tests/` so it cannot quietly come back.
 
 **A query-level `time_range` REPLACES the range written in a `TEMPORAL_RANGE` filter clause.**
 That is how a dashboard's time filter reaches a chart: the chart carries its own clause on the time column
@@ -245,7 +245,7 @@ largest (`order_desc`, `row_limit`): two different settings.
 
 **The Morocco map shipped in 6.1 is the older sixteen-region division** (`MA-01` … `MA-16`: « Grand Casablanca »,
 « Souss - Massa - Draâ »…), not today's twelve regions. A reference table using the current codes joins
-perfectly and draws an empty map. → `dbt/seeds/dim_region.csv` was written from the image's own geometry.
+perfectly and draws an empty map. → `governance/dbt/seeds/dim_region.csv` was written from the image's own geometry.
 
 **Superset's image has no browser, so its screenshot endpoints cannot work here** — and there is no dashboard
 version history or restore in the API at all. → the engine renders with its own headless browser, and keeps
@@ -350,7 +350,7 @@ from a hidden element in the theme's « strong » weight and draws the title its
 kit's theme (strong = 500) the two widths differ by a pixel for some titles, and one pixel is enough for the
 ellipsis. Not a font-loading race: a cold and a warm load measure the same. → the engine's dashboards carry
 `.dynamic-title-input { font-weight: inherit }`, so the drawn text is the measured text (352 needed / 351 given
-became 351 / 351). The same line in `superset/templates/head_custom_extra.html` would cure every dashboard in the kit,
+became 351 / 351). The same line in `kit/superset/templates/head_custom_extra.html` would cure every dashboard in the kit,
 hand-made ones included; that is the kit's stylesheet and was left alone.
 
 **A pie's label on one line loses its share for long names; on two it does not.** `label_type: template` with
@@ -629,7 +629,7 @@ extension host put it there, and a page of ours is not an extension. → the tok
 Flask's own `csrf_token()`, with Superset's `/api/v1/security/csrf_token/` as the fallback, because the
 extension's API refuses a write without it (`csrf_exempt = False`, the lesson above).
 
-**A workspace can be looked at without starting Superset.** `python studio/preview.py` serves the same page
+**A workspace can be looked at without starting Superset.** `python studio/web/preview.py` serves the same page
 against a stand-in for the extension's API; `--check` drives it in a browser and holds it to thirteen
 promises — the moves it offers, the minimum widths, the section a chart may not leave, the draft it saves,
 undo. Thirteen checks in nine seconds, against a kit that takes a minute to start and real data to be
@@ -645,7 +645,7 @@ specification that `dashboards.validate` then judges.
 **A form control inherits rules written for other form controls.** `.ss-field input { width: 100% }` is right
 for a text field and wrong for a radio button: in the chart gallery it stretched every radio across its row
 and left the label nothing, which read as a broken list rather than a CSS rule. → the rule excludes radios and
-checkboxes, and the gallery is in `studio/preview.py --check`, which would have caught it the first time if
+checkboxes, and the gallery is in `studio/web/preview.py --check`, which would have caught it the first time if
 it had been written before the modal.
 
 **A modal and a toast hang off `<body>`, outside the page's own root.** Every style was scoped to

@@ -16,14 +16,14 @@ bar — with the person's Superset session, theme and address.
 ## Decision
 
 The Studio is served at `/sharpsight/studio/<project>/` by the add-on's Flask blueprint
-(`superset-addon/sharpsight_bi.py`), on Superset's own page template. Its files are served as they are in the
+(`studio/addon/sharpsight_bi.py`), on Superset's own page template. Its files are served as they are in the
 repository. What it asks, it asks of the extension's API, which is where its permissions already are.
 
 ## Consequences
 
 - One application, one sign-in, one theme. Nothing about it is a second product.
 - It rests on three things of Superset's own: `superset/spa.html` and its blocks, `get_spa_template_context`,
-  and Flask's `csrf_token()` in a template. All three are in `registry/compatibility.yaml` as things to
+  and Flask's `csrf_token()` in a template. All three are in `governance/registry/compatibility.yaml` as things to
   re-check at every upgrade.
 - Superset's application is loaded whole, to draw its bar, and told to take only the height the bar needs; its
   own client-side navigation removes the page when the address leaves `/sharpsight/`.

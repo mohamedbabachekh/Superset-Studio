@@ -19,7 +19,7 @@
 #   bash ai-bi.sh e2e [--only n]                           THE WHOLE SOLUTION, TRIED: a project generated, a
 #                                                          draft saved, a version committed, approved,
 #                                                          exported and — with a target — deployed and read
-#                                                          back (scripts/e2e.sh)
+#                                                          back (tools/e2e.sh)
 #   bash ai-bi.sh run-target [--stop|--erase]              a SECOND Superset on this machine, as the « run »
 #                                                          environment a version is deployed to
 #   bash ai-bi.sh --stop       stop the engine, leave the kit running
@@ -78,7 +78,7 @@ case "${1:-}" in
     # Taking a version to another Superset — the « run » environment. What is deployed is the package that
     # was validated, and only a version someone OTHER than whoever asked for it has already approved for
     # that gate. Where the targets come from: AIBI_TARGET_<NAME>_URL and the rest, in this service's
-    # environment (services/ai-bi/aibi/config.py).
+    # environment (engine/aibi/config.py).
     project="${2:?usage: ai-bi.sh deploy <project> <version> --to <target> [--gate UAT|PROD] [comment]}"
     version="${3:?the version to deploy, e.g. 1.0.0}"
     shift 3
@@ -106,17 +106,17 @@ case "${1:-}" in
     echo "  SharpSight ▸ Releases          what was approved, by whom, and what shipped        $bi/superset/dashboard/sharpsight-releases/"
     echo "  SharpSight ▸ Audit trail       every action, by whom, how it ended                 $bi/superset/dashboard/sharpsight-audit-trail/"
     echo "  SharpSight ▸ Data models       dbt's own documentation and lineage                 $bi/sharpsight/dbt-docs/"
-    echo "A person sees the entries they may open (registry/security/rbac.yaml); an administrator sees all six."
+    echo "A person sees the entries they may open (governance/registry/security/rbac.yaml); an administrator sees all six."
     echo "  SQL ▸ SQL Lab                  the SharpSight panel, on the right: project, gate, Validate, Commit   $bi/sqllab/"
     echo "                                 (for an account named like a user of rbac.yaml:  bash ai-bi.sh person dev.user)"
     echo "Asking and approving are here:  bash ai-bi.sh request \"…\"   ·   bash ai-bi.sh approve <project> UAT|PROD"
     echo "A chart is edited in Superset's own Explore; then:  bash ai-bi.sh validate <project>   ·   bash ai-bi.sh commit <project>"
     exit 0 ;;
-  person)   cli person "${2:?usage: ai-bi.sh person <a user of registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
+  person)   cli person "${2:?usage: ai-bi.sh person <a user of governance/registry/security/rbac.yaml>}" --user release.manager; exit $? ;;
   check-adapter)
     compose exec -T sharpsight-ai-bi sh -c 'python -m aibi.adapter_check "$@"' check "${2:?usage: ai-bi.sh check-adapter <project>}"; exit $? ;;
   test)     compose exec -T sharpsight-ai-bi sh -c 'cd /app && python -m pytest'; exit $? ;;
-  e2e)      shift; exec bash scripts/e2e.sh "$@" ;;
+  e2e)      shift; exec bash tools/e2e.sh "$@" ;;
   run-target)
     # A SECOND SUPERSET, here, as the environment a version is deployed to — so that « create a dashboard
     # and deploy it to the run platform » can be tried on one laptop. It is a stand-in for a real target,
