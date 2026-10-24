@@ -32,7 +32,10 @@ from pydantic import BaseModel, Field
 from . import __version__, compatibility
 from .audit import AuditLog
 from .config import Settings, get_settings
+from .config import targets as config_targets
+from .copilot import Copilot, diff as spec_diff
 from .data_gateway import DataGateway
+from .deploy import Deployer
 from .dbt_runner import DbtRunner, lineage_from_artifacts, semantic_layer
 from .git_adapter import GitAdapter, GitError
 from .layout import problems as layout_problems
@@ -78,6 +81,11 @@ class Service:
         self.lifecycle = Lifecycle(self.tools, settings.exports_dir)
         # the Studio's tiles: one picture of the dashboard, cut per slot (aibi/picture.py)
         self.pictures = Pictures(self.tools.visual, state)
+        # the Studio's copilot: a request in words, answered with a proposal and never with a change
+        self.copilot = Copilot(self.registry, self.policy, self.tools.dashboards)
+        # taking a version to another Superset — the « run » environment — and proving it arrived
+        self.deployer = Deployer(self.store, self.audit, self.lifecycle, self.policy, self.registry)
+        self.targets = config_targets()
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
         self.parser = get_parser(settings.llm_provider, self.registry)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
@@ -177,6 +185,16 @@ SUPERSET_MAY = frozenset({
     ("DELETE", "/projects/{project_id}/draft"), ("POST", "/projects/{project_id}/draft/validate"),
     ("POST", "/projects/{project_id}/draft/commit"), ("POST", "/projects/{project_id}/pictures"),
     ("GET", "/projects/{project_id}/picture/{slot}"),
+    # the copilot and the gallery: both answer with a proposal and change nothing by themselves
+    ("POST", "/projects/{project_id}/propose"), ("POST", "/projects/{project_id}/compose"),
+    ("POST", "/projects/{project_id}/alter"),
+    # what a run found, last time: the levels of validation only a run can produce
+    ("GET", "/projects/{project_id}/report"), ("GET", "/datasets/{dataset_id}/lineage"),
+    # the immutable package a version was cut as (§47.2 « Export Package »): reading it is not promoting it
+    ("GET", "/projects/{project_id}/versions/{version}/package"),
+    # where a version may go, where it has been, and taking it there — never approving it to go
+    ("GET", "/targets"), ("GET", "/projects/{project_id}/deployments"),
+    ("POST", "/projects/{project_id}/versions/{version}/deploy"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
 })
@@ -194,8 +212,10 @@ def caller(request: Request, authorization: str = Header(default=""),
            x_sharpsight_user: str = Header(default="")) -> Identity:
     token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
     if _same(token, service.settings.api_token):
+        request.state.via = "command line"
         return service.policy.identify(x_sharpsight_user)
     if _same(token, service.settings.superset_gateway_token):
+        request.state.via = "Superset"
         route = getattr(request.scope.get("route"), "path", "")
         if not superset_may(request.method, route):
             raise HTTPException(status_code=403, detail=(
@@ -476,6 +496,39 @@ def _studio_spec(project: dict[str, Any]) -> tuple[DashboardSpec, bool]:
     return DashboardSpec(**project["spec"]), False
 
 
+def _filter_options(spec: DashboardSpec, template: Any, identity: Identity) -> list[dict[str, Any]]:
+    """The columns a filter may be put on. A filter reaches charts, so it is offered only on a dataset the
+    dashboard already uses; the template says which ROLES of column may be filtered on and how many filters
+    it allows; the registry says which columns this person may read at all."""
+    offered: dict[str, dict[str, Any]] = {}
+    for dataset_id in spec.datasets():
+        dataset = service.registry.datasets.get(dataset_id)
+        if dataset is None or not service.policy.can_read(identity, dataset):
+            continue
+        readable = service.policy.readable_columns(identity, dataset)
+        for name, column in dataset.columns.items():
+            if name not in readable or column.role not in template.filters.allowed_roles:
+                continue
+            entry = offered.setdefault(name, {"column": name, "role": column.role, "label": column.label or name,
+                                              "datasets": [], "used": name in spec.filters})
+            entry["datasets"].append(dataset.id)
+    # a filter that does not reach every chart is a warning at validation, so say it here instead of there
+    for entry in offered.values():
+        entry["reaches_every_chart"] = len(entry["datasets"]) == len(spec.datasets())
+    return sorted(offered.values(), key=lambda entry: (not entry["used"], entry["column"]))
+
+
+def _security(spec: DashboardSpec, identity: Identity) -> dict[str, Any]:
+    datasets = [service.registry.datasets[d] for d in spec.datasets() if d in service.registry.datasets]
+    metrics = [service.registry.metrics[m] for m in spec.metrics() if m in service.registry.metrics]
+    rules = service.policy.row_rules(datasets, metrics)
+    return {"audience": service.policy.audience(datasets, metrics),
+            "row_rules": rules,
+            "classifications": sorted({m.classification for m in metrics}),
+            "uncertified": sorted({m.id for m in metrics if not m.certified}
+                                  | {d.id for d in datasets if not d.certified})}
+
+
 def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, Any]:
     spec, from_draft = _studio_spec(project)
     template = service.registry.template(spec.dashboard.template)
@@ -540,6 +593,37 @@ def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, An
         "token": _token(project.get("draft")),
         "problems": layout_problems(spec, template),
         "pictures": service.pictures.taken(project["project_id"]),
+        # what the draft changes about the committed specification — the brief's review panel (§21)
+        "diff": spec_diff(DashboardSpec(**project["spec"]), spec, template) if from_draft else [],
+        # the versions this project has, and where each stands: the release panel (§22). Promotion is not
+        # here and is not meant to be: PROD needs a second person, on the command line.
+        "versions": [{"version": v.version, "status": v.status, "state": v.state, "created_at": v.created_at,
+                      "created_by": v.created_by, "title": v.title,
+                      "git_commit": v.git_commit, "package": (v.package or {}).get("name"),
+                      "validation": (v.validation or {}).get("summary") or {}}
+                     for v in service.store.list_versions(project["project_id"])],
+        "ask": service.copilot.examples(spec, template),
+        # the component library (§47.3): what may be drawn, where each may go, and what is approved but not
+        # installed in this BI engine — a library that offered a visualization the engine cannot draw would
+        # be offering a refusal
+        "visualizations": [
+            {"id": name, "status": body.status, "needs": body.needs,
+             "slots": [slot for slot, defined in template.slots.items() if name in defined.accepts],
+             "purposes": sorted({template.slots[slot].purpose for slot in template.slots
+                                 if name in template.slots[slot].accepts})}
+            for name, body in service.registry.visualizations.items()],
+        # the filters this dashboard may carry: a column of a dataset it already uses, in a role the
+        # template allows, that this person may read (§47.5, « for a dashboard: filters »)
+        "filter_options": _filter_options(spec, template, identity),
+        # who may open the dashboard this becomes, and the row-level rules that follow it — SharpSight's
+        # decision, enforced in Superset when a version is built (§19 « Security »)
+        "security": _security(spec, identity),
+        # the free slots a chart may be added to, with what each accepts: the gallery of §48.3
+        "free_slots": [{"slot": slot, "purpose": template.slots[slot].purpose,
+                        "accepts": template.slots[slot].accepts,
+                        "mandatory": template.slots[slot].mandatory,
+                        "section": template.section_of(slot)}
+                       for slot in service.copilot._free(spec, template)],
     }
 
 
@@ -655,6 +739,137 @@ def commit_draft(project_id: str, body: Commit, response: Response, identity: Id
     threading.Thread(target=work, name=f"run-{run.id}", daemon=True).start()
     response.status_code = 202
     return {"run_id": run.id, "request_id": run.request_id, "status": "running", "layout_of": layout_source(spec)}
+
+
+class Request(BaseModel):
+    request: str = Field(default="", max_length=500)
+
+
+class Compose(BaseModel):
+    slot: str = Field(max_length=40)
+    metric: str = Field(max_length=120)
+    type: Optional[str] = Field(default=None, max_length=40)
+    dimension: Optional[str] = Field(default=None, max_length=120)
+    time_grain: Optional[Literal["P1D", "P1W", "P1M"]] = None
+
+
+def _proposal(project: dict[str, Any], identity: Identity, make) -> Any:  # noqa: ANN001
+    spec, _ = _studio_spec(project)
+    template = service.registry.template(spec.dashboard.template)
+    proposal = make(spec, template)
+    service.audit.record(action="copilot:propose", user=identity.user, request_id=str(uuid.uuid4()),
+                         actor="ai", ai_model=proposal.read_by, project_id=project["project_id"],
+                         metrics=proposal.touches.get("metrics", []),
+                         outcome="refused" if proposal.unresolved and not proposal.changes else "ok",
+                         detail={"request": proposal.request, "understood": proposal.understood,
+                                 "changes": [c.says for c in proposal.changes],
+                                 "unresolved": proposal.unresolved})
+    return proposal
+
+
+@app.post("/projects/{project_id}/propose")
+def propose(project_id: str, body: Request, identity: Identity = Depends(caller)) -> Any:
+    """A request in words, answered with a proposal: what it would change, what it touches, whether it would
+    pass validation — and the specification as it would be. Nothing is saved. Applying it is the Studio
+    sending that specification back as a draft, through the same route as any other change (§47.6)."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity,
+                     lambda spec, template: service.copilot.propose(body.request, spec, template, identity))
+
+
+@app.post("/projects/{project_id}/compose")
+def compose(project_id: str, body: Compose, identity: Identity = Depends(caller)) -> Any:
+    """The same proposal, from the Studio's own form rather than from a sentence: a chart on a free slot.
+    « Do not force users to use AI » (§48.3) — the manual path is not a prompt, and is checked the same."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity, lambda spec, template: service.copilot.compose(
+        body.slot, body.metric, body.type, body.dimension, body.time_grain, spec, template, identity))
+
+
+class Alter(BaseModel):
+    slot: str = Field(max_length=40)
+    type: Optional[str] = Field(default=None, max_length=40)
+    metric: Optional[str] = Field(default=None, max_length=120)
+    dimension: Optional[str] = Field(default=None, max_length=120)
+    dataset: Optional[str] = Field(default=None, max_length=120)
+
+
+@app.post("/projects/{project_id}/alter")
+def alter(project_id: str, body: Alter, identity: Identity = Depends(caller)) -> Any:
+    """A chart changed from the Studio's own controls — a dataset, a kind, a metric, a dimension. The same
+    proposal the words and the gallery produce: checked, and never applied by asking."""
+    service.policy.require(identity, "bi.generate")
+    project = _project(project_id, identity)
+    return _proposal(project, identity, lambda spec, template: service.copilot.alter(
+        body.slot, body.model_dump(exclude={"slot"}), spec, template, identity))
+
+
+class Deploy(BaseModel):
+    target: str = Field(max_length=40)
+    gate: Literal["UAT", "PROD"] = "UAT"
+    comment: str = Field(default="", max_length=500)
+
+
+@app.get("/targets")
+def deployment_targets(identity: Identity = Depends(reader)) -> Any:
+    """Where a version may be deployed from here. A target is a Superset somewhere else, named in this
+    service's environment and written down nowhere in the repository."""
+    return [{"name": name, "url": target.where, "database": target.database_name,
+             "from_studio": target.from_studio}
+            for name, target in sorted(service.targets.items())]
+
+
+@app.get("/projects/{project_id}/deployments")
+def deployments(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """Every deployment of this project, most recent last — what went where, when, by whom, and what was
+    read back."""
+    project = _project(project_id, identity)
+    return project.get("deployments") or []
+
+
+@app.post("/projects/{project_id}/versions/{version}/deploy")
+def deploy(project_id: str, version: str, body: Deploy, request: Request,
+           identity: Identity = Depends(caller)) -> Any:
+    """Take a version to another Superset, and prove it arrived.
+
+    What it deploys is the package that was validated — not a new generation — and it deploys only a version
+    ALREADY APPROVED for that gate, by someone other than whoever asked for it. Approving is elsewhere, on
+    purpose; this executes an approval that exists, and records what it did."""
+    service.policy.require(identity, "bi.generate")
+    _project(project_id, identity)
+    target = service.targets.get(body.target)
+    if target is None:
+        raise LifecycleError(f"no deployment target is called « {body.target} ». "
+                             f"This service knows: {', '.join(sorted(service.targets)) or 'none'}")
+    if not target.from_studio and getattr(request.state, "via", "") != "command line":
+        raise LifecycleError(f"{body.target} is deployed to from the command line only")
+    record = service.store.get_version(project_id, version)
+    refused = service.deployer.refusal(record, target, body.gate)
+    if refused:
+        raise LifecycleError(refused)
+    if not service.busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a generation is already running; this kit runs one at a time")
+    try:
+        return service.deployer.deploy(record, target, body.gate, identity.user, str(uuid.uuid4()),
+                                       uuid.uuid4().hex[:12])
+    finally:
+        service.busy.release()
+
+
+@app.get("/projects/{project_id}/report")
+def last_report(project_id: str, identity: Identity = Depends(reader)) -> Any:
+    """The whole of the last version's validation — the brief's levels 2 to 6, which only a run can produce:
+    the SQL and the data, the security probes, the render, the picture, the timings (§53)."""
+    project = _project(project_id, identity)
+    latest = service.store.latest_version(project_id)
+    if latest is None:
+        raise HTTPException(status_code=404, detail=f"{project_id} has no version yet")
+    return {"version": latest.version, "status": latest.status, "created_at": latest.created_at,
+            "created_by": latest.created_by, "validation": latest.validation,
+            "dashboard": latest.dashboard, "package": latest.package, "built_with": latest.built_with,
+            "history": [h.model_dump() for h in latest.history], "approvals": [a.model_dump() for a in latest.approvals]}
 
 
 @app.post("/projects/{project_id}/pictures")

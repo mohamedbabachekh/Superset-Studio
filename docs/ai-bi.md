@@ -333,13 +333,18 @@ is no second renderer, no second chart editor, no second SQL Lab here.
 
 | | |
 |---|---|
-| the canvas | the rows in force, each tile a photograph of that chart — cut out of one picture of the real dashboard (`aibi/picture.py`), because Superset's own screenshot endpoints cannot work in this image. *Preview* opens the live dashboard, with its filters and its tooltips |
+| the canvas, two modes | **Compose** — the draft's rows, each tile a photograph of that chart — cut out of one picture of the real dashboard (`aibi/picture.py`), because Superset's own screenshot endpoints cannot work in this image. *Preview* opens it in a tab. **Live** — Superset's own standalone dashboard framed inside the workspace, with a box over each chart read from that page's own DOM: real charts, real data, no second renderer. A draft is not in it until it is committed, and the mode says so |
 | what may be moved | the rows, in order; a chart's place on its row; a chart's width, taking from its neighbour, never below the template's minimum; a row's height. A chart may not leave its section — it has an owner and filters of its own — and with every template today being one row per section, that means it stays on its row |
 | the inspector | what a specification carries for that chart (a title, what it is for, a top N, a time grain, an order, a number format) and its governance: the metric, its definition, its owner, whether it is certified; the dataset, its owner, its domain, its grain; the slot's purpose and what it accepts |
 | the draft | the third state (§50.2): what a person is editing, kept with the project, saved a moment after each change, carrying a token so that two people with the page open cannot overwrite each other silently (§50.3) |
 | validate | the engine's own Level 1 report on the draft, in the drawer — the layout, the slots, the visualizations, the metrics, the datasets, this person's clearance for each. It touches nothing in Superset |
 | commit | the draft becomes a version **through the pipeline every other commit goes through**: the ten quality gates, Superset, visual QA, git, a package. Nothing here approves, and nothing here promotes |
-| the AI panel | present, and wired to nothing, on purpose: no language model has been chosen (`aibi/llm.py`). It says so, and says what it will do when one is — a proposal with a diff, and Preview / Apply / Reject |
+| the library | the chart kinds the registry approves, grouped by what they are for, each saying which of this template's slots accept it and whether it is installed in this BI engine. One drags onto a row, or is clicked |
+| the dashboard's own inspector | with nothing selected: its title, description and owner; its **filters** — the columns the template allows, on datasets it already uses, with how many it allows; its **security** — who may open the dashboard this becomes and the row-level rules that follow; and its layout |
+| adding a chart | a gallery: a free slot of the template, a governed metric, a type the slot accepts. What comes back is a **proposal**, not a change — the registry chooses the dataset and refuses what cannot be drawn that way |
+| the copilot | **deterministic** (`aibi/copilot.py`): it reads a request with the planner's own governed vocabulary and answers with a proposal — the changes, what they touch, whether validation would pass, and the specification as it would be. Add a view, take one off, rename, a top N, a time grain, an order, a number format, a width, a height, a row moved, « what is … ». What it does not understand, it says it does not understand. No language model has been chosen (`aibi/llm.py` is the seam); one plugs in by producing the same proposal |
+| the drawer | Validation (Level 1, without touching Superset), Changes (what the draft changes about its version, and what Superset holds against what was validated), Last run (the levels only a run can produce — the data, the security probes, the render, the picture, the timings), Releases (every version, its gate, its package) |
+| the keyboard | every move the mouse can make, and a card that lists them |
 
 The layout a person places is **kept**: it is carried in the specification, in the template's own shape (rows
 of slots with a width in twelfths), it is what the next build draws, and a commit no longer sets it back.
@@ -360,7 +365,7 @@ Its section 38 lists fourteen things for one `sharpsight-bi.supx`. On Superset 6
 | 2 | SharpSight menu entries | **done** — Superset's top bar, shown by `rbac.yaml` |
 | 3 | Governance drawer | **in the Studio's inspector**, per chart: metric, definition, owner, certification, dataset, domain, grain. Elsewhere: certified badges and tags in Superset's lists; *Data Quality* |
 | 4 | Asset Library panel | **in the Studio's explorer**: the project's outline, and the governed datasets and metrics this person may use. Adding a chart is still a request to the engine, not a drag from the list |
-| 5 | AI chat panel | the panel is **in the Studio** and answers nothing: no language model was chosen (and 6.1.0 has no chat contribution, which is moot on a page of ours) |
+| 5 | AI chat panel | **done, deterministic** — the Studio's copilot answers with a proposal and changes nothing by itself. No language model was chosen; 6.1.0 has no chat contribution either, which is moot on a page of ours |
 | 6 | Validate command | **done** — panel, command, command line |
 | 7 | Commit command | **done** — panel, command, command line |
 | 8 | dbt status panel | as a dashboard: *Data Quality* (models, every test); dbt's own documentation under the menu |

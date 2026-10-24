@@ -18,6 +18,7 @@ import pytest
 
 from aibi import main
 from aibi.audit import AuditLog
+from aibi.copilot import Copilot
 from aibi.dashboard_agent import DashboardAgent
 from aibi.lifecycle import LifecycleError
 from aibi.models import DashboardSpec
@@ -41,10 +42,12 @@ PROJECT = {"project_id": "cem-qoe", "title": "CEM QoE", "template": "executive",
 def service(registry, policy, semantic, tmp_path: Path, monkeypatch):
     store = Store(tmp_path / "control-plane.sqlite")
     store.save_project("cem-qoe", json.loads(json.dumps(PROJECT)), "2026-10-19T00:00:00Z")
+    dashboards = DashboardAgent(registry, policy, semantic)
     stand_in = SimpleNamespace(
         registry=registry, policy=policy, store=store,
         audit=AuditLog(tmp_path / "audit", []),
-        tools=SimpleNamespace(dashboards=DashboardAgent(registry, policy, semantic)),
+        tools=SimpleNamespace(dashboards=dashboards),
+        copilot=Copilot(registry, policy, dashboards),
         pictures=SimpleNamespace(taken=lambda project_id: None))
     monkeypatch.setattr(main, "service", stand_in)
     return stand_in
@@ -76,6 +79,19 @@ def test_the_studio_draws_the_version_until_there_is_a_draft(service, dev):
     # and the template's constraints, which are what the canvas may rearrange
     assert payload["template"]["grid"]["columns"] == 12
     assert payload["template"]["min_slot_width"] == {"kpi": 2, "chart": 4}
+    # the component library: every approved visualization, where it may go, and whether it can be drawn here
+    library = {v["id"]: v for v in payload["visualizations"]}
+    assert library["big_number"]["slots"] == ["kpi_1", "kpi_2", "kpi_3", "kpi_4"]
+    assert library["line"]["purposes"] == ["trend"] and library["line"]["status"] == "available"
+    assert any(v["status"] != "available" for v in payload["visualizations"]), (
+        "the library must show what is approved but not installed, not hide it")
+    # the filters it may carry: a column of a dataset it uses, in a role the template allows
+    offered = {f["column"]: f for f in payload["filter_options"]}
+    assert offered["date"]["used"] is True and offered["region"]["used"] is False
+    assert all(f["role"] in payload["template"]["filters"]["allowed_roles"] for f in payload["filter_options"])
+    # and who may open the dashboard this becomes
+    assert "bi_developer" in payload["security"]["audience"]
+    assert payload["security"]["classifications"] == ["internal"]
     # and the specification itself, which is what the workspace edits and sends back
     assert payload["spec"]["dashboard"]["id"] == "cem-qoe" and payload["spec"]["layout"] == []
 

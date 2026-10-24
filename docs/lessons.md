@@ -629,3 +629,33 @@ promises — the moves it offers, the minimum widths, the section a chart may no
 undo. Thirteen checks in nine seconds, against a kit that takes a minute to start and real data to be
 meaningful. It proves no rule of the engine's: those are tested against the real registry, and the whole
 thing is run by `bash ai-bi.sh demo`.
+
+**A rule in the page is not a rule.** The canvas refuses a move the engine would refuse — a width below the
+template's minimum, a chart leaving its section — so that a person is never offered something that will fail.
+Both refusals are also in `aibi/layout.py`, and the engine's is the one that decides: the page's copy exists
+for the explanation, not for the enforcement. The same shape holds for the copilot, which proposes a
+specification that `dashboards.validate` then judges.
+
+**A form control inherits rules written for other form controls.** `.ss-field input { width: 100% }` is right
+for a text field and wrong for a radio button: in the chart gallery it stretched every radio across its row
+and left the label nothing, which read as a broken list rather than a CSS rule. → the rule excludes radios and
+checkboxes, and the gallery is in `studio/preview.py --check`, which would have caught it the first time if
+it had been written before the modal.
+
+**A modal and a toast hang off `<body>`, outside the page's own root.** Every style was scoped to
+`#sharpsight-studio`, so the first modal inherited Superset's type and looked like another product's. → the
+two rules that live outside the root say so, and set their own type and colours.
+
+**Selecting on click and selecting on focus cancel each other.** A tile that selected itself on `focus` and
+toggled on `click` ended up deselected by a single click: the focus handler had already selected it. → focus
+selects nothing; Enter or Space on a focused tile does, and the arrow keys move the selection.
+
+**The canvas could show the real dashboard all along.** A tile is a photograph because a second renderer is
+forbidden — and that was read as « no live charts », which it never was. Superset will render the dashboard
+in a frame inside the workspace: `?standalone=1` is the address the engine's own browser already loads to
+photograph it, the page is the same origin as the Studio, and this kit sets no `X-Frame-Options`
+(`TALISMAN_ENABLED = False`). Same origin also means the frame's own DOM can be read, so the chrome over it
+is positioned from the real chart holders — the same `data-test-chart-id` visual QA reads — rather than from
+arithmetic of ours. → two modes, Compose and Live (docs/adr/0022). To be confirmed the first time this runs
+on a server: that a framed standalone dashboard behaves as it does in a tab, and that a Superset with
+Talisman on still allows `self` as a frame ancestor.

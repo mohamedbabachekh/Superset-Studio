@@ -1,0 +1,133 @@
+# A SECOND SUPERSET on the same machine: the « run » environment a version is DEPLOYED TO.
+#
+# This exists so that « create a dashboard here and deploy it to the run platform » can be TRIED, on one
+# laptop, without a second server — and so scripts/e2e.sh can prove it: the package that was validated is
+# imported there, its connection is repointed at that environment's warehouse, the audience SharpSight
+# decided is granted, and every chart is asked for its data before it is called deployed.
+#
+#   bash ai-bi.sh run-target        start it (and tell the engine it is there)
+#   bash ai-bi.sh e2e               the whole walk, this target included
+#   bash ai-bi.sh run-target --stop stop it, keep what was deployed
+#
+# or by hand, as a THIRD overlay, after the kit's and the engine's:
+#   docker compose -p sharpsight-superset-devkit -f docker-compose.yaml -f docker-compose.ai-bi.yaml \
+#                  -f docker-compose.run-target.yaml up -d
+#
+# WHAT IT IS NOT. It is not a production environment, and it is not how a real target is configured: a real
+# one is somebody else's server, named by AIBI_TARGET_<NAME>_URL and the rest in the engine's own
+# environment, with somebody else's password — written down nowhere in this repository (config.targets).
+# This overlay is a stand-in for it, close enough to be honest: a Superset of its own, with its own metadata
+# database, its own accounts, its own URL, and NOTHING of the kit's — no SharpSight menu, no Studio, no
+# extension, no seeded connection. The deployment has to bring everything it needs.
+
+name: sharpsight-superset-devkit
+
+x-run-env: &run-env
+  # Its own secret key: a session of the kit's Superset must not be a session of this one.
+  SUPERSET_SECRET_KEY: "${RUN_SECRET_KEY:?set RUN_SECRET_KEY in .env — openssl rand -base64 42}"
+  SUPERSET_META_URI: "postgresql+psycopg2://devkit:${DEVKIT_DB_PASSWORD:?set DEVKIT_DB_PASSWORD in .env}@devkit-db:5432/runbi"
+  # database 3 of the same Redis: the kit uses 0, and a cache shared between the two would hide a deployment
+  SUPERSET_REDIS_URL: "redis://devkit-redis:6379/3"
+  PYTHONPATH: "/app/pythonpath"
+  DEVKIT_APP_NAME: "${RUN_APP_NAME:-SharpSight BI — run}"
+  DEVKIT_LOCALE: "${DEVKIT_LOCALE:-fr}"
+  DEVKIT_DARK: "0"
+  DEVKIT_BEHIND_PROXY: "false"
+  DEVKIT_COOKIE_SECURE: "false"
+  DEVKIT_DATA_CACHE_TTL: "${DEVKIT_DATA_CACHE_TTL:-3600}"
+  DEVKIT_META_CACHE_TTL: "${DEVKIT_META_CACHE_TTL:-300}"
+  DEVKIT_SQLLAB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+  DEVKIT_WEB_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+
+services:
+  # ── its metadata database, beside the kit's own ──────────────────────────────────────────────────────────
+  run-db-init:
+    image: postgres:16.4
+    environment:
+      PGPASSWORD: "${DEVKIT_DB_PASSWORD}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if ! psql -h devkit-db -U devkit -d devkit -tAc "SELECT 1 FROM pg_database WHERE datname='runbi'" | grep -q 1; then
+          psql -h devkit-db -U devkit -d devkit -q -c "CREATE DATABASE runbi OWNER devkit"
+          echo "runbi created — the run environment's own metadata database"
+        else
+          echo "runbi is already there"
+        fi
+    depends_on:
+      devkit-db:
+        condition: service_healthy
+    restart: "no"
+
+  # ── its own accounts and tables. devkit_seed.py is NOT run: nothing is seeded here on purpose ───────────
+  run-superset-init:
+    image: sharpsight-superset-devkit:1.0.0
+    environment:
+      <<: *run-env
+      RUN_ADMIN_USER: "${RUN_ADMIN_USER:-run-admin}"
+      RUN_ADMIN_PASSWORD: "${RUN_ADMIN_PASSWORD:?set RUN_ADMIN_PASSWORD in .env — the run environment's administrator}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        superset db upgrade
+        superset fab create-admin --username "$$RUN_ADMIN_USER" --firstname Run --lastname Environment \
+          --email "$$RUN_ADMIN_USER@sharpsight.local" --password "$$RUN_ADMIN_PASSWORD" || true
+        superset fab reset-password --username "$$RUN_ADMIN_USER" --password "$$RUN_ADMIN_PASSWORD" >/dev/null 2>&1 || true
+        superset init
+        echo "the run environment is ready — it holds no connection and no dashboard until something is deployed"
+    depends_on:
+      run-db-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  run-superset:
+    image: sharpsight-superset-devkit:1.0.0
+    environment:
+      <<: *run-env
+      SERVER_WORKER_AMOUNT: "${RUN_WORKERS:-1}"
+      SERVER_THREADS_AMOUNT: "${DEVKIT_THREADS:-20}"
+      GUNICORN_TIMEOUT: "${DEVKIT_SQLLAB_TIMEOUT:-300}"
+      GUNICORN_KEEPALIVE: "75"
+    ports:
+      - "${DEVKIT_BIND:-127.0.0.1}:${RUN_PORT:-3004}:8088"
+    volumes:
+      - run-home:/app/superset_home
+      - ./driver-jars:/app/driver-jars:ro
+    depends_on:
+      run-superset-init:
+        condition: service_completed_successfully
+      devkit-redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "${RUN_CPUS:-2.0}", memory: "${RUN_MEMORY:-2g}" }
+
+  # ── and the engine is told the target exists. These five variables are all config.targets() reads ───────
+  sharpsight-ai-bi:
+    environment:
+      AIBI_TARGET_RUN_URL: "http://run-superset:8088"
+      AIBI_TARGET_RUN_USER: "${RUN_ADMIN_USER:-run-admin}"
+      AIBI_TARGET_RUN_PASSWORD: "${RUN_ADMIN_PASSWORD}"
+      # the same NAME the package expects: Superset 6 records a catalog per dataset, and for PostgreSQL the
+      # catalog is the database (docs/lessons.md) — a different name here and every dataset arrives orphaned
+      AIBI_TARGET_RUN_DB_NAME: "${AIBI_SUPERSET_DATABASE:-SharpSight BI (read-only)}"
+      # THAT environment's warehouse. The same machine here, read-only as everywhere; on a real target it is
+      # that environment's own, which is the whole reason an import is repointed afterwards.
+      AIBI_TARGET_RUN_DB_URI: "postgresql+psycopg2://bi_reader:${AIBI_READER_PASSWORD}@devkit-db:5432/devkit"
+      AIBI_TARGET_RUN_FROM_STUDIO: "true"
+      # where a person reaches it, for the link a deployment leaves behind
+      AIBI_TARGET_RUN_PUBLIC_URL: "http://${DEVKIT_BIND:-127.0.0.1}:${RUN_PORT:-3004}"
+
+volumes:
+  run-home:
