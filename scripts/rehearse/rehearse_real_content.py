@@ -1,7 +1,7 @@
 """The upgrade rehearsal on REAL content: what every connection, dashboard and chart answers, before and after.
 
-  python rehearse_real_content.py snapshot <base url> <admin user> <out.json>     (password in DEVKIT_REHEARSAL_PW)
-  python rehearse_real_content.py compare  <before.json> <after.json>
+  python scripts/rehearse/rehearse_real_content.py snapshot <base url> <admin user> <out.json>     (password in DEVKIT_REHEARSAL_PW)
+  python scripts/rehearse/rehearse_real_content.py compare  <before.json> <after.json>
 
 A snapshot asks Superset itself, as a reader would: each connection runs `select 1` through SQL Lab (its saved
 password must decrypt and be accepted), each dashboard and its page answer, each chart is QUERIED (force — not

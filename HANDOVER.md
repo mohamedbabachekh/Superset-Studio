@@ -59,37 +59,37 @@ Full instructions: [`README.md`](README.md) for the kit, [`docs/ai-bi.md`](docs/
 
 ~130 tracked files, ~20 000 lines. Nothing is vestigial; this is what each piece is for.
 
-### The kit itself (repository root)
+### The kit itself (the root, `superset/` — what the image carries flat in `/app/pythonpath` — and `dbt/cem_to_mart.py`)
 
 | File | Lines | Its job |
 |---|---|---|
 | `Dockerfile` | 79 | the image: Superset on the **same pinned digest as the product**, plus psycopg2, pymssql, python-oracledb, PyHive, JayDeBeApi + JPype + Java 17, pyodbc + FreeTDS, the French catalogue compiled from the base image's `.po` files, this kit's modules, templates and brand |
 | `docker-compose.yaml` | 324 | eight services (§5) |
 | `install.sh` | 317 | first install, start, stop, erase, and **`--from <old folder>`** to upgrade in place carrying `.env`/`cem.env`; it remembers the checksum of the images archive it loaded, so an upgrade actually loads the new image |
-| `superset_config.py` | 237 | login, caches, SQL Lab limits, feature flags, the SharpSight theme, the pool that follows the threads, the CSP, and the `FLASK_APP_MUTATOR` that installs the rest |
-| `devkit_drivers.py` | 78 | makes Oracle and SQL Server *exist* at all (§6) |
-| `devkit_forms.py` | 79 | gives both the « host, port, user, password » dialog |
-| `yacht_dialect.py` | 297 | a SQLAlchemy dialect over the CEM's JDBC driver, so SQL Lab queries the cluster live |
-| `cem_to_mart.py` | 294 | lands a CEM query in the kit's own database (the production pattern, in miniature) |
-| `devkit_seed.py` | 149 | creates the two connections and three saved queries on every start, idempotently |
-| `devkit_refresh.py` | 583 | the scheduled refresh: replays recorded dashboard requests so an open hits cache |
-| `sharpsight_translations.py` | 115 | compiles the French `.mo`/`.json` the base image does not ship |
-| `templates/head_custom_extra.html` | 93 | the sign-in page's look, through Superset's own extension point |
+| `superset/superset_config.py` | 237 | login, caches, SQL Lab limits, feature flags, the SharpSight theme, the pool that follows the threads, the CSP, and the `FLASK_APP_MUTATOR` that installs the rest |
+| `superset/devkit_drivers.py` | 78 | makes Oracle and SQL Server *exist* at all (§6) |
+| `superset/devkit_forms.py` | 79 | gives both the « host, port, user, password » dialog |
+| `superset/yacht_dialect.py` | 297 | a SQLAlchemy dialect over the CEM's JDBC driver, so SQL Lab queries the cluster live |
+| `dbt/cem_to_mart.py` | 294 | lands a CEM query in the kit's own database (the production pattern, in miniature) |
+| `superset/devkit_seed.py` | 149 | creates the two connections and three saved queries on every start, idempotently |
+| `superset/devkit_refresh.py` | 583 | the scheduled refresh: replays recorded dashboard requests so an open hits cache |
+| `superset/sharpsight_translations.py` | 115 | compiles the French `.mo`/`.json` the base image does not ship |
+| `superset/templates/head_custom_extra.html` | 93 | the sign-in page's look, through Superset's own extension point |
 | `brand/` | 6 files | logos, the loader, the chrome CSS |
 | `initdb/10-devmart.sql` | 10 | the `superset` database and the `devmart` schema, on the database's first start |
 | `nginx/default.conf.template` | 49 | the HTTPS/HTTP-2 proxy in front of Superset |
 | `.env.example` / `cem.env.example` | 141 / 37 | every setting, with what it costs; the CEM's, with everything that is not secret already filled |
 
-### Shipping and proving
+### Shipping and proving (`scripts/bundle/`, `scripts/rehearse/`)
 
 | File | Lines | Its job |
 |---|---|---|
-| `build-devkit-bundle.sh` | 109 | one tar: the image, PostgreSQL, Redis, the scripts, the docs, a manifest. `INCLUDE_CEM=1` adds the Yacht driver and (if non-empty) `cem.env` — and says out loud that the tarball then holds a password |
-| `verify-bundle.sh` | 126 | 16 checks before a bundle leaves the machine; `INSTALL=1` rehearses the install and signs in |
-| `rehearse-upgrade.sh` | 176 | rehearses an upgrade **on a copy of a real kit's database** — the only way an upgrade is allowed to be called safe |
-| `rehearse_real_content.py`, `rehearse_upgrade_content.py`, `rehearse_dashboards.mjs` | 157/133/47 | what the rehearsal asserts: every connection answers, every chart returns **the same data** before and after |
-| `export-for-devkit.sh` | 76 | **on the platform server**: dumps the mart and exports every dashboard as Superset itself exports it |
-| `import-into-devkit.sh` | 94 | **here**: restores that archive, repoints the connection, imports the dashboards |
+| `scripts/bundle/build-devkit-bundle.sh` | 109 | one tar: the image, PostgreSQL, Redis, the scripts, the docs, a manifest. `INCLUDE_CEM=1` adds the Yacht driver and (if non-empty) `cem.env` — and says out loud that the tarball then holds a password |
+| `scripts/bundle/verify-bundle.sh` | 126 | 16 checks before a bundle leaves the machine; `INSTALL=1` rehearses the install and signs in |
+| `scripts/rehearse/rehearse-upgrade.sh` | 176 | rehearses an upgrade **on a copy of a real kit's database** — the only way an upgrade is allowed to be called safe |
+| `scripts/rehearse/rehearse_real_content.py`, `rehearse_upgrade_content.py`, `rehearse_dashboards.mjs` | 157/133/47 | what the rehearsal asserts: every connection answers, every chart returns **the same data** before and after |
+| `scripts/bundle/export-for-devkit.sh` | 76 | **on the platform server**: dumps the mart and exports every dashboard as Superset itself exports it |
+| `scripts/bundle/import-into-devkit.sh` | 94 | **here**: restores that archive, repoints the connection, imports the dashboards |
 
 ### The AI BI engine (`services/ai-bi/`, ~10 000 lines + 2 400 of tests)
 
@@ -194,11 +194,11 @@ A rewrite is free to change almost everything **except** these. Each one cost a 
 ## 6 · Build, verify, ship, upgrade
 
 ```bash
-bash build-devkit-bundle.sh                        # → dist/sharpsight-superset-devkit-<date>.tar.gz
-INCLUDE_CEM=1 VERSION=20261019b bash build-devkit-bundle.sh
-bash verify-bundle.sh dist/<bundle>.tar.gz         # 16 checks
-INSTALL=1 bash verify-bundle.sh dist/<bundle>.tar.gz   # … and install it in a scratch folder
-bash rehearse-upgrade.sh <old bundle> <new bundle>     # on a COPY of a real kit's database
+bash scripts/bundle/build-devkit-bundle.sh                        # → dist/sharpsight-superset-devkit-<date>.tar.gz
+INCLUDE_CEM=1 VERSION=20261019b bash scripts/bundle/build-devkit-bundle.sh
+bash scripts/bundle/verify-bundle.sh dist/<bundle>.tar.gz         # 16 checks
+INSTALL=1 bash scripts/bundle/verify-bundle.sh dist/<bundle>.tar.gz   # … and install it in a scratch folder
+bash scripts/rehearse/rehearse-upgrade.sh <old bundle> <new bundle>     # on a COPY of a real kit's database
 ```
 
 Rules that have each cost an hour: **never build twice under the same name** (bump `VERSION`); **carry `.env`
@@ -240,8 +240,9 @@ rebuild:
   works around it by remembering the images archive's checksum. A rebuild should give the image a real version.
 - **Superset 6.1.0 takes an extension panel in SQL Lab only** — no dashboard, no Explore, no chat. Read from the
   image before anything was built on it.
-- **Brand values live in three places** kept alike by hand (`superset_config.py`,
-  `registry/design/tokens.yaml`, the sign-in template). One source would be better.
+- **Brand values live in three places** kept alike by hand (`superset/superset_config.py`,
+  `registry/design/tokens.yaml`, the sign-in template `superset/templates/head_custom_extra.html`). One source
+  would be better.
 - **Three decisions are the owner's**, not ours: whether a hand-made layout in Superset should survive a commit;
   how a project in UAT/PROD gets a next version in a kit with one Superset; whether a developer may query in SQL
   Lab at all.

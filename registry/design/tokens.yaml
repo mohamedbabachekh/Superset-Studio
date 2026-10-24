@@ -3,7 +3,7 @@
 # The AI never writes CSS. It names a token (`accent: primary`), the generator turns the token into a rule
 # scoped to that one dashboard, and a name that is not here is refused before Superset is called.
 colors:
-  primary: "#0972BC"        # SharpSight blue — the same value superset_config.py gives the interface
+  primary: "#0972BC"        # SharpSight blue — the same value superset/superset_config.py gives the interface
   info: "#26ABA8"
   success: "#37A15E"
   warning: "#F2B72D"
@@ -14,7 +14,7 @@ colors:
   surface: "#FFFFFF"
   surface_muted: "#F5F6F9"
 
-# Categorical schemes. Each must also be registered in superset_config.py (EXTRA_CATEGORICAL_COLOR_SCHEMES)
+# Categorical schemes. Each must also be registered in superset/superset_config.py (EXTRA_CATEGORICAL_COLOR_SCHEMES)
 # or ship with Superset — a scheme Superset does not know falls back to its default without a word.
 color_schemes: [sharpsight, inwi, supersetColors]
 

@@ -36,7 +36,7 @@ server {
         proxy_set_header Connection "";
 
         # The address the browser used, port included: Superset writes it into the links it makes
-        # (DEVKIT_BEHIND_PROXY=true makes it believe these; superset_config.py, PROXY_FIX_CONFIG).
+        # (DEVKIT_BEHIND_PROXY=true makes it believe these; superset/superset_config.py, PROXY_FIX_CONFIG).
         proxy_set_header Host              $http_host;
         proxy_set_header X-Forwarded-Host  $http_host;
         proxy_set_header X-Forwarded-Proto https;

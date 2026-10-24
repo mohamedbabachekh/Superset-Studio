@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # REHEARSE AN UPGRADE of the dev kit — the test for any change to install.sh, and for every bundle before it ships.
 #
-#   bash rehearse-upgrade.sh dist/sharpsight-superset-devkit-<old>.tar.gz dist/sharpsight-superset-devkit-<new>.tar.gz
-#   KEEP=1 bash rehearse-upgrade.sh …      leave the scratch project up at the end, to look at it
-#   REAL_CONTENT_FROM=sharpsight-superset-devkit REAL_CONTENT_ENV=.env bash rehearse-upgrade.sh …
+#   bash scripts/rehearse/rehearse-upgrade.sh dist/sharpsight-superset-devkit-<old>.tar.gz dist/sharpsight-superset-devkit-<new>.tar.gz
+#   KEEP=1 bash scripts/rehearse/rehearse-upgrade.sh …      leave the scratch project up at the end, to look at it
+#   REAL_CONTENT_FROM=sharpsight-superset-devkit REAL_CONTENT_ENV=.env bash scripts/rehearse/rehearse-upgrade.sh …
 #       rehearse on a COPY OF A REAL KIT instead of a made-up one: its connections, datasets, charts, dashboards,
 #       users, tags and extracts (every database of its server), with its secret key so its saved passwords still
 #       decrypt. Every connection, dashboard and chart is asked before and after; with REHEARSAL_BROWSER_IMAGE (a
@@ -28,8 +28,8 @@
 # when this ends the tag is the NEW bundle's image, and the kit in use is recreated on it at its next start.
 # Stop the real kit first on a small machine: a second Superset needs about 700 MB.
 set -uo pipefail
-OLD_BUNDLE="${1:?usage: bash rehearse-upgrade.sh <old bundle.tar.gz> <new bundle.tar.gz>}"
-NEW_BUNDLE="${2:?usage: bash rehearse-upgrade.sh <old bundle.tar.gz> <new bundle.tar.gz>}"
+OLD_BUNDLE="${1:?usage: bash scripts/rehearse/rehearse-upgrade.sh <old bundle.tar.gz> <new bundle.tar.gz>}"
+NEW_BUNDLE="${2:?usage: bash scripts/rehearse/rehearse-upgrade.sh <old bundle.tar.gz> <new bundle.tar.gz>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
 OLD_BUNDLE="$(abs "$OLD_BUNDLE")"; NEW_BUNDLE="$(abs "$NEW_BUNDLE")"

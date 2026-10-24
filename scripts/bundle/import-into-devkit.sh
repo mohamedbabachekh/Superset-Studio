@@ -3,7 +3,7 @@
 # Run it on the DEV machine, FROM THE DEV KIT'S FOLDER (where its install.sh and .env are), with the kit running
 # (bash install.sh).
 #
-#   bash import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
+#   bash scripts/bundle/import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
 #
 # What it does:
 #   1. checks the archive against its .sha256;
@@ -13,7 +13,7 @@
 #   4. imports the dashboards into the kit's Superset (overwriting earlier imports of the same dashboards).
 set -euo pipefail
 
-ARCHIVE="${1:?usage: bash import-into-devkit.sh <sharpsight-devkit-export-…tgz>}"
+ARCHIVE="${1:?usage: bash scripts/bundle/import-into-devkit.sh <sharpsight-devkit-export-…tgz>}"
 P=sharpsight-superset-devkit
 [ -f install.sh ] && [ -f .env ] || { echo "run this from the dev kit's folder (install.sh and .env)" >&2; exit 1; }
 DEVKIT_DB_PASSWORD=$(grep -E '^DEVKIT_DB_PASSWORD=' .env | head -1 | cut -d= -f2-)

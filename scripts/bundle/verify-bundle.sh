@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Check a bundle before it is shipped — and say what is in it, in words.
 #
-#   bash verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
-#   INSTALL=1 bash verify-bundle.sh dist/…tar.gz      also installs it in a scratch folder and signs in
+#   bash scripts/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
+#   INSTALL=1 bash scripts/bundle/verify-bundle.sh dist/…tar.gz      also installs it in a scratch folder and signs in
 #
 # What it asserts, and why each one has cost a round trip at least once:
 #   · the checksum file matches, and names THIS tarball (each bundle verifies against its own, never another's)
@@ -14,7 +14,7 @@
 # signs in with the generated admin — the only proof that matters.
 set -euo pipefail
 
-ARCHIVE="${1:?usage: bash verify-bundle.sh <bundle.tar.gz>}"
+ARCHIVE="${1:?usage: bash scripts/bundle/verify-bundle.sh <bundle.tar.gz>}"
 ARCHIVE="$(cd "$(dirname "$ARCHIVE")" && pwd)/$(basename "$ARCHIVE")"
 NAME="$(basename "$ARCHIVE" .tar.gz)"
 PROJECT=sharpsight-superset-devkit
@@ -39,7 +39,7 @@ fi
 # ── what is inside ────────────────────────────────────────────────────────────────────────────────────────────
 listing="$(tar -tzf "$ARCHIVE")"
 for needed in install.sh docker-compose.yaml .env.example cem.env.example README.md MANIFEST.txt \
-              images/devkit-images.tar.gz initdb/10-devmart.sql import-into-devkit.sh export-for-devkit.sh \
+              images/devkit-images.tar.gz initdb/10-devmart.sql scripts/bundle/import-into-devkit.sh scripts/bundle/export-for-devkit.sh \
               nginx/default.conf.template; do
   printf '%s\n' "$listing" | grep -q "^$NAME/$needed$" \
     && ok "carries $needed" || no "MISSING $needed — install.sh would fail on the target"

@@ -37,14 +37,14 @@ Volumes: `devkit-db` (everything you keep), `devkit-home` (Superset's home), `de
 2. `devkit-cem-sync` copies `cem.env` into the `devkit-cem` volume as root — the only way to read a `0600` file
    owned by you — and says how many settings it handed over, or that the CEM is not configured.
 3. `devkit-init` runs `superset db upgrade`, creates the admin from `.env`, runs `superset init`, then
-   [`devkit_seed.py`](../devkit_seed.py).
-4. `superset-devkit` starts, loads [`superset_config.py`](../superset_config.py), which installs the drivers
-   ([`devkit_drivers.py`](../devkit_drivers.py)), the connection forms ([`devkit_forms.py`](../devkit_forms.py)),
-   the sign-in page's look (`templates/head_custom_extra.html`) and a narrow CSP.
+   [`devkit_seed.py`](../superset/devkit_seed.py).
+4. `superset-devkit` starts, loads [`superset_config.py`](../superset/superset_config.py), which installs the drivers
+   ([`devkit_drivers.py`](../superset/devkit_drivers.py)), the connection forms ([`devkit_forms.py`](../superset/devkit_forms.py)),
+   the sign-in page's look (`superset/templates/head_custom_extra.html`) and a narrow CSP.
 
 ## What the seeding creates
 
-[`devkit_seed.py`](../devkit_seed.py), on every start, idempotent:
+[`devkit_seed.py`](../superset/devkit_seed.py), on every start, idempotent:
 
 - **Dev kit store** — `devkit` database, where extracts and `CREATE TABLE AS` land;
 - **CEM live** — `yacht://cem`, only when `cem.env` names a CEM; no credential in Superset's database;
@@ -78,8 +78,8 @@ the `.po` files the base image ships, this kit's Python modules, its templates a
 ## Shipping it
 
 ```bash
-bash build-devkit-bundle.sh                 # → dist/sharpsight-superset-devkit-<version>.tar.gz
-INCLUDE_CEM=1 bash build-devkit-bundle.sh   # … and the Yacht driver, and cem.env if you have written one
+bash scripts/bundle/build-devkit-bundle.sh                 # → dist/sharpsight-superset-devkit-<version>.tar.gz
+INCLUDE_CEM=1 bash scripts/bundle/build-devkit-bundle.sh   # … and the Yacht driver, and cem.env if you have written one
 ```
 
 The bundle carries the image, PostgreSQL and Redis, the compose file, the scripts and the documentation — it

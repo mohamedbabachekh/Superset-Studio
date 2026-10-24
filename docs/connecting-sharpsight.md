@@ -18,7 +18,7 @@ Two scripts, both in this repository.
 **On the platform server** — read-only; it dumps and exports, it changes nothing:
 
 ```bash
-bash export-for-devkit.sh          # → ~/sharpsight-devkit-export-<date>.tgz (+ .sha256)
+bash export-for-devkit.sh          # copied from scripts/bundle/ → ~/sharpsight-devkit-export-<date>.tgz (+ .sha256)
 ```
 
 It takes the schema `roaming_mart` of the `roaming` database (aggregates only: no subscriber number, nothing
@@ -33,7 +33,7 @@ as the first account holding the Admin role.
 **On the machine running the kit**, from the kit's folder, with the kit up:
 
 ```bash
-bash import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
+bash scripts/bundle/import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
 ```
 
 It verifies the checksum, restores the mart into a database called **`roaming`**, writes this kit's password
@@ -77,7 +77,7 @@ Fill `cem.env` (copy `cem.env.example`), restart, and add a connection whose SQL
 yacht://cem
 ```
 
-No credential goes into that form: [`yacht_dialect.py`](../yacht_dialect.py) reads them from the mounted
+No credential goes into that form: [`yacht_dialect.py`](../superset/yacht_dialect.py) reads them from the mounted
 `cem.env` at connect time, so **Superset's own database never stores them**. Then
 `select * from dc_run.<table> limit 100` reads the cluster and stores nothing.
 

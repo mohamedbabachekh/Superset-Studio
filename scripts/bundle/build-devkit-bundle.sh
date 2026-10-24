@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build ONE tar that installs this Superset dev kit on another machine — including one with no internet.
 #
-#   bash tools/superset-devkit/build-devkit-bundle.sh
-#   OUT=/mnt/usb bash tools/superset-devkit/build-devkit-bundle.sh
+#   bash scripts/bundle/build-devkit-bundle.sh
+#   OUT=/mnt/usb bash scripts/bundle/build-devkit-bundle.sh
 #
 # It contains the built image, its two dependencies (PostgreSQL, Redis), the compose file, the configuration and
 # an install.sh. It contains NO credential: the installed kit asks for its own on first start.
@@ -11,7 +11,8 @@
 # and nothing here can install or upgrade SharpSight.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
+# This script lives in scripts/bundle/; everything it builds and packs is the checkout's root, two folders up.
+HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${OUT:-$HERE/dist}"
 VERSION="${VERSION:-$(date +%Y%m%d)}"
 NAME="sharpsight-superset-devkit-$VERSION"
@@ -40,7 +41,11 @@ echo "  wrote $(du -h "$stage/images/devkit-images.tar.gz" | cut -f1)"
 echo "═══ 4/4  sealing"
 # -s, not -f: an EMPTY cem.env is not a secret, and saying it is teaches people to ignore the warning
 [ "${INCLUDE_CEM:-0}" = "1" ] && [ -s "$HERE/cem.env" ] && INCLUDE_CEM_SECRET=yes || INCLUDE_CEM_SECRET=no
-cp "$HERE/docker-compose.yaml" "$HERE/install.sh"    "$HERE/cem.env.example" "$HERE/import-into-devkit.sh" "$HERE/export-for-devkit.sh" "$stage/"
+cp "$HERE/docker-compose.yaml" "$HERE/install.sh"    "$HERE/cem.env.example" "$stage/"
+# The two archive scripts travel at the same path as in the checkout, so the README's commands — which the
+# bundle's README is a copy of — are the commands that work in the installed folder too.
+mkdir -p "$stage/scripts/bundle"
+cp "$HERE/scripts/bundle/import-into-devkit.sh" "$HERE/scripts/bundle/export-for-devkit.sh" "$stage/scripts/bundle/"
 # THE KIT, AND NOTHING OF THE AI BI ENGINE — its settings and its documentation included. The engine is an overlay
 # of this checkout and is not shipped (owner, 2026-10-05). Its section of .env.example travelled all the same,
 # and install.sh adds to an upgraded .env every setting the bundle's .env.example knows: the first rehearsal of

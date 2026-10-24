@@ -1,6 +1,6 @@
 """Superset's configuration when the AI BI engine is on: the kit's own, and what SharpSight adds to Superset.
 
-docker-compose.ai-bi.yaml points SUPERSET_CONFIG_PATH here. The kit's superset_config.py is not edited and not
+docker-compose.ai-bi.yaml points SUPERSET_CONFIG_PATH here. The kit's superset/superset_config.py is not edited and not
 copied: it is imported, whole, and extended in two places — one hook (the SharpSight menu, sharpsight_bi.py)
 and Superset's own extension system (the bundle sharpsight-bi-<version>.supx, superset-extension/). Without the
 engine's overlay this file is not mounted and Superset starts exactly as the kit ships it.

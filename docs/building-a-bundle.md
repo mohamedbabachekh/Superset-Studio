@@ -28,7 +28,7 @@ bash install.sh --stop
 ## 2 · Build it
 
 ```bash
-bash build-devkit-bundle.sh
+bash scripts/bundle/build-devkit-bundle.sh
 ```
 
 → `dist/sharpsight-superset-devkit-<today>.tar.gz` and its `.sha256`.
@@ -41,7 +41,7 @@ bash build-devkit-bundle.sh
 | `DEVKIT_WITH_JDBC` | `1` | `0` builds a smaller image with no Java and no CEM helper |
 
 ```bash
-INCLUDE_CEM=1 VERSION=20261003b bash build-devkit-bundle.sh
+INCLUDE_CEM=1 VERSION=20261003b bash scripts/bundle/build-devkit-bundle.sh
 ```
 
 > **Never build twice under the same name.** Two tarballs called `…-20261003.tar.gz` with different contents is
@@ -60,7 +60,7 @@ the secrets.
 ## 3 · Verify it — before it leaves the machine
 
 ```bash
-bash verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
+bash scripts/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
 ```
 
 It checks the checksum (and that the checksum file names *this* tarball), that every file `install.sh` needs is
@@ -71,7 +71,7 @@ not execute on Linux at all.
 For a full rehearsal — unpack into a scratch folder, install, and sign in:
 
 ```bash
-INSTALL=1 bash verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
+INSTALL=1 bash scripts/bundle/verify-bundle.sh dist/sharpsight-superset-devkit-20261003.tar.gz
 ```
 
 > `INSTALL=1` **removes the kit currently on this machine** (containers and volumes) before installing the

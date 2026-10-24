@@ -126,6 +126,9 @@ services:
       # that environment's own, which is the whole reason an import is repointed afterwards.
       AIBI_TARGET_RUN_DB_URI: "postgresql+psycopg2://bi_reader:${AIBI_READER_PASSWORD}@devkit-db:5432/devkit"
       AIBI_TARGET_RUN_FROM_STUDIO: "true"
+      # the approval a version needs to come here: one reviewer's, as for UAT. A target that does not say is
+      # held to PROD, so a real production Superset is never one forgotten line away from a single sign-off.
+      AIBI_TARGET_RUN_GATE: "UAT"
       # where a person reaches it, for the link a deployment leaves behind
       AIBI_TARGET_RUN_PUBLIC_URL: "http://${DEVKIT_BIND:-127.0.0.1}:${RUN_PORT:-3004}"
 

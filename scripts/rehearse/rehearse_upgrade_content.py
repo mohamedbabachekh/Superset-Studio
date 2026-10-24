@@ -1,8 +1,8 @@
 """The upgrade rehearsal's content: made on the OLD kit as a developer would, looked for on the NEW one.
 
-  python rehearse_upgrade_content.py make  <kit folder> <base url>     creates a connection (with a password), a table, a
+  python scripts/rehearse/rehearse_upgrade_content.py make  <kit folder> <base url>     creates a connection (with a password), a table, a
                                                               dataset, a chart, a dashboard and a saved query
-  python rehearse_upgrade_content.py check <kit folder> <base url>     the same things, asked for after the upgrade
+  python scripts/rehearse/rehearse_upgrade_content.py check <kit folder> <base url>     the same things, asked for after the upgrade
 
 Reads the admin's name and password from the folder's .env and never prints them.
 """

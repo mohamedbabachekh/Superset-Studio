@@ -174,7 +174,7 @@ connection and a dashboard made in it, then the new bundle from a new folder —
 two faults nothing else would have: an empty variable made `[ "" -lt 2 ]` fail quietly, so the one settings
 change the upgrade existed for was skipped; and the bundle's `.env.example` still carried the AI BI engine's
 section, so « add the settings this version knows » wrote seven `AIBI_` lines into a kit with no engine.
-→ `rehearse-upgrade.sh <old bundle> <new bundle>` is the test for any change to `install.sh`: old bundle, real content, new bundle, then
+→ `scripts/rehearse/rehearse-upgrade.sh <old bundle> <new bundle>` is the test for any change to `install.sh`: old bundle, real content, new bundle, then
 ask for the content THROUGH Superset (a query through the saved connection proves its password still decrypts;
 a row count does not).
 
@@ -313,6 +313,12 @@ column, in another schema, under another dataset id: Superset would have shown t
 regions on every chart and the whole country on the map. → a policy follows a dataset into everything
 `derived_from` it, and both rules are written.
 
+**A rule on a dataset is not one dashboard's.** The clean-up that withdrew `sharpsight:<role>:<dataset>` rules
+deleted every one whose role was not in THIS dashboard's audience — so another dashboard over the same dataset
+lost its audience's rule and showed them every row; and granting the dashboard before writing its rules left
+it open, unfiltered, whenever a later write failed. → one helper for the kit and a deployment: rules first and
+read back, the grant last (put back if it fails), and a rule deleted only when the policy no longer declares it.
+
 **`POST /dashboard/<id>/copy/` takes the copy's layout from `positions` INSIDE the metadata it is sent.** Sent
 the original's `json_metadata` as stored, the copy has its charts and no layout. → the adapter puts the
 original's `position_json` there. Found the first time the copy was run at all, by `ai-bi.sh check-adapter`.
@@ -344,7 +350,7 @@ from a hidden element in the theme's « strong » weight and draws the title its
 kit's theme (strong = 500) the two widths differ by a pixel for some titles, and one pixel is enough for the
 ellipsis. Not a font-loading race: a cold and a warm load measure the same. → the engine's dashboards carry
 `.dynamic-title-input { font-weight: inherit }`, so the drawn text is the measured text (352 needed / 351 given
-became 351 / 351). The same line in `templates/head_custom_extra.html` would cure every dashboard in the kit,
+became 351 / 351). The same line in `superset/templates/head_custom_extra.html` would cure every dashboard in the kit,
 hand-made ones included; that is the kit's stylesheet and was left alone.
 
 **A pie's label on one line loses its share for long names; on two it does not.** `label_type: template` with

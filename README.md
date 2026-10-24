@@ -36,7 +36,7 @@ bash install.sh
 **On another machine**, including one with no internet — build a bundle here first:
 
 ```bash
-bash build-devkit-bundle.sh                 # → dist/sharpsight-superset-devkit-<date>.tar.gz  (~1 GB)
+bash scripts/bundle/build-devkit-bundle.sh                 # → dist/sharpsight-superset-devkit-<date>.tar.gz  (~1 GB)
 ```
 
 then, over there — **from the folder the two files are in**, because the checksum file names the tarball
@@ -86,7 +86,7 @@ Nothing to configure before the first query:
 | **Three saved queries** | the catalogue of `dc_run`, a peek at one table, and the shape of an aggregate to copy — under *SQL → Requêtes enregistrées* |
 | **No outbound beacon** | Apache's telemetry pixel is off in the page and blocked by a header for the bundle that adds it at runtime: nothing leaves the machine |
 
-They are created by [devkit_seed.py](devkit_seed.py) on every start and are **idempotent**: it updates what it
+They are created by [devkit_seed.py](superset/devkit_seed.py) on every start and are **idempotent**: it updates what it
 made, never deletes, and leaves alone anything you rename or edit (it marks its own in the connection's extra).
 
 ## 3 · Connect another source
@@ -115,7 +115,7 @@ SQL Server    mssql+pymssql://svc:***@10.1.2.3:1433/KPI
 **Neither engine offers that form in a stock Superset** — both were URI-only, and SQL Server was not even in the
 list, because Superset probes each backend's *default* dialect and `mssql` defaults to **pyodbc**, which needs
 unixODBC and Microsoft's ODBC driver. The kit registers **pymssql** as that default and gives both specs the
-parameters form; [devkit_drivers.py](devkit_drivers.py) and [devkit_forms.py](devkit_forms.py) say exactly what
+parameters form; [devkit_drivers.py](superset/devkit_drivers.py) and [devkit_forms.py](superset/devkit_forms.py) say exactly what
 that changes. **Oracle needs nothing installed either**: Superset 6.1 ships SQLAlchemy 1.4, whose only Oracle
 dialect is `oracle+cx_oracle` — the old driver that requires Oracle's Instant Client — so **python-oracledb**
 (pure Python, thin mode) is registered under that name, as its own documentation prescribes.
@@ -151,7 +151,7 @@ database and chart that.
 Two ways, and you can use both at once.
 
 **Live, in SQL Lab — `yacht://cem`.** Paramètres → Bases de données → + → *Autres*, paste `yacht://cem` as the
-SQLAlchemy URI, tick *Exposer dans SQL Lab*, connect. The dialect in [yacht_dialect.py](yacht_dialect.py) takes
+SQLAlchemy URI, tick *Exposer dans SQL Lab*, connect. The dialect in [yacht_dialect.py](superset/yacht_dialect.py) takes
 the host, account and driver from `cem.env` at connect time, so **no credential is stored in Superset's own
 database**. Then `select … from dc_run.<table>` reads the cluster's rows and stores nothing anywhere. Its
 schema panel speaks Spark SQL (`show databases`, `show tables in <schema>`, `describe`), and `CEM_SCHEMA` in
@@ -184,7 +184,7 @@ already holds the driver class and the URL shape — so the only editing left on
 it that way here:
 
 ```bash
-INCLUDE_CEM=1 bash build-devkit-bundle.sh
+INCLUDE_CEM=1 bash scripts/bundle/build-devkit-bundle.sh
 ```
 
 and, on the server, before `bash install.sh`:
@@ -275,14 +275,14 @@ the platform — carry both across with the two scripts the kit ships:
 
 **On the platform server** (read-only: it dumps and exports, it changes nothing):
 ```bash
-bash export-for-devkit.sh          # → ~/sharpsight-devkit-export-<date>.tgz (+ .sha256)
+bash export-for-devkit.sh          # copied from scripts/bundle/ → ~/sharpsight-devkit-export-<date>.tgz (+ .sha256)
 ```
 It takes the schema `roaming_mart` of the `roaming` database — aggregates only, no subscriber number, nothing
 under ten SIM cards — and every dashboard as Superset itself exports it, charts and datasets included.
 
 **On the machine running the kit**, from the kit's folder, with the kit up:
 ```bash
-bash import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
+bash scripts/bundle/import-into-devkit.sh /path/to/sharpsight-devkit-export-<date>.tgz
 ```
 It checks the archive against its checksum, restores the mart into a database called **`roaming`** beside the
 kit's own, writes this kit's password into the connection, and imports the dashboards.
@@ -405,20 +405,20 @@ is baked into the image or the bundle.
 | | |
 |---|---|
 | [Dockerfile](Dockerfile) | the image: Superset + the drivers + Java for the JDBC bridge + the brand |
-| [superset_config.py](superset_config.py) | login, caches, SQL Lab limits, feature flags, the SharpSight theme |
-| [devkit_drivers.py](devkit_drivers.py) | Oracle in thin mode on SQLAlchemy 1.4 |
-| [cem_to_mart.py](cem_to_mart.py) | a CEM query landed in the kit's own database |
+| [superset_config.py](superset/superset_config.py) | login, caches, SQL Lab limits, feature flags, the SharpSight theme |
+| [devkit_drivers.py](superset/devkit_drivers.py) | Oracle in thin mode on SQLAlchemy 1.4 |
+| [cem_to_mart.py](dbt/cem_to_mart.py) | a CEM query landed in the kit's own database |
 | [docker-compose.yaml](docker-compose.yaml) | the four containers, isolated from everything else |
 | [install.sh](install.sh) | first run, start, stop, erase |
-| [build-devkit-bundle.sh](build-devkit-bundle.sh) | one tar for a machine with no internet ([how](docs/building-a-bundle.md)) |
-| [verify-bundle.sh](verify-bundle.sh) | checks a bundle before it leaves the machine; `INSTALL=1` rehearses the install |
+| [build-devkit-bundle.sh](scripts/bundle/build-devkit-bundle.sh) | one tar for a machine with no internet ([how](docs/building-a-bundle.md)) |
+| [verify-bundle.sh](scripts/bundle/verify-bundle.sh) | checks a bundle before it leaves the machine; `INSTALL=1` rehearses the install |
 | [.env.example](.env.example) | every setting, with the URI of every source |
 | [cem.env.example](cem.env.example) | the CEM's settings, ready but for the host, the user and the password |
-| [devkit_seed.py](devkit_seed.py) | the two connections and the starting queries, created on every start |
-| [export-for-devkit.sh](export-for-devkit.sh) | run on the platform: its mart and its dashboards into one archive |
-| [import-into-devkit.sh](import-into-devkit.sh) | run here: that archive into this kit, dashboards working |
-| [yacht_dialect.py](yacht_dialect.py) | the dialect that lets SQL Lab query the CEM live |
-| `templates/head_custom_extra.html` | the sign-in page's look, through Superset's own extension point |
+| [devkit_seed.py](superset/devkit_seed.py) | the two connections and the starting queries, created on every start |
+| [export-for-devkit.sh](scripts/bundle/export-for-devkit.sh) | run on the platform: its mart and its dashboards into one archive |
+| [import-into-devkit.sh](scripts/bundle/import-into-devkit.sh) | run here: that archive into this kit, dashboards working |
+| [yacht_dialect.py](superset/yacht_dialect.py) | the dialect that lets SQL Lab query the CEM live |
+| `superset/templates/head_custom_extra.html` | the sign-in page's look, through Superset's own extension point |
 | `brand/` | its own copy of the logos, so this folder builds alone |
 | `driver-jars/` | where the customer's JDBC jar goes — never committed, never shipped |
 | [ai-bi.sh](ai-bi.sh) · [docker-compose.ai-bi.yaml](docker-compose.ai-bi.yaml) | the AI BI engine: start, demo, request, approve, audit, discard, check-adapter, people, compatibility, where — an overlay, the kit runs without it. It has no page of its own: what it makes and knows is shown in Superset ([what it is](docs/ai-bi.md)) |

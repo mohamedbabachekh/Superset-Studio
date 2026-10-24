@@ -4,6 +4,7 @@
 # exports, it changes nothing on the platform.
 #
 #   bash export-for-devkit.sh            → ~/sharpsight-devkit-export-<date>.tgz (+ .sha256)
+#   (the file is copied to the platform server on its own; in the kit it is scripts/bundle/export-for-devkit.sh)
 #
 # What the archive holds:
 #   roaming_mart.dump   the schema roaming_mart of the « roaming » database (tables, views, data) — the mart both
@@ -73,4 +74,4 @@ echo "3/3  $OUT"
 tar --force-local -czf "$OUT" -C "$WORK" roaming_mart.dump dashboards.zip manifest.txt
 ( cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
 ls -lh "$OUT" "$OUT.sha256"
-echo "Copy BOTH files to the dev machine, next to the dev kit, then run import-into-devkit.sh there."
+echo "Copy BOTH files to the dev machine, next to the dev kit, then run  bash scripts/bundle/import-into-devkit.sh <archive>  from the kit's folder."

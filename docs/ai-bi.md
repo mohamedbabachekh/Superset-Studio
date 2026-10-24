@@ -207,9 +207,9 @@ commit).
 ### The menu, and dbt's documentation — `superset-addon/`
 
 Two files, mounted into the kit's Superset by the engine's compose overlay. The kit's image and its
-`superset_config.py` are not edited: `superset_config_ai_bi.py` imports the kit's configuration whole and
-extends one hook, and `SUPERSET_CONFIG_PATH` points at it. Without the overlay Superset starts exactly as the
-kit ships it.
+`superset/superset_config.py` are not edited: `superset-addon/superset_config_ai_bi.py` imports the kit's
+configuration whole and extends one hook, and `SUPERSET_CONFIG_PATH` points at it. Without the overlay Superset
+starts exactly as the kit ships it.
 
 - **The menu** is six `appbuilder.add_link` calls — what Superset does for its own entries — under a
   « SharpSight » category.
@@ -441,7 +441,7 @@ are what would notice.
 | what the page gives an extension | `window.superset.views`, `.commands`, `.authentication`; the location `sqllab.rightSidebar` | read from the 6.1.0 frontend bundle, not from a package |
 | React and Ant Design, shared | module federation's share scope: react 17.0.2, antd 5.27.6 | Superset's page offering them as singletons to an extension |
 | the extension's API path | `/extensions/sharpsight/bi/…` — not under `/api/v1` | where `@api` puts an extension's endpoints in 6.1.0 |
-| the kit's own, older than the engine | `templates/head_custom_extra.html`, the brand CSS, the header that keeps images local | Superset's page template and class names |
+| the kit's own, older than the engine | `superset/templates/head_custom_extra.html`, the brand CSS, the header that keeps images local | Superset's page template and class names |
 
 ---
 
@@ -633,6 +633,16 @@ of every gate before it. `state` (DEV, UAT, PROD) is derived from the gate.
 
 The approval and the deployment are two records: `APPROVED_FOR_…` is the person's decision, written before
 anything is done on the strength of it; `UAT` and `PROD` are the system's, written when its own checks passed.
+
+A deployment to another Superset (`bash ai-bi.sh deploy`) carries the audience and the row-level rules
+itself, since an export holds neither: the `sharpsight_<role>` roles are ensured there and granted the
+dashboard, and each `sharpsight:<role>:<dataset>` rule is written onto the dataset the import created, with the
+same names and adapter calls the kit uses at home, so a second deployment updates in place. A rule the policy
+no longer has is withdrawn. Everything is then read back, and the deployment fails if the target refused it or
+holds something else. Both go through one helper (`aibi/tools.py::apply_access`): every rule is written and read
+back before the dashboard is granted, a grant that fails is put back to what it was, and only a rule the POLICY
+no longer declares is deleted — never one another dashboard over the same dataset still needs. A version whose
+datasets or metrics the registry no longer knows is refused before any access is applied.
 
 The `.ssbi` package is the project's folder as committed — `manifest.yaml`, `dbt/`, `semantic/`, `datasets/`,
 `metrics/`, `superset/`, `dashboards/`, `charts/`, `security/`, `tests/`, `documentation/` — zipped, with the

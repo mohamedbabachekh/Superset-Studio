@@ -3,6 +3,27 @@
 Versions are the date a bundle was built (`sharpsight-superset-devkit-<version>.tar.gz`). Everything below was
 built and verified on a running kit before it was written down.
 
+## Not in a bundle yet — the repository's layout (2026-10-24)
+
+The root held thirty files; it now holds what a person opens first and the files Docker and the installer
+look for there. Every move was a `git mv`, so each file keeps its history. Nothing an installed kit does
+changes: the image is the same image, built from the same sources at new paths.
+
+- **`superset/`** — `superset_config.py`, `devkit_drivers.py`, `devkit_forms.py`, `devkit_seed.py`,
+  `devkit_refresh.py`, `yacht_dialect.py`, `sharpsight_translations.py` and `templates/head_custom_extra.html`.
+  The Dockerfile still copies them FLAT into `/app/pythonpath`, so they import each other by bare name as
+  before, and every `/app/pythonpath/<file>.py` command in the compose files and the docs is unchanged.
+- **`dbt/cem_to_mart.py`** — beside the dbt project whose source it lands; in the image it is still
+  `/app/pythonpath/cem_to_mart.py`.
+- **`scripts/bundle/`** — `build-devkit-bundle.sh`, `verify-bundle.sh`, `export-for-devkit.sh`,
+  `import-into-devkit.sh`. The build finds the root two folders up. A bundle now carries the two archive scripts
+  at `scripts/bundle/` too, so `bash scripts/bundle/import-into-devkit.sh <archive>` is the same command in a
+  checkout and in an installed folder; `verify-bundle.sh` asks for them there.
+- **`scripts/rehearse/`** — `rehearse-upgrade.sh` and the three files it runs, which it finds beside itself.
+- The root keeps `README.md`, `HANDOVER.md`, `CHANGELOG.md`, `install.sh`, `ai-bi.sh`, the `Dockerfile`, the
+  compose files and the two `.example` settings files. The commands in the README, the handover and `docs/`
+  name the new paths; the entries below keep the names they were written with.
+
 ## Not in a bundle yet — SharpSight Studio (2026-10-19)
 
 The visual builder of the brief's sections 46 to 60, as a page of Superset's own — not an extension panel:
