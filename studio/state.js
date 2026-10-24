@@ -12,6 +12,14 @@ export const state = {
   spec: null,          // the specification being edited
   token: 'none',       // the draft this page is a change to (§50.3)
   selected: null,
+  // WHICH SCREEN. The Studio is four of them on one page — the builder, the copilot, the governed data, and
+  // the releases — and the rail switches between them without leaving Superset's page.
+  screen: 'design',   // design · ai · model · release
+  pane: 'components', // the builder's left pane: components · templates · outline
+  modelTab: 'overview',
+  modelAsset: null,   // the dataset being read on the modelling screen
+  schema: {},         // its columns, by dataset id — names, types, roles; never a row
+  releaseTab: 'versions',
   dirty: false,
   saving: false,
   savedAt: null,
@@ -62,14 +70,18 @@ export function minWidth(slot) {
 /** The rows as they are drawn: the specification's own layout, or the template's, with only the slots that
  *  hold a chart. The engine materialises it the same way (aibi/layout.py::materialise). */
 export function rows() {
-  if (!state.spec.layout || !state.spec.layout.length) {
-    const held = new Set((state.spec.components || []).map(c => c.slot));
-    state.spec.layout = (state.payload.template.rows || []).map(row => ({
-      row: row.row, height: row.height,
-      slots: row.slots.filter(place => held.has(place.id)).map(place => ({ id: place.id, width: place.width })),
-    })).filter(row => row.slots.length);
-  }
+  if (!state.spec.layout || !state.spec.layout.length) state.spec.layout = rowsOf(state.spec);
   return state.spec.layout;
+}
+
+/** The same reading of ANY specification, without touching it — what a proposal would be laid out as. */
+export function rowsOf(spec) {
+  if (spec.layout && spec.layout.length) return spec.layout;
+  const held = new Set((spec.components || []).map(c => c.slot));
+  return (state.payload.template.rows || []).map(row => ({
+    row: row.row, height: row.height,
+    slots: row.slots.filter(place => held.has(place.id)).map(place => ({ id: place.id, width: place.width })),
+  })).filter(row => row.slots.length);
 }
 
 export const rowOf = slot => rows().find(row => row.slots.some(place => place.id === slot));

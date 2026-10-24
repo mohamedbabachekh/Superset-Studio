@@ -125,8 +125,12 @@ services:
       AIBI_SUPERSET_PASSWORD: "${AIBI_SUPERSET_PASSWORD}"
       AIBI_API_TOKEN: "${AIBI_API_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       AIBI_SUPERSET_GATEWAY_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
-      # Which model drives the planner is an open decision. `none` is the deterministic planner (aibi/llm.py).
+      # Which model reads a request. `none` (the default) is the deterministic planner — it calls nobody.
+      # `claude` or `openai` put a model in front of it (aibi/llm.py); the key stays here, out of the image.
       AIBI_LLM_PROVIDER: "${AIBI_LLM_PROVIDER:-none}"
+      AIBI_LLM_MODEL: "${AIBI_LLM_MODEL:-}"
+      AIBI_LLM_API_KEY: "${AIBI_LLM_API_KEY:-}"
+      AIBI_LLM_BASE_URL: "${AIBI_LLM_BASE_URL:-}"
     ports:
       # Loopback, and not negotiable the way the kit's own port is: the API trusts the user named in a header
       # because the caller holds the gateway's token. It is the portal's backend, not something to browse to.
@@ -185,7 +189,7 @@ services:
       SHARPSIGHT_ENGINE_TOKEN: "${AIBI_SUPERSET_GATEWAY_TOKEN:?run ai-bi.sh once: it writes the engine's secrets into .env}"
       # the bundle Superset may load: its checksum, said HERE and not in the folder the bundle is in — whoever
       # could replace the bundle there could replace a checksum beside it (written by superset-extension/build.py)
-      SHARPSIGHT_EXTENSION_SHA256: "6bd8afda661707a095e566df62d5704d69bb51c906e82b887de24e379807e928"
+      SHARPSIGHT_EXTENSION_SHA256: "2452dbd90e224bbaa886f53becf18d6da5ecc7d23c22b86a75568c834e77e979"
       SHARPSIGHT_EXTENSIONS_DIR: /app/sharpsight/extensions
       # the Studio's own stylesheet and script, read as they are in the repository: no build step, no Node
       SHARPSIGHT_STUDIO_DIR: /app/sharpsight/studio

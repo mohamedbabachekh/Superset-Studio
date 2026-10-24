@@ -159,6 +159,33 @@ def token(draft) -> str:
     return hashlib.sha256(json.dumps(draft["spec"], sort_keys=True).encode()).hexdigest()[:16]
 
 
+DATASETS = [
+    {"id": "cem.qoe_daily", "name": "CEM QoE Daily", "certified": True, "owner": "CEM", "domain": "cem",
+     "kind": "fact", "grain": ["event_date", "region", "rat"],
+     "description": "Daily QoE aggregated by region and technology, with active and degraded users."},
+    {"id": "cem.region", "name": "Regions", "certified": True, "owner": "Reference data", "domain": "cem",
+     "kind": "dimension", "grain": ["region_id"], "description": "The regions, as the network names them."},
+    {"id": "cem.qoe_site_daily", "name": "QoE by site", "certified": False, "owner": "CEM", "domain": "cem",
+     "kind": "fact", "grain": ["event_date", "site"], "description": "QoE per site — not certified yet."},
+]
+COLUMNS = {
+    "event_date": {"type": "date", "role": "time", "classification": "internal", "physical_type": "date",
+                   "readable": True},
+    "region_id": {"type": "string", "role": "dimension", "classification": "internal",
+                  "physical_type": "varchar", "readable": True},
+    "technology": {"type": "string", "role": "dimension", "classification": "internal",
+                   "physical_type": "varchar", "readable": True},
+    "active_users": {"type": "integer", "role": "measure", "classification": "internal",
+                     "physical_type": "bigint", "readable": True},
+    "degraded_users": {"type": "integer", "role": "measure", "classification": "internal",
+                       "physical_type": "bigint", "readable": True},
+    "avg_qoe_score": {"type": "number", "role": "measure", "classification": "internal",
+                      "physical_type": "numeric", "readable": True},
+    "msisdn_hash": {"type": "string", "role": "identifier", "classification": "restricted",
+                    "physical_type": "varchar", "readable": False},
+}
+
+
 def payload() -> dict:
     spec = copy.deepcopy(state["draft"]["spec"] if state["draft"] else SPEC)
     rows = spec.get("layout") or TEMPLATE["rows"]
@@ -364,10 +391,11 @@ class Handler(BaseHTTPRequestHandler):
             slot = path.rsplit("/", 1)[-1].split("?")[0]
             return self._send(200, tile(slot), "image/svg+xml; charset=utf-8")
         if path.endswith("/datasets"):
-            return self._json(200, {"result": [{"id": "cem.qoe_daily", "name": "CEM QoE Daily", "certified": True},
-                                               {"id": "cem.region", "name": "Regions", "certified": True},
-                                               {"id": "cem.qoe_site_daily", "name": "QoE by site",
-                                                "certified": False}]})
+            return self._json(200, {"result": DATASETS})
+        if "/datasets/" in path and not path.endswith(("/lineage", "/schema")):
+            which = path.rsplit("/", 1)[-1]
+            found = next((one for one in DATASETS if one["id"] == which), DATASETS[0])
+            return self._json(200, {"result": {**found, "columns": COLUMNS}})
         if path.endswith("/metrics"):
             return self._json(200, {"result": [
                 {"id": m, "name": m.split(".")[-1].replace("_", " ").title(), "certified": m != "cem.degraded_rate",
@@ -398,9 +426,29 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith("/package"):
             return self._send(200, b"PK\x05\x06" + b"\0" * 18, "application/zip")
         if "/lineage" in path:
-            return self._json(200, {"result": {"dataset": "cem.qoe_daily", "model": "mart_cem_qoe_daily",
-                                               "built_from": ["stg_cem_qoe", "dim_region"],
-                                               "tests": {"passed": 24, "failed": 0}}})
+            which = path.split("/datasets/", 1)[-1].split("/")[0]
+            return self._json(200, {"result": {
+                "dataset": which, "model": "mart_cem_qoe_daily", "derived_from": [],
+                "metrics": ["cem.qoe_score", "cem.active_users", "cem.degraded_users"],
+                "nodes": [
+                    {"name": "mart_cem_qoe_daily", "resource_type": "model", "environment": "prod",
+                     "relation": "devkit.bi.mart_cem_qoe_daily", "materialized": "table",
+                     "path": "dbt/models/marts/mart_cem_qoe_daily.sql",
+                     "tests": ["not_null_event_date", "unique_event_date_region"],
+                     "depends_on": [{"name": "stg_cem_qoe", "unique_id": "model.sharpsight.stg_cem_qoe"},
+                                    {"name": "dim_region", "unique_id": "model.sharpsight.dim_region"}]},
+                    {"name": "stg_cem_qoe", "resource_type": "model", "environment": "prod",
+                     "relation": "devkit.bi.stg_cem_qoe", "materialized": "view",
+                     "path": "dbt/models/staging/stg_cem_qoe.sql", "tests": ["not_null_event_time"],
+                     "depends_on": [{"name": "raw_cem_events", "unique_id": "source.sharpsight.raw_cem_events"}]},
+                    {"name": "dim_region", "resource_type": "model", "environment": "prod",
+                     "relation": "devkit.bi.dim_region", "materialized": "table",
+                     "path": "dbt/models/staging/dim_region.sql", "tests": ["unique_region_id"],
+                     "depends_on": []},
+                    {"name": "raw_cem_events", "resource_type": "source", "environment": "prod",
+                     "relation": "devkit.landing.raw_cem_events", "materialized": None,
+                     "path": "dbt/models/sources.yml", "tests": [], "depends_on": []},
+                ]}})
         if path.endswith("/changes"):
             return self._json(200, {"result": {"same_as_validated": True, "charts": [], "why_not": None,
                                                "on_the_dashboard": [], "would_take": []}})
@@ -543,6 +591,15 @@ ROW = ("() => Array.from(document.querySelectorAll('.ss-row')).map(row => row.da
        "tile.style.getPropertyValue('--w')).join(', '))")
 
 
+def open_settings(page) -> str:  # noqa: ANN001 — a Playwright page
+    """What Settings says, and closed again: a page sets how it looks, and nothing about the project."""
+    page.click('.ss-rail button:has-text("Settings")')
+    page.wait_for_selector(".ss-modal")
+    said = page.inner_text(".ss-modal")
+    page.keyboard.press("Escape")
+    return said
+
+
 def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     """Hold the workspace to what it promises: the moves it offers, the minimum widths it must not go under,
     the section it must not let a chart leave, the draft it saves, and undo.
@@ -560,13 +617,16 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     inspector = ".ss-stack > .ss-card:first-child"
     expect("selecting a chart opens its inspector",
            "kpi_1" in page.inner_text(f"{inspector} header").lower())
-    expect("whose first tab is what the chart measures, as a control bound to the registry",
-           page.eval_on_selector(f"{inspector} select", "n => n.value") == "cem.qoe_score")
+    expect("whose Data tab is what the chart measures, as controls bound to the registry",
+           page.locator(f"{inspector} .ss-field", has_text="Metrics").locator("select")
+           .input_value() == "cem.qoe_score"
+           and page.locator(f"{inspector} .ss-field", has_text="Dataset").locator("select")
+           .input_value() == "cem.qoe_daily")
     page.click(f'{inspector} .ss-tabs >> text=Governance')
     expect("and whose governance tab says who owns it and whether it is certified",
            "Certified" in page.inner_text(inspector) and "Owner" in page.inner_text(inspector))
 
-    page.click(f'{inspector} .ss-tabs >> text=Chart')
+    page.click(f'{inspector} .ss-tabs >> text=Style')
     page.click('button[title^="Later on the row"]')
     time.sleep(0.2)
     expect("a chart moves later on its row",
@@ -605,8 +665,8 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
 
     time.sleep(1.6)                                   # the draft saves itself a moment after the last change
     expect("the draft is saved", bool(state["draft"]) and "Draft saved" in page.inner_text(".ss-bar"))
-    expect("and the drawer says what it changes about the version",
-           bool(page.query_selector(".ss-drawer")))
+    expect("and the tab row says it is unsaved no longer",
+           "Draft saved" in page.inner_text(".ss-bar"))
     expect("and it carries the layout that was placed",
            state["draft"]["spec"]["layout"][1]["slots"][2]["id"] == "kpi_3")
 
@@ -616,9 +676,14 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("undo takes back one step, not a whole drag", page.evaluate(ROW) != before
            and page.evaluate(ROW)[0].startswith("kpis"))
 
-    page.click(".ss-bar >> text=Validate")
+    page.keyboard.press("v")
     page.wait_for_selector(".ss-checks")
-    expect("validate shows the engine's own report", "passed" in page.inner_text(".ss-drawer"))
+    expect("validate goes to the release screen and shows the engine's own report",
+           page.eval_on_selector_all('.ss-areas button[aria-selected="true"]',
+                                     "ns => ns.map(n => n.textContent)") == ["Validation"]
+           and "passed" in page.inner_text(".ss-panes").lower())
+    page.keyboard.press("1")
+    time.sleep(0.3)
 
     # ── the keyboard: every move the mouse can make (§47.4) ────────────────────────────────────────────────
     page.click('[data-slot="trend_1"]')
@@ -637,7 +702,7 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.keyboard.press("Escape")
 
     # ── the gallery: the manual path, which is not a prompt (§48.3) ────────────────────────────────────────
-    page.click(".ss-bar >> text=Add chart")
+    page.keyboard.press("a")
     page.wait_for_selector(".ss-modal")
     expect("the gallery offers the template's free slot", "map_1" in page.inner_text(".ss-modal"))
     page.check('.ss-modal input[value="cem.qoe_score"]')
@@ -669,39 +734,54 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.click('[data-slot="kpi_4"]')
     page.keyboard.press("Backspace")
     time.sleep(0.3)
+    page.click('.ss-card.ss-pane .ss-tabs >> text=Outline')
+    time.sleep(0.2)
     expect("a chart taken off the dashboard is kept, parked",
            page.eval_on_selector_all('[data-slot="kpi_4"]', "n => n.length") == 0
            and "parked" in page.inner_text(".ss-card.ss-pane").lower())
+    page.click('.ss-card.ss-pane .ss-tabs >> text=Components')
     page.click('[data-slot="trend_1"]')
     page.keyboard.press("Backspace")
     time.sleep(0.3)
     expect("a mandatory chart is not", page.eval_on_selector_all('[data-slot="trend_1"]', "n => n.length") == 1)
 
-    # ── the drawer: what a commit would change, what the last run found, where the versions stand ──────────
-    page.click(".ss-drawer >> text=Releases")
-    expect("the drawer lists the versions and says promotion is elsewhere",
-           "1.0.0" in page.inner_text(".ss-drawer") and "command line" in page.inner_text(".ss-drawer"))
-    page.click(".ss-drawer >> text=Last run")
-    page.click(".ss-drawer >> text=Read the last run")
+    # ── the release screen: the versions, the pipeline, what the last run found ────────────────────────────
+    page.keyboard.press("4")
+    time.sleep(0.4)
+    page.click('.ss-areas >> text=Version History')
+    time.sleep(0.2)
+    expect("the release screen lists the versions and says promotion is elsewhere",
+           "1.0.0" in page.inner_text(".ss-panes") and "command line" in page.inner_text(".ss-panes"))
+    expect("and draws the pipeline this version stands in, which is a picture and not a set of buttons",
+           page.eval_on_selector_all(".ss-stage", "ns => ns.map(n => n.textContent)")[0].startswith("DEV")
+           and page.eval_on_selector_all(".ss-stage", "n => n.length") == 3
+           and page.eval_on_selector_all(".ss-stage button", "n => n.length") == 0)
+    page.click('.ss-areas >> text=Releases')
+    page.click(".ss-panes >> text=Read the last run")
     page.wait_for_selector(".ss-table")
     expect("and shows the levels only a run can produce",
-           "security" in page.inner_text(".ss-drawer") and "performance" in page.inner_text(".ss-drawer"))
-    page.click(".ss-drawer >> text=What this is")
-    expect("and says what this workspace is", "not a dashboard" in page.inner_text(".ss-drawer"))
+           "security" in page.inner_text(".ss-panes") and "performance" in page.inner_text(".ss-panes"))
+    page.click('.ss-areas >> text=Version History')
+    expect("and what this workspace is, in Settings",
+           "not a dashboard" in open_settings(page))
+    page.keyboard.press("1")
+    time.sleep(0.3)
 
     # ── the command palette: everything the workspace can do, by name ──────────────────────────────────────
     page.keyboard.press("Control+k")
     page.wait_for_selector(".ss-palette")
     expect("the palette lists what can be done, and the charts",
            "Validate" in page.inner_text(".ss-palette") and "QoE" in page.inner_text(".ss-palette"))
-    page.keyboard.type("releases")
+    page.keyboard.type("version history")
     time.sleep(0.2)
     expect("and narrows to what was typed",
            page.eval_on_selector_all(".ss-palette-row", "n => n.length") == 1)
     page.keyboard.press("Enter")
-    time.sleep(0.2)
-    expect("and running an entry does what the bar would",
-           "1.0.0" in page.inner_text(".ss-drawer"))
+    time.sleep(0.4)
+    expect("and running an entry goes where the rail would",
+           "1.0.0" in page.inner_text(".ss-panes"))
+    page.keyboard.press("1")
+    time.sleep(0.3)
 
     # ── light and dark ─────────────────────────────────────────────────────────────────────────────────────
     expect("light is the default", page.evaluate("() => document.documentElement.dataset.ssTheme") == "light")
@@ -716,8 +796,12 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.click('.ss-bar button[aria-label="Dark or light"]')
 
     # ── the package a version was cut as ───────────────────────────────────────────────────────────────────
-    expect("the latest version's package can be taken from the bar",
-           page.eval_on_selector('.ss-bar >> text=Export .ssbi', "n => !n.disabled"))
+    page.keyboard.press("4")
+    time.sleep(0.3)
+    expect("the latest version's package can be taken from the release screen",
+           page.eval_on_selector('.ss-areas >> text=Export (.ssbi)', "n => !n.disabled"))
+    page.keyboard.press("1")
+    time.sleep(0.3)
 
     # ── narrow: the panes become drawers rather than squeezing the canvas ──────────────────────────────────
     page.set_viewport_size({"width": 900, "height": 900})
@@ -795,12 +879,13 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
            page.eval_on_selector_all(".ss-tile", "n => n.length") > 0)
 
     # ── the rail, and the areas of the workspace ───────────────────────────────────────────────────────────
-    expect("a rail of where to go next: SharpSight's pages this person may open, and Superset's own",
-           page.eval_on_selector_all(".ss-rail-link", "n => n.length") >= 7
-           and "SQL Lab" in page.inner_text(".ss-rail")
-           and "Data Quality" in page.inner_text(".ss-rail"))
-    expect("and the Studio is the one marked as where you are",
-           page.eval_on_selector('.ss-rail-link[aria-current="page"]', "n => n.textContent") == "Studio")
+    expect("a rail of where to go: four screens of this page, SharpSight's own pages, and Superset's",
+           page.eval_on_selector_all(".ss-rail-link", "n => n.length") >= 11
+           and all(what in page.inner_text(".ss-rail") for what in
+                   ("Dashboards", "AI Assistant", "Data Modeling", "Deployments", "SQL Lab", "Data Quality")))
+    expect("and the one you are on is marked, and only that one",
+           page.eval_on_selector_all('.ss-rail-link[aria-current="page"]',
+                                     "ns => ns.map(n => n.textContent)") == ["Dashboards"])
     page.click('.ss-areas >> text=Filters')
     time.sleep(0.2)
     expect("the Filters area is the dashboard's filters, with the template's limit",
@@ -818,7 +903,7 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
 
     # ── the inspector's own controls: a change is a proposal ───────────────────────────────────────────────
     page.click('[data-slot="ranking_1"]')
-    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Chart')
+    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Style')
     expect("the kinds the slot accepts are a row of icons, the current one pressed",
            page.eval_on_selector_all(".ss-kindbtn", "n => n.length") >= 2
            and page.eval_on_selector('.ss-kindbtn[data-kind="bar"]',
@@ -828,8 +913,9 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     expect("and switching to another asks for a proposal rather than changing the draft",
            "table" in page.inner_text(".ss-proposal"))
     page.click(".ss-proposal >> text=Reject")
-    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Content')
-    page.select_option('.ss-stack select >> nth=0', "cem.active_users")
+    page.click('.ss-stack > .ss-card:first-child .ss-tabs >> text=Data')
+    page.locator('.ss-stack > .ss-card:first-child .ss-field', has_text="Metrics").locator("select") \
+        .select_option("cem.active_users")
     page.wait_for_selector(".ss-proposal")
     expect("changing what a chart measures asks for one too",
            "cem.active_users" in page.inner_text(".ss-proposal"))
@@ -843,13 +929,16 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.click('.ss-devices button[aria-label="Fit to the pane"]')
 
     # ── deploying to another Superset (§55) ────────────────────────────────────────────────────────────────
-    page.click(".ss-bar >> text=Deploy")
+    page.keyboard.press("4")
+    time.sleep(0.3)
+    page.click('.ss-areas >> text=Environments')
+    page.click(".ss-panes >> text=Where can this go?")
     page.wait_for_selector(".ss-table")
-    expect("the Deployments tab says where a version may go, and what is the command line's",
-           "run" in page.inner_text(".ss-drawer") and "command line only" in page.inner_text(".ss-drawer"))
+    expect("Environments says where a version may go, and what is the command line's",
+           "run" in page.inner_text(".ss-panes") and "command line only" in page.inner_text(".ss-panes"))
     # (what may NOT be deployed — a version nobody signed off, a package that changed, a chart that cannot
     #  draw — is held by services/ai-bi/tests/test_deploy.py, against the engine's own refusals)
-    page.click('.ss-drawer button:has-text("Deploy 1.0.0")')
+    page.click('.ss-panes button:has-text("Deploy 1.0.0")')
     page.wait_for_selector(".ss-modal")
     expect("asking for it opens a sheet that says what a deployment does, in order",
            page.locator(".ss-modal .ss-steps li").count() == 5
@@ -858,8 +947,8 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
     page.click('.ss-modal button:has-text("Deploy to run")')
     page.wait_for_selector(".ss-panel")
     expect("and a deployment is shown step by step, with what was read back afterwards",
-           "Ask every chart for its data" in page.inner_text(".ss-drawer")
-           and "charts arrived" in page.inner_text(".ss-drawer"))
+           "Ask every chart for its data" in page.inner_text(".ss-panes")
+           and "charts arrived" in page.inner_text(".ss-panes"))
     # …and all of it is READ, not scrolled inside a window of its own: the last steps are the ones that say
     # whether it worked, and they were hidden by the cap a validation's hundreds of checks need
     expect("and none of its steps is hidden inside a scrolling box",
@@ -867,6 +956,8 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
                                  "n => n.scrollHeight <= n.clientHeight + 1"))
 
     # ── the dashboard's own inspector (§47.5) ──────────────────────────────────────────────────────────────
+    page.keyboard.press("1")
+    time.sleep(0.3)
     if page.eval_on_selector('.ss-bar button[aria-label="The copilot"]',
                              "n => n.getAttribute('aria-pressed') !== 'true'"):
         page.click('.ss-bar button[aria-label="The copilot"]')
@@ -884,6 +975,61 @@ def check(page) -> list[str]:  # noqa: ANN001 — a Playwright page
            "bi_reviewer" in page.inner_text(inspector) and "cem_analyst" in page.inner_text(inspector))
     page.click(f'{inspector} .ss-tabs >> text=Layout')
     expect("and whose layout says who laid it out", "template" in page.inner_text(inspector).lower())
+
+    # ── the four screens, which are one page (the owner's own layouts) ────────────────────────────────────
+    page.click('.ss-card.ss-pane .ss-tabs >> text=Templates')
+    time.sleep(0.2)
+    expect("the left pane is the owner's three: what can be put on a dashboard, what it is bound to, what is on it",
+           "executive" in page.inner_text(".ss-card.ss-pane")
+           and "bound to its template" in page.inner_text(".ss-card.ss-pane"))
+    page.click('.ss-card.ss-pane .ss-tabs >> text=Components')
+    time.sleep(0.2)
+    pane = page.inner_text(".ss-card.ss-pane").lower()
+    expect("and the components are grouped as a builder groups them, filters and layout included",
+           all(what in pane for what in ("charts", "kpis", "filters", "layout", "others")))
+    expect("with what a specification does not carry shown rather than left out",
+           "not carried" in page.inner_text(".ss-card.ss-pane"))
+    page.click('.ss-areas >> text=Parameters')
+    time.sleep(0.2)
+    expect("Parameters is what the dashboard is given: its template, its widths, its defaults",
+           "no Jinja parameters" in page.inner_text(".ss-panes"))
+    page.click('.ss-areas >> text=Design')
+    time.sleep(0.2)
+
+    page.click('.ss-rail button:has-text("AI Assistant")')
+    page.wait_for_selector(".ss-ai")
+    expect("the assistant has a screen of its own: the conversation, and the dashboard beside it",
+           page.eval_on_selector_all(".ss-chatpane", "n => n.length") == 1
+           and page.eval_on_selector_all(".ss-ai .ss-tile", "n => n.length") >= 6)
+    page.click('.ss-chatpane .ss-chip >> text=make the trend weekly')
+    page.wait_for_selector(".ss-plan")
+    expect("asking there answers with a plan, and says it is a proposal",
+           page.eval_on_selector_all(".ss-plan li", "n => n.length") >= 1
+           and "proposed by sharpsight ai" in page.inner_text(".ss-ai").lower())
+    expect("and applying it is the tab row's own button, which validation can refuse",
+           page.eval_on_selector('.ss-areas >> text=Apply', "n => !n.disabled"))
+
+    page.click('.ss-rail button:has-text("Data Modeling")')
+    page.wait_for_selector(".ss-table")
+    expect("the governed data has a screen too: the models, and the columns of the one being read",
+           "msisdn_hash" in page.inner_text(".ss-panes")
+           and "restricted" in page.inner_text(".ss-panes"))
+    expect("and no row of the data anywhere on it, with the reason said",
+           "no sample is shown" in page.inner_text(".ss-panes").lower())
+    page.click('.ss-areas >> text=Lineage')
+    page.wait_for_selector(".ss-lineage")
+    expect("lineage is dbt's own graph, as it was built",
+           "mart_cem_qoe_daily" in page.inner_text(".ss-lineage")
+           and "stg_cem_qoe" in page.inner_text(".ss-lineage"))
+    page.click('.ss-areas >> text=Metrics')
+    time.sleep(0.3)
+    expect("and the metrics are the governed ones, with their owner and their certification",
+           "cem.qoe_score" in page.inner_text(".ss-panes") and "Owner" in page.inner_text(".ss-panes"))
+    expect("and the rail marks the screen you are on, not two of them",
+           page.eval_on_selector_all('.ss-rail-link[aria-current="page"]',
+                                     "ns => ns.map(n => n.textContent)") == ["Metrics"])
+    page.click('.ss-rail button:has-text("Dashboards")')
+    page.wait_for_selector(".ss-canvas")
 
     # ── zoom and the width it is read at (§47.4) ───────────────────────────────────────────────────────────
     page.click('.ss-card button[aria-label="Zoom out"]')

@@ -64,6 +64,7 @@ export function client(el) {
     run: id => ask('GET', `/runs/${slot(id)}`),
     datasets: () => ask('GET', '/datasets'),
     metrics: () => ask('GET', '/metrics'),
+    dataset: id => ask('GET', `/datasets/${slot(id)}`),
     lineage: dataset => ask('GET', `/datasets/${slot(dataset)}/lineage`),
     picture: (slotId, taken) => `${BASE}/projects/${slot(project)}/picture/${slot(slotId)}?v=${slot(taken || '0')}`,
     // the immutable package a version was cut as. Reading it is not promoting it: a promotion is approved

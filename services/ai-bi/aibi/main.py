@@ -87,7 +87,8 @@ class Service:
         self.deployer = Deployer(self.store, self.audit, self.lifecycle, self.policy, self.registry)
         self.targets = config_targets()
         self.people = People(self.registry, self.policy, self.superset, self.audit, settings.superset_user)
-        self.parser = get_parser(settings.llm_provider, self.registry)
+        self.parser = get_parser(settings.llm_provider, self.registry, model=settings.llm_model,
+                                 api_key=settings.llm_api_key, base_url=settings.llm_base_url)
         self.pipeline = Pipeline(self.tools, self.lifecycle, self.parser)
         # Superset is the interface: the engine's own records are shown there — tables, two dashboards, the
         # gate of each project as a tag (superset_view.py). A Superset session of its own: it runs beside a
@@ -197,6 +198,10 @@ SUPERSET_MAY = frozenset({
     ("POST", "/projects/{project_id}/versions/{version}/deploy"),
     # the explorer's governed lists (the brief's section 7): read-only, and filtered to this person
     ("GET", "/datasets"), ("GET", "/metrics"), ("GET", "/templates"),
+    # one governed dataset, for the Studio's data-modelling screen: its registry metadata and its COLUMNS —
+    # what each is called, its type, its role, its classification, whether this person may read it. Never a
+    # row of it: the engine can sample a dataset and the Studio is given no way to ask (ADR 0013)
+    ("GET", "/datasets/{dataset_id}"),
 })
 
 

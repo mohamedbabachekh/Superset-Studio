@@ -12,32 +12,60 @@ import { KEYS, button, close, field, icon, modal, node, pair, select, tag, theme
 
 export function draw(el, client, commands) {
   const where = window.scrollY;
+  // A redraw rebuilds the panes, which throws away whatever was focused — and a search box that loses the
+  // caret after every letter is a search box nobody can type in. What had focus is put back, with its
+  // caret, as long as it has an id.
+  const had = document.activeElement;
+  const hadId = had && had.id && el.contains(had) ? had.id : null;
+  const caret = hadId && typeof had.selectionStart === 'number' ? had.selectionStart : null;
   el.textContent = '';
   if (state.loading) {
     el.appendChild(skeleton());
     return;
   }
-  const barNode = bar(commands);
-  el.appendChild(barNode);
+  const top = topBar(commands);
+  el.appendChild(top);
   // the drawers of a narrow screen start below the bar, whose height depends on how far it wraps
-  document.documentElement.style.setProperty('--ss-bar-h', `${barNode.offsetHeight || 56}px`);
-  el.appendChild(areas(commands));
+  document.documentElement.style.setProperty('--ss-bar-h', `${top.offsetHeight || 56}px`);
+  el.appendChild(tabRow(commands));
   banners(el, commands);
-  const panes = node('div', { class: 'ss-panes', 'data-explorer': state.explorer ? 'open' : 'closed',
-    'data-copilot': state.copilot ? 'open' : 'closed' });
-  if (state.explorer) panes.appendChild(explorer(commands));
-  panes.appendChild(middle(client, commands));
-  if (state.copilot) panes.appendChild(rightPane(client, commands));
-  el.appendChild(panes);
-  el.appendChild(drawer(commands));
-  el.appendChild(rail());
+  el.appendChild(({ design: designScreen, ai: aiScreen, model: modelScreen,
+    release: releaseScreen }[state.screen] || designScreen)(client, commands));
+  el.appendChild(rail(commands));
   window.scrollTo(0, where);
+  if (hadId) {
+    const back = document.getElementById(hadId);
+    if (back) {
+      back.focus({ preventScroll: true });
+      if (caret !== null && typeof back.setSelectionRange === 'function') {
+        try { back.setSelectionRange(caret, caret); } catch (error) { /* a type that has no caret */ }
+      }
+    }
+  }
 }
 
-/* The rail: where a person goes from here. SharpSight's own entries are the ones this person may open —
- * the add-on puts them in the page, applying the same rule the menu obeys — and Superset's are its own
- * pages, which it will refuse itself if they are not theirs. It is a short cut, not a second application:
- * every one of these addresses is reachable from Superset's top bar too. */
+/* ── the four screens ─────────────────────────────────────────────────────────────────────────────────────
+ * One page, four screens, switched from the rail: the BUILDER (a dashboard being composed), the ASSISTANT
+ * (the same proposal, with room to read it beside what it would make), the GOVERNED DATA (datasets, metrics,
+ * the dbt behind them) and the RELEASES (versions, validation, environments, what was deployed where).
+ *
+ * They are screens and not pages because they are one project: the draft being edited, the proposal just
+ * made and the version about to be released are the same thing seen from four sides, and a page load
+ * between them would throw away the first.
+ */
+function designScreen(client, commands) {
+  const panes = node('div', { class: 'ss-panes', 'data-explorer': state.explorer ? 'open' : 'closed',
+    'data-copilot': state.copilot ? 'open' : 'closed' });
+  if (state.explorer) panes.appendChild(leftPane(commands));
+  panes.appendChild(middle(client, commands));
+  if (state.copilot) panes.appendChild(rightPane(client, commands));
+  return panes;
+}
+
+/* The rail (ADR 0023, and the owner's layouts): where a person goes from here. Four of these entries are
+ * screens of this page; the rest are addresses — SharpSight's own pages, the ones this person may open (the
+ * add-on puts them in the page, applying the same rule the menu obeys), and Superset's, which it refuses
+ * itself if they are not theirs. It is a short cut, not a second application. */
 const SUPERSET_PAGES = [
   ['home', 'Home', '/superset/welcome/'],
   ['datasets', 'Datasets', '/tablemodelview/list/'],
@@ -48,37 +76,143 @@ const SUPERSET_PAGES = [
 const SHARPSIGHT_ICONS = { Projects: 'projects', 'BI Factory': 'ai', 'Data Quality': 'quality',
   'Impact Analysis': 'impact', Releases: 'releases', 'Audit trail': 'audit', 'Data models (dbt)': 'dbt' };
 
-function rail() {
-  let links = [];
-  try { links = JSON.parse(document.getElementById('sharpsight-studio').dataset.links || '[]'); }
-  catch (error) { links = []; }
-  const here = window.location.pathname;
-  const entry = (kind, label, href, current) => node('a', { class: 'ss-rail-link', href,
-    'aria-current': current ? 'page' : false, title: label },
-  icon(kind, { class: 'ss-rail-icon' }), node('span', { class: 'ss-rail-label', text: label }));
-  return node('nav', { class: 'ss-rail', 'aria-label': 'SharpSight' },
-    node('div', { class: 'ss-rail-group' },
-      node('span', { class: 'ss-rail-head', text: 'SharpSight' }),
-      entry('studio', 'Studio', here, true),
-      links.map(link => entry(SHARPSIGHT_ICONS[link.name] || 'other', link.name, link.href,
-        here.startsWith(link.href)))),
-    node('div', { class: 'ss-rail-group' },
-      node('span', { class: 'ss-rail-head', text: 'Superset' }),
-      SUPERSET_PAGES.map(([kind, label, href]) => entry(kind, label, href, false))));
+// what the rail holds, in the owner's own order. `screen` is a screen of this page; `page` is one of
+// Superset's; `link` is a SharpSight page, shown only if this person was given it.
+const RAIL = [
+  ['home', 'Home', { page: '/superset/welcome/' }],
+  ['projects', 'Projects', { link: 'Projects' }],
+  ['datasets', 'Datasets', { page: '/tablemodelview/list/' }],
+  ['metrics', 'Metrics', { screen: 'model', tab: 'metrics' }],
+  ['charts', 'Charts', { page: '/chart/list/' }],
+  ['dashboards', 'Dashboards', { screen: 'design' }],
+  ['sql', 'SQL Lab', { page: '/sqllab/' }],
+  ['modeling', 'Data Modeling', { screen: 'model' }],
+  ['ai', 'AI Assistant', { screen: 'ai' }],
+  ['deployments', 'Deployments', { screen: 'release' }],
+  ['settings', 'Settings', { settings: true }],
+];
+
+function railLinks() {
+  try { return JSON.parse(document.getElementById('sharpsight-studio').dataset.links || '[]'); }
+  catch (error) { return []; }
 }
 
-/* The areas of the brief's own top row (§47.2): the canvas, and the three things about a dashboard that are
- * not one chart. Design is the canvas; the others take the middle of the workspace, so the explorer and the
- * copilot stay where they are. */
-const AREAS = [['design', 'Design'], ['data', 'Data'], ['filters', 'Filters'],
-  ['interactions', 'Interactions']];
+function rail(commands) {
+  const links = railLinks();
+  const here = window.location.pathname;
+  const link = (kind, label, href, current) => node('a', { class: 'ss-rail-link', href,
+    'aria-current': current ? 'page' : false, title: label },
+  icon(kind, { class: 'ss-rail-icon' }), node('span', { class: 'ss-rail-label', text: label }));
+  // « Metrics » and « Data Modeling » are the same screen on two tabs, so only one of them is where you are
+  const at = where => state.screen === where.screen
+    && (where.tab ? state.modelTab === where.tab : !(where.screen === 'model' && state.modelTab === 'metrics'));
+  const go = (kind, label, where) => node('button', { class: 'ss-rail-link', type: 'button',
+    'aria-current': at(where) ? 'page' : false, title: label,
+    on: { click: () => commands.screen(where.screen, where.tab) } },
+  icon(kind, { class: 'ss-rail-icon' }), node('span', { class: 'ss-rail-label', text: label }));
 
-function areas(commands) {
-  const now = state.area || 'design';
+  const main = node('div', { class: 'ss-rail-group' });
+  RAIL.forEach(([kind, label, what]) => {
+    if (what.screen) main.appendChild(go(kind, label, what));
+    else if (what.page) main.appendChild(link(kind, label, what.page, false));
+    else if (what.settings) {
+      main.appendChild(node('button', { class: 'ss-rail-link', type: 'button', title: label,
+        on: { click: () => settings(commands) } },
+      icon(kind, { class: 'ss-rail-icon' }), node('span', { class: 'ss-rail-label', text: label })));
+    } else {
+      const found = links.find(one => one.name === what.link);
+      if (found) main.appendChild(link(kind, label, found.href, here.startsWith(found.href)));
+    }
+  });
+  // everything else this person may open in SharpSight: the record dashboards, dbt's documentation
+  const rest = links.filter(one => one.name !== 'Projects');
+  return node('nav', { class: 'ss-rail', 'aria-label': 'SharpSight' },
+    node('div', { class: 'ss-logo' }, icon('studio', { class: 'ss-logo-mark' }),
+      node('span', {}, node('strong', { text: 'SharpSight' }),
+        node('span', { class: 'ss-logo-sub', text: 'BI Studio' }))),
+    main,
+    rest.length ? node('div', { class: 'ss-rail-group' },
+      node('span', { class: 'ss-rail-head', text: 'More in SharpSight' }),
+      rest.map(one => link(SHARPSIGHT_ICONS[one.name] || 'other', one.name, one.href,
+        here.startsWith(one.href)))) : null,
+    node('div', { class: 'ss-rail-group' },
+      node('span', { class: 'ss-rail-head', text: 'Superset' }),
+      SUPERSET_PAGES.slice(2).map(([kind, label, href]) => link(kind, label, href, false))));
+}
+
+/* The row under the bar: what is being worked on, and what can be done to it. Both belong to the screen —
+ * the builder's tabs are areas of a dashboard, the releases' are stages of a release. */
+const AREAS = [['design', 'Design'], ['data', 'Data'], ['filters', 'Filters'],
+  ['interactions', 'Interactions'], ['parameters', 'Parameters']];
+const MODEL_TABS = [['overview', 'Overview'], ['datasets', 'Datasets'], ['metrics', 'Metrics'],
+  ['models', 'dbt Models'], ['lineage', 'Lineage'], ['tests', 'Tests']];
+const RELEASE_TABS = [['versions', 'Version History'], ['validation', 'Validation'],
+  ['environments', 'Environments'], ['releases', 'Releases']];
+
+function tabRow(commands) {
+  const of = {
+    design: [AREAS, state.area || 'design', key => { state.area = key; }],
+    model: [MODEL_TABS, state.modelTab, key => { state.modelTab = key; }],
+    release: [RELEASE_TABS, state.releaseTab, key => { state.releaseTab = key; }],
+    ai: [[], null, () => {}],
+  }[state.screen] || [AREAS, state.area || 'design', key => { state.area = key; }];
+  const [tabs, now, pick] = of;
   return node('div', { class: 'ss-areas', role: 'tablist', 'aria-label': 'What is being worked on' },
-    AREAS.map(([key, label]) => node('button', { type: 'button', role: 'tab', text: label,
-      'aria-selected': now === key,
-      on: { click: () => { state.area = key; commands.redraw(); } } })));
+    tabs.map(([key, label]) => node('button', { type: 'button', role: 'tab', text: label,
+      'aria-selected': now === key, on: { click: () => { pick(key); commands.redraw(); } } })),
+    node('span', { class: 'ss-spacer' }),
+    actions(commands));
+}
+
+function actions(commands) {
+  const project = state.payload.project;
+  if (state.screen === 'ai') {
+    const made = state.proposal;
+    return node('div', { class: 'ss-group' },
+      button('Preview', () => window.open(project.dashboard, '_blank', 'noopener'),
+        { disabled: !project.dashboard, title: 'The live dashboard in Superset, as it is now' }),
+      button('Edit in Studio', () => { state.screen = 'design'; commands.redraw(); },
+        { title: 'Back to the canvas' }),
+      button('Apply', () => { act.apply(made); state.screen = 'design'; commands.redraw(); },
+        { 'data-weight': 'primary',
+          disabled: !made || !made.spec || !(made.validation || {}).passed,
+          title: !made ? 'Ask for a change first'
+            : !(made.validation || {}).passed ? 'This proposal would not pass validation'
+              : 'Take this proposal into the draft — one undo takes it back' }));
+  }
+  if (state.screen === 'release') {
+    return node('div', { class: 'ss-group' },
+      button('Export (.ssbi)', commands.export_, {
+        disabled: !(state.payload.versions || []).some(version => version.package),
+        title: (state.payload.versions || []).some(version => version.package)
+          ? 'The immutable package of the latest version — what a deployment carries'
+          : 'No version of this project has a package yet' }),
+      button('+ New Release', commands.commit, { 'data-weight': 'primary',
+        disabled: !act.editable() || !state.savedAt || state.dirty,
+        title: !act.editable() ? 'This project is read-only here'
+          : state.dirty ? 'Save the draft first' : !state.savedAt ? 'There is no draft to release'
+            : 'Make this draft a version, through the engine’s ten gates' }));
+  }
+  if (state.screen === 'model') {
+    const docs = (railLinks().find(one => one.name === 'Data models (dbt)') || {}).href;
+    return node('div', { class: 'ss-group' },
+      button('Open dbt docs', () => window.open(docs, '_blank', 'noopener'),
+        { disabled: !docs, title: docs ? 'dbt’s own documentation and lineage, as it was built'
+          : 'dbt’s documentation is not one of the pages you were given' }));
+  }
+  return node('div', {}, node('div', { class: 'ss-group' },
+    button('↶', () => act.undo('undo'), { 'data-weight': 'quiet', title: 'Undo (⌘Z)',
+      'aria-label': 'Undo', disabled: !state.past.length }),
+    button('↷', () => act.undo('redo'), { 'data-weight': 'quiet', title: 'Redo (⇧⌘Z)',
+      'aria-label': 'Redo', disabled: !state.future.length }),
+    button('⋯', commands.palette, { 'data-weight': 'quiet', 'aria-label': 'Everything else',
+      title: 'Validate, add a chart, photograph the tiles, deploy… — every command, by name (⌘K)' })),
+  node('div', { class: 'ss-group' },
+    button('Preview', () => window.open(project.dashboard, '_blank', 'noopener'),
+      { disabled: !project.dashboard,
+        title: 'Open the live dashboard in Superset: filters, tooltips, cross-filters' }),
+    button('Save', act.save, { 'data-weight': 'primary', disabled: !state.dirty || !act.editable(),
+      title: state.dirty ? 'Save the draft now (⌘S)' : 'Nothing has changed since the last save' })));
 }
 
 const middle = (client, commands) => ({
@@ -86,6 +220,7 @@ const middle = (client, commands) => ({
   data: () => dataArea(commands),
   filters: () => filtersArea(commands),
   interactions: () => interactionsArea(),
+  parameters: () => parametersArea(),
 }[state.area || 'design'] || (() => canvas(client, commands)))();
 
 function dataArea(commands) {
@@ -173,6 +308,47 @@ function interactionsArea() {
         + 'specification, which today means on the command line or by the copilot — the Studio shows it.' })));
 }
 
+/* Parameters: what a dashboard is given rather than what it holds — the template it is bound to, the widths
+ * it declares it will be read at, the theme, and the defaults a chart inherits. A specification carries
+ * these; it carries no Jinja parameter, because nothing in this kit templates a governed query. */
+function parametersArea() {
+  const template = state.payload.template;
+  const header = state.spec.dashboard || {};
+  const theme_ = state.spec.theme || {};
+  const grains = [...new Set((state.spec.components || [])
+    .map(component => (component.options || {}).time_grain).filter(Boolean))];
+  return node('section', { class: 'ss-card' }, node('header', {}, 'Parameters'),
+    node('div', { class: 'ss-body' },
+      node('div', { class: 'ss-panel' },
+        node('h4', { text: 'The template it is bound to' }),
+        node('ul', { class: 'ss-gov' },
+          pair('Template', `${template.id} v${template.version}`),
+          pair('Name', template.name),
+          pair('Grid', `${template.grid.columns} columns, ${template.grid.row_height || '—'} per row unit`),
+          pair('Sections', (template.sections || []).map(one => one.title || one.id).join(', ')),
+          pair('Slots', Object.keys(template.slots || {}).length))),
+      node('div', { class: 'ss-panel' },
+        node('h4', { text: 'The widths it is read at' }),
+        node('ul', { class: 'ss-gov' }, (template.viewports || []).length
+          ? (template.viewports || []).map(one => pair(one.name || `${one.width}px`,
+            `${one.width}px — ${one.columns || template.grid.columns} columns`))
+          : [pair('—', 'this template declares none')]),
+        node('p', { class: 'ss-note', text:
+          'The canvas can be seen at each of them (the device row above the canvas): a dashboard is read on '
+          + 'the width it is read on, not on the one it was built on.' })),
+      node('div', { class: 'ss-panel' },
+        node('h4', { text: 'Defaults' }),
+        node('ul', { class: 'ss-gov' },
+          pair('Theme', theme_.name || 'SharpSight’s own, from the engine'),
+          pair('Time grains in use', grains.join(', ') || 'each chart’s own'),
+          pair('Owner', header.owner),
+          pair('Refresh', 'a tag on the dashboard in Superset (refresh:06:30, refresh:30m, refresh:off)'))),
+      node('div', { class: 'ss-callout', 'data-kind': 'info', text:
+        'There are no Jinja parameters here. A governed query is a dbt model and a registered metric, built '
+        + 'before a dashboard asks for it — nothing on this page templates SQL, which is why nothing on this '
+        + 'page can be made to read what you are not cleared for.' })));
+}
+
 function skeleton() {
   return node('div', { class: 'ss-panes', style: 'padding-top: 24px' },
     node('div', { class: 'ss-skeleton', style: 'height: 320px' }),
@@ -193,62 +369,70 @@ const AGO = at => {
   return new Date(at).toLocaleTimeString();
 };
 
-function bar(commands) {
+function topBar(commands) {
   const project = state.payload.project;
   const saved = state.saving ? 'Saving…' : state.dirty ? 'Unsaved changes'
     : state.savedAt ? `Draft saved ${AGO(state.savedAt)}` : 'No draft';
   const gate = { PROD: 'good', UAT: 'good', APPROVED_FOR_UAT: 'good', APPROVED_FOR_PROD: 'good',
     READY_FOR_REVIEW: 'warn', VALIDATION_FAILED: 'bad', UAT_FAILED: 'bad' }[project.gate];
+  const projects = (railLinks().find(one => one.name === 'Projects') || {}).href;
+  const search = node('input', { class: 'ss-topsearch', id: 'ss-search', type: 'search',
+    placeholder: 'Search assets, metrics, charts…  (/)', value: state.search,
+    'aria-label': 'Search assets, metrics and charts',
+    on: { input: event => { state.search = event.target.value; commands.redraw(); } } });
   return node('div', { class: 'ss-bar' },
-    node('div', { class: 'ss-crumb' },
-      node('span', { class: 'ss-dim', text: 'SharpSight Studio' }), node('span', { class: 'ss-dim', text: '/' }),
-      node('span', { text: project.title || project.project_id }), node('span', { class: 'ss-dim', text: '/' }),
-      node('span', { text: project.dashboard_title })),
+    projects ? node('a', { class: 'ss-btn ss-back', 'data-weight': 'quiet', href: projects,
+      title: 'Every project', 'aria-label': 'Every project' }, icon('back', { class: 'ss-rail-icon' })) : null,
+    node('div', { class: 'ss-crumb' }, node('span', { text: project.title || project.project_id })),
     tag(project.environment, 'env'),
     project.version && tag(`v${project.version}`),
     project.gate && tag(project.gate.replace(/_/g, ' ').toLowerCase(), gate),
     tag(saved, state.dirty ? 'warn' : state.savedAt ? 'good' : undefined),
     node('span', { class: 'ss-spacer' }),
-    node('span', { class: 'ss-avatar', title: `Signed in as ${who()}`, text: initials(who()) }),
-    node('div', { class: 'ss-group' },
-      button('↶', () => act.undo('undo'), { 'data-weight': 'quiet', title: 'Undo (⌘Z)',
-        'aria-label': 'Undo', disabled: !state.past.length }),
-      button('↷', () => act.undo('redo'), { 'data-weight': 'quiet', title: 'Redo (⇧⌘Z)',
-        'aria-label': 'Redo', disabled: !state.future.length })),
-    node('div', { class: 'ss-group' },
-      button('Add chart', commands.gallery, { disabled: !act.editable() || !state.payload.free_slots.length,
-        title: state.payload.free_slots.length ? 'Put a governed chart on a free slot of the template (a)'
-          : 'Every slot of this template already holds a chart' }),
-      button('Tiles', commands.tiles, { title: 'Photograph the real dashboard again' }),
-      button('Preview', () => window.open(project.dashboard, '_blank', 'noopener'),
-        { disabled: !project.dashboard, title: 'Open the live dashboard in Superset: filters, tooltips, cross-filters' })),
-    node('div', { class: 'ss-group' },
-      button('Validate', commands.validate, { title: 'Check the draft against the registry and the template (v)' }),
-      button('Save draft', act.save, { disabled: !state.dirty || !act.editable(),
-        title: state.dirty ? 'Save now (⌘S)' : 'Nothing has changed since the last save' }),
-      button('Deploy', () => { state.tab = 'deployments'; commands.deployments(); },
-        { title: 'Take a version to another Superset — the run environment' }),
-      button('Export .ssbi', commands.export_, {
-        disabled: !(state.payload.versions || []).some(version => version.package),
-        title: (state.payload.versions || []).some(version => version.package)
-          ? 'The immutable package of the latest version — what a deployment service imports elsewhere'
-          : 'No version of this project has a package yet' }),
-      button('Commit version', commands.commit, { 'data-weight': 'primary',
-        disabled: !act.editable() || !state.savedAt || state.dirty,
-        title: !act.editable() ? 'This project is read-only here'
-          : state.dirty ? 'Save the draft first' : !state.savedAt ? 'There is no draft to commit'
-            : 'Make this draft a version, through the engine’s ten gates' })),
+    search,
+    node('span', { class: 'ss-spacer' }),
     node('div', { class: 'ss-group' },
       button('⌘K', commands.palette, { 'data-weight': 'quiet', title: 'Every command, by name (⌘K)',
         'aria-label': 'Command palette' }),
-      button('◧', () => { state.explorer = !state.explorer; commands.redraw(); },
-        { 'data-weight': 'quiet', 'aria-pressed': state.explorer, 'aria-label': 'The explorer', title: 'The explorer' }),
-      button('◨', () => { state.copilot = !state.copilot; commands.redraw(); },
-        { 'data-weight': 'quiet', 'aria-pressed': state.copilot, 'aria-label': 'The copilot', title: 'The copilot' }),
+      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button',
+        'aria-pressed': state.explorer, 'aria-label': 'The explorer', title: 'The explorer',
+        on: { click: () => { state.explorer = !state.explorer; commands.redraw(); } } }, '◧'),
+      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button',
+        'aria-pressed': state.copilot, 'aria-label': 'The copilot', title: 'The copilot',
+        on: { click: () => { state.copilot = !state.copilot; commands.redraw(); } } }, '◨'),
       button('◐', () => { theme(themeNow() === 'dark' ? 'light' : 'dark'); commands.redraw(); },
         { 'data-weight': 'quiet', 'aria-pressed': themeNow() === 'dark', 'aria-label': 'Dark or light',
           title: 'Dark or light — kept in this browser' }),
-      button('?', commands.help, { 'data-weight': 'quiet', title: 'Keyboard shortcuts (?)' })));
+      button('?', commands.help, { 'data-weight': 'quiet', title: 'Keyboard shortcuts (?)' })),
+    node('span', { class: 'ss-avatar', title: `Signed in as ${who()}`, text: initials(who()) }));
+}
+
+/* Settings: what this page lets a person set, which is what a page may set — how it looks, and which panes
+ * are open. Everything else about this project is the registry's or the engine's. */
+function settings(commands) {
+  modal({
+    title: 'Settings',
+    body: node('div', {},
+      field('Theme', select(themeNow(), [['light', 'Light'], ['dark', 'Dark']],
+        value => { theme(value); commands.redraw(); })),
+      field('Panes', node('div', { class: 'ss-two' },
+        node('label', { class: 'ss-check' },
+          node('input', { type: 'checkbox', checked: state.explorer,
+            on: { change: () => { state.explorer = !state.explorer; commands.redraw(); } } }),
+          node('span', { text: 'The explorer, on the left' })),
+        node('label', { class: 'ss-check' },
+          node('input', { type: 'checkbox', checked: state.copilot,
+            on: { change: () => { state.copilot = !state.copilot; commands.redraw(); } } }),
+          node('span', { text: 'The inspector and the copilot, on the right' })))),
+      node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
+        'The theme is kept in this browser, for you. Everything else about this project — who may open it, '
+        + 'what it may read, what it may be drawn as — is the registry’s, and is changed there.' }),
+      node('div', { class: 'ss-callout', 'data-kind': 'info', style: 'margin-top: 12px', text:
+        'This workspace edits a SPECIFICATION, not a dashboard. Superset draws every chart and every '
+        + 'dashboard; the Studio says what they should be, and the engine decides whether that may become a '
+        + 'version. Nothing here approves and nothing here promotes.' })),
+    footer: [button('Close', close, { 'data-weight': 'primary' })],
+  });
 }
 
 function banners(el, commands) {
@@ -284,10 +468,144 @@ function runBanner(commands) {
 }
 
 /* ── the explorer and the outline (§47.3, §8) ─────────────────────────────────────────────────────────────── */
-function explorer(commands) {
-  const match = text => !state.search || String(text).toLowerCase().includes(state.search.toLowerCase());
-  const tree = node('ul', { class: 'ss-tree' });
+/* The left pane, in three tabs — the owner's own layout: what can be put on a dashboard (Components), what
+ * this one is bound to (Templates), and what is on it now (Outline). */
+const LIBRARY = [
+  ['Charts', ['line', 'bar', 'area', 'pie', 'map', 'table']],
+  ['KPIs', ['big_number', 'gauge', 'progress']],
+];
+// a dashboard carries these, and they are not charts: a filter is a governed column, a row belongs to the
+// template, and a text box is Superset's own furniture — each says so rather than being left out
+const NOT_CHARTS = [['text', 'Text'], ['image', 'Image'], ['divider', 'Divider']];
 
+function leftPane(commands) {
+  const tabs = [['components', 'Components'], ['templates', 'Templates'], ['outline', 'Outline']];
+  const which = state.pane || 'components';
+  const body = node('div', { class: 'ss-body' });
+  body.appendChild(node('input', { class: 'ss-search', id: 'ss-search-panel', type: 'search',
+    placeholder: 'Search components…', value: state.search, 'aria-label': 'Search this panel',
+    on: { input: event => { state.search = event.target.value; commands.redraw(); } } }));
+  ({ components: componentsTab, templates: templatesTab, outline: outlineTab }[which]
+    || componentsTab)(body, commands);
+  return node('section', { class: 'ss-card ss-pane' },
+    node('header', {}, node('div', { class: 'ss-tabs' }, tabs.map(([key, label]) =>
+      node('button', { type: 'button', text: label, 'aria-selected': which === key,
+        on: { click: () => { state.pane = key; commands.redraw(); } } })))),
+    body);
+}
+
+const matches = text => !state.search || String(text).toLowerCase().includes(state.search.toLowerCase());
+
+function kindCard(kind, commands) {
+  const free = (state.payload.free_slots || []).filter(slot => (slot.accepts || []).includes(kind.id));
+  const ready = kind.status === 'available' && free.length && act.editable();
+  const where = kind.status !== 'available' ? 'absent' : free.length ? 'free' : 'full';
+  return node('button', { class: 'ss-kind', type: 'button', 'data-kind': kind.id, 'data-state': where,
+    draggable: ready, title: ready
+      ? `Drag onto a row, or click: it goes on ${free.map(slot => slot.slot).join(' or ')}`
+      : kind.status !== 'available'
+        ? `${kind.id} is approved but not installed in this BI engine: a dashboard asking for it is refused`
+        : `every slot that accepts a ${kind.id} already holds a chart`,
+    on: {
+      dragstart: event => { event.dataTransfer.setData('text/plain', `type:${kind.id}`); },
+      click: () => (ready ? commands.gallery(free[0].slot, kind.id)
+        : toast(kind.status !== 'available'
+          ? `${kind.id} is approved but not installed in this BI engine.`
+          : `Every slot that accepts a ${kind.id} already holds a chart.`, { kind: 'bad' })),
+    } },
+  icon(kind.id, { class: 'ss-kind-icon' }),
+  node('span', { class: 'ss-kind-name', text: kind.id }),
+  node('span', { class: 'ss-kind-state', text: where === 'absent' ? 'not installed'
+    : where === 'free' ? `${free.length} free` : 'full' }));
+}
+
+function group(body, title, cards) {
+  if (!cards.length) return;
+  body.appendChild(node('h3', { class: 'ss-group-head', text: title }));
+  body.appendChild(node('div', { class: 'ss-cards' }, cards));
+}
+
+function componentsTab(body, commands) {
+  const library = state.payload.visualizations || [];
+  const named = new Set(LIBRARY.flatMap(([, kinds]) => kinds));
+  LIBRARY.forEach(([family, kinds]) => group(body, family, kinds
+    .map(id => library.find(kind => kind.id === id))
+    .filter(kind => kind && matches(kind.id))
+    .map(kind => kindCard(kind, commands))));
+  group(body, 'Other charts', library.filter(kind => !named.has(kind.id) && matches(kind.id))
+    .map(kind => kindCard(kind, commands)));
+
+  // Filters: a governed column the template allows, put on the dashboard — not a chart, and not dragged
+  const options = (state.payload.filter_options || []).filter(one => matches(one.label) || matches(one.column));
+  const used = state.spec.filters || [];
+  group(body, 'Filters', options.slice(0, 12).map(option => node('button', { class: 'ss-kind',
+    type: 'button', 'data-kind': option.role, 'data-state': used.includes(option.column) ? 'full' : 'free',
+    disabled: !act.editable(),
+    title: used.includes(option.column) ? `${option.column} is already a filter of this dashboard`
+      : `Put ${option.column} on this dashboard as a filter`,
+    on: { click: () => act.setFilter(option.column, !used.includes(option.column)) } },
+  icon(option.role === 'time' ? 'date' : option.role === 'measure' ? 'range' : 'dropdown',
+    { class: 'ss-kind-icon' }),
+  node('span', { class: 'ss-kind-name', text: option.label || option.column }),
+  node('span', { class: 'ss-kind-state', text: used.includes(option.column) ? 'on the dashboard' : 'add' }))));
+
+  // Layout: the rows are the template's, and that is the whole point of a template
+  const rows = act.rows().filter(row => matches(row.row));
+  group(body, 'Layout', rows.map(row => {
+    const used_ = row.slots.reduce((sum, place) => sum + place.width, 0);
+    const columns = state.payload.template.grid.columns;
+    return node('button', { class: 'ss-kind', type: 'button', 'data-kind': 'row',
+      'data-state': used_ < columns ? 'free' : 'full',
+      title: `Row ${row.row}: ${used_} of ${columns} columns, height ${row.height}. The template owns the `
+        + 'rows; what you may change is what is on them, and how wide each is.',
+      on: { click: () => { state.area = 'design'; commands.select(row.slots[0] && row.slots[0].id); } } },
+    icon('row', { class: 'ss-kind-icon' }),
+    node('span', { class: 'ss-kind-name', text: row.row }),
+    node('span', { class: 'ss-kind-state', text: `${used_}/${columns}` }));
+  }));
+
+  group(body, 'Others', NOT_CHARTS.filter(([id]) => matches(id)).map(([id, label]) =>
+    node('button', { class: 'ss-kind', type: 'button', 'data-kind': id, 'data-state': 'absent',
+      title: `A specification has no place for a ${label.toLowerCase()}: it says what is MEASURED. Superset’s `
+        + 'own dashboard editor can add one, and the next build will not keep it.',
+      on: { click: () => toast(`A specification carries no ${label.toLowerCase()}: it says what a dashboard `
+        + 'measures, and the next build would not keep one.', { kind: 'bad' }) } },
+    icon(id, { class: 'ss-kind-icon' }),
+    node('span', { class: 'ss-kind-name', text: label }),
+    node('span', { class: 'ss-kind-state', text: 'not carried' }))));
+}
+
+function templatesTab(body, commands) {
+  const template = state.payload.template;
+  body.appendChild(node('div', { class: 'ss-panel' },
+    node('h4', {}, template.name || template.id, node('span', { class: 'ss-tag', 'data-kind': 'good',
+      style: 'margin-left: 8px', text: `v${template.version}` })),
+    node('ul', { class: 'ss-gov' },
+      pair('Id', template.id),
+      pair('Grid', `${template.grid.columns} columns`),
+      pair('Sections', (template.sections || []).length),
+      pair('Slots', Object.keys(template.slots || {}).length),
+      pair('Filters', `up to ${(template.filters || {}).max || '—'}`))));
+  (template.sections || []).forEach(section => {
+    const slots = Object.entries(template.slots || {})
+      .filter(([slot]) => (act.rows().find(row => (section.rows || []).includes(row.row)
+        && row.slots.some(place => place.id === slot))))
+      .filter(([slot]) => matches(slot));
+    if (!slots.length) return;
+    body.appendChild(node('div', { class: 'ss-panel' },
+      node('h4', { text: section.title || section.id }),
+      node('ul', { class: 'ss-gov' }, slots.map(([slot, defined]) => pair(slot,
+        `${defined.purpose} · ${(defined.accepts || []).join(', ')}${defined.mandatory ? ' · mandatory' : ''}`)))));
+  });
+  body.appendChild(node('div', { class: 'ss-callout', 'data-kind': 'info', text:
+    'A project is bound to its template when it is created, and keeps it: the template is what makes a '
+    + 'dashboard reviewable — the slots that must be filled, what each may be drawn as, and the sections a '
+    + 'chart is accountable to. Another template is another project.' }));
+}
+
+function outlineTab(body, commands) {
+  const match = matches;
+  const tree = node('ul', { class: 'ss-tree' });
   tree.appendChild(node('h3', {}, node('span', { text: 'Outline' }),
     node('span', { class: 'ss-faint', text: `${(state.spec.components || []).length} charts` })));
   (state.payload.template.sections || []).forEach(section => {
@@ -319,53 +637,12 @@ function explorer(commands) {
           on: { click: () => commands.gallery(free.slot) } }),
         node('span', { class: 'ss-faint', text: free.mandatory ? 'mandatory' : 'add' }))));
   }
-
-  const library = state.payload.visualizations || [];
-  if (library.length) {
-    tree.appendChild(node('h3', {}, node('span', { text: 'Components' }),
-      node('span', { class: 'ss-faint', text: `${library.filter(kind => kind.status === 'available').length}` })));
-    const byPurpose = {};
-    // a kind no slot of this template accepts still belongs in the library, under « elsewhere »: a library
-    // that hides what cannot be used here would be hiding the reason it cannot
-    library.forEach(kind => ((kind.purposes || []).length ? kind.purposes : ['elsewhere']).forEach(purpose => {
-      byPurpose[purpose] = byPurpose[purpose] || [];
-      byPurpose[purpose].push(kind);
-    }));
-    Object.entries(byPurpose).forEach(([purpose, kinds]) => {
-      const shown = kinds.filter(kind => match(kind.id) || match(purpose));
-      if (!shown.length) return;
-      tree.appendChild(node('li', { class: 'ss-section-head' }, purpose));
-      tree.appendChild(node('li', { class: 'ss-shelf' }, node('div', { class: 'ss-cards' },
-        shown.map(kind => {
-          const free = (state.payload.free_slots || []).filter(slot => (slot.accepts || []).includes(kind.id));
-          const ready = kind.status === 'available' && free.length && act.editable();
-          const state_ = kind.status !== 'available' ? 'absent' : free.length ? 'free' : 'full';
-          return node('button', { class: 'ss-kind', type: 'button', 'data-kind': kind.id,
-            'data-state': state_, draggable: ready, title: ready
-              ? `Drag onto a row, or click: it goes on ${free.map(slot => slot.slot).join(' or ')}`
-              : kind.status !== 'available'
-                ? `${kind.id} is approved but not installed in this BI engine: a dashboard asking for it is refused`
-                : `every slot that accepts a ${kind.id} already holds a chart`,
-            on: {
-              dragstart: event => { event.dataTransfer.setData('text/plain', `type:${kind.id}`); },
-              click: () => (ready ? commands.gallery(free[0].slot, kind.id)
-                : toast(kind.status !== 'available'
-                  ? `${kind.id} is approved but not installed in this BI engine.`
-                  : `Every slot that accepts a ${kind.id} already holds a chart.`, { kind: 'bad' })),
-            } },
-          icon(kind.id, { class: 'ss-kind-icon' }),
-          node('span', { class: 'ss-kind-name', text: kind.id }),
-          node('span', { class: 'ss-kind-state', text: state_ === 'absent' ? 'not installed'
-            : state_ === 'free' ? `${free.length} free` : 'full' }));
-        }))));
-    });
-  }
-
   tree.appendChild(node('h3', {}, node('span', { text: 'Datasets' }),
     node('span', { class: 'ss-faint', text: String(state.datasets.length) })));
   state.datasets.filter(d => match(d.id) || match(d.name)).slice(0, 30).forEach(dataset =>
     tree.appendChild(node('li', { class: 'ss-sub', title: dataset.description || '' },
-      node('span', { class: 'ss-name', text: dataset.id }),
+      node('button', { class: 'ss-name', type: 'button', text: dataset.id,
+        on: { click: () => commands.openAsset(dataset.id) } }),
       node('span', { class: 'ss-cert', 'data-certified': Boolean(dataset.certified),
         text: dataset.certified ? '✓' : '○' }))));
   tree.appendChild(node('h3', {}, node('span', { text: 'Metrics' }),
@@ -375,14 +652,7 @@ function explorer(commands) {
       node('span', { class: 'ss-name', text: metric.id }),
       node('span', { class: 'ss-cert', 'data-certified': Boolean(metric.certified),
         text: metric.certified ? '✓' : '○' }))));
-
-  return node('section', { class: 'ss-card ss-pane' },
-    node('header', {}, 'Project'),
-    node('div', { class: 'ss-body' },
-      node('input', { class: 'ss-search', id: 'ss-search', placeholder: 'Search assets…  (/)',
-        value: state.search, 'aria-label': 'Search assets',
-        on: { input: event => { state.search = event.target.value; commands.redraw(); } } }),
-      tree));
+  body.appendChild(tree);
 }
 
 /* ── the canvas (§47.4) ──────────────────────────────────────────────────────────────────────────────────── */
@@ -687,40 +957,59 @@ function inspector(client, commands) {
   const governance = said.governance || {};
   const row = act.rowOf(slot);
   const place = row && row.slots.find(s => s.id === slot);
-  const tabs = { content: 'Content', chart: 'Chart', governance: 'Governance', data: 'Data & dbt' };
+  const tabs = { data: 'Data', style: 'Style', interactions: 'Interactions', governance: 'Governance' };
   const body = node('div', { class: 'ss-body' });
-  const which = state.inspector || 'content';
+  const which = state.inspector || 'data';
+  const metric = (state.metrics || []).find(one => one.id === own.metric) || {};
 
-  if (which === 'content') {
+  if (which === 'data') {
+    // What a chart MEASURES is the registry's, so none of these edits the draft: each asks for a proposal,
+    // which says whether it would pass and is applied — or not — by hand.
+    const datasets = (state.datasets || []).map(dataset => [dataset.id,
+      `${dataset.id}${dataset.certified ? '' : '  (not certified)'}`]);
+    body.appendChild(field('Dataset', select(own.dataset || '',
+      datasets.length ? datasets : [own.dataset || ''], value => commands.alter({ slot, dataset: value }),
+      { disabled: !act.editable() })));
+    body.appendChild(field('Chart type', select(own.type, (said.accepts || [own.type]),
+      value => commands.alter({ slot, type: value }), { disabled: !act.editable() })));
+    const metrics = (state.metrics || []).map(one => [one.id,
+      `${one.name || one.id}${one.certified ? '' : '  (not certified)'}`]);
+    body.appendChild(field('Metrics', node('div', {},
+      select(own.metric, metrics.length ? metrics : [own.metric],
+        value => commands.alter({ slot, metric: value }), { disabled: !act.editable() }),
+      node('button', { class: 'ss-add', type: 'button', disabled: true,
+        title: 'A chart on this template carries one governed metric. Two metrics on one chart is a second '
+          + 'chart, on a slot that accepts it.' }, '+ Add metric'))));
+    const dimensions = [...new Set([own.dimension, ...(metric.dimensions || [])])].filter(Boolean);
+    body.appendChild(field('Broken down by', select(own.dimension || '',
+      [['', '— none —'], ...dimensions], value => commands.alter({ slot, dimension: value }),
+      { disabled: !act.editable() || ['big_number', 'histogram'].includes(own.type) })));
+    body.appendChild(field('Time column', node('input', { value: (governance.dataset_grain || [])[0] || '',
+      disabled: true, title: 'The time grain of the governed dataset: the registry declares it, and a '
+        + 'dashboard reads it' })));
+    body.appendChild(field('Time grain', select((own.options || {}).time_grain, ['', 'P1D', 'P1W', 'P1M'],
+      value => act.setField(slot, 'time_grain', value),
+      { disabled: !act.editable() || !['line', 'area'].includes(own.type) })));
+    const filters = state.spec.filters || [];
+    body.appendChild(field('Filters', node('div', {},
+      filters.length
+        ? node('div', { class: 'ss-chipbar' }, filters.map(column => node('span', { class: 'ss-filterchip',
+          text: column })))
+        : node('p', { class: 'ss-note', text: 'this dashboard carries none' }),
+      node('button', { class: 'ss-add', type: 'button', disabled: !act.editable(),
+        title: 'A filter belongs to the dashboard, not to one chart: it reaches every chart that reads its '
+          + 'column', on: { click: () => { state.area = 'filters'; commands.redraw(); } } }, '+ Add filter'))));
+    body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
+      'The dataset, the chart type, the metric and the breakdown ask for a proposal rather than editing the '
+      + 'draft: the engine checks the metric is registered and valid on the dataset, that the slot accepts '
+      + 'the chart, and that you are cleared for it. You see what it would do before it does it.' }));
+  }
+  if (which === 'style') {
     body.appendChild(field('Title', node('input', { value: own.title || '', maxlength: 80,
       disabled: !act.editable(), on: { change: e => act.setField(slot, 'title', e.target.value) } })));
     body.appendChild(field('What it is for', node('textarea', { rows: 2, maxlength: 300,
       disabled: !act.editable(), on: { change: e => act.setField(slot, 'description', e.target.value) } },
-      own.description || '')));
-    // What a chart MEASURES is the registry's, so these three do not edit the draft: each asks for a
-    // proposal, which says whether it would pass and is applied — or not — by hand.
-    const metrics = (state.metrics || []).map(metric => [metric.id,
-      `${metric.name || metric.id}${metric.certified ? '' : '  (not certified)'}`]);
-    body.appendChild(field('Measures', select(own.metric, metrics.length ? metrics : [own.metric],
-      value => commands.alter({ slot, metric: value }), { disabled: !act.editable() })));
-    const dimensions = [...new Set([own.dimension, ...(((state.metrics || [])
-      .find(metric => metric.id === own.metric) || {}).dimensions || [])])].filter(Boolean);
-    // "none" is asked as an empty string: the extension forwards a key the Studio left out as a null, so the
-    // engine reads a null as "not said" and an empty dimension as the one taken away
-    body.appendChild(field('Broken down by', select(own.dimension || '',
-      [['', '— none —'], ...dimensions], value => commands.alter({ slot, dimension: value || '' }),
-      { disabled: !act.editable() || ['big_number', 'histogram'].includes(own.type) })));
-    const datasets = (state.datasets || []).map(dataset => [dataset.id,
-      `${dataset.id}${dataset.certified ? '' : '  (not certified)'}`]);
-    body.appendChild(field('Read from', select(own.dataset || '',
-      datasets.length ? datasets : [own.dataset || ''], value => commands.alter({ slot, dataset: value }),
-      { disabled: !act.editable() })));
-    body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
-      'Changing one of those three asks for a proposal rather than editing the draft: the engine checks the '
-      + 'metric is registered and valid on the dataset, that the slot accepts the chart, and that you are '
-      + 'cleared for it. You see what it would do before it does it.' }));
-  }
-  if (which === 'chart') {
+    own.description || '')));
     // the kinds this slot accepts, as a row: switching is one click, and it is a proposal like any other
     body.appendChild(node('div', { class: 'ss-kindrow', role: 'group', 'aria-label': 'How it is drawn' },
       (said.accepts || []).map(kind => node('button', { class: 'ss-kindbtn', type: 'button',
@@ -733,9 +1022,6 @@ function inspector(client, commands) {
       field('Top N', node('input', { type: 'number', min: 1, max: 1000, value: (own.options || {}).row_limit || '',
         disabled: !act.editable() || !['bar', 'table', 'pie'].includes(own.type),
         on: { change: e => act.setField(slot, 'row_limit', e.target.value) } })),
-      field('Time grain', select((own.options || {}).time_grain, ['', 'P1D', 'P1W', 'P1M'],
-        value => act.setField(slot, 'time_grain', value),
-        { disabled: !act.editable() || !['line', 'area'].includes(own.type) })),
       field('Order', select((own.options || {}).sort, ['', 'desc', 'asc'],
         value => act.setField(slot, 'sort', value),
         { disabled: !act.editable() || !['bar', 'table'].includes(own.type) })),
@@ -752,18 +1038,33 @@ function inspector(client, commands) {
         on: { click: () => act.resize(slot, -1) } }),
       act.editable() && node('button', { type: 'button', title: 'Wider (])', text: '+',
         on: { click: () => act.resize(slot, 1) } })));
-    body.appendChild(node('ul', { class: 'ss-gov' },
-      pair('Kind', said.type || own.type), pair('Purpose', said.purpose),
-      pair('The slot accepts', (said.accepts || []).join(', ')),
-      pair('Mandatory', said.mandatory ? 'yes — it cannot be taken off' : 'no')));
     if (act.editable() && !said.mandatory) {
-      body.appendChild(node('div', { style: 'margin-top: 12px' },
+      body.appendChild(node('div', { style: 'margin-top: 4px' },
         button('Take off the dashboard', () => act.park(slot),
           { title: 'It is kept in the specification, parked in its section (Backspace)' })));
     }
     body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
       'A colour, a legend, an axis or an ECharts option is Superset’s own: a specification has no place '
       + 'for it, so a commit sets it back. Explore is open; what it changes does not last.' }));
+  }
+  if (which === 'interactions') {
+    const filters = state.spec.filters || [];
+    const reached = filters.filter(column => (state.payload.filter_options || [])
+      .some(option => option.column === column
+        && (option.reaches_every_chart || (option.datasets || []).includes(own.dataset))));
+    body.appendChild(node('ul', { class: 'ss-gov' },
+      pair('Reached by', reached.join(', ') || 'no filter of this dashboard'),
+      pair('Not reached by', filters.filter(column => !reached.includes(column)).join(', ') || '—'),
+      pair('Section', said.section),
+      pair('Its section’s own filters', ((state.spec.sections || [])
+        .find(one => one.id === said.section) || {}).filters?.join(', ') || 'none')));
+    body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
+      'A filter reaches a chart when the chart’s dataset carries its column — that is all a specification '
+      + 'decides about interaction. Cross-filtering, drill-through and a chart’s own emitted filters are '
+      + 'Superset’s own: set them on the dashboard there, and a commit will not undo them, because a '
+      + 'specification never claimed them.' }));
+    body.appendChild(node('div', { style: 'margin-top: 10px' },
+      button('The dashboard’s filters', () => { state.area = 'filters'; commands.redraw(); })));
   }
   if (which === 'governance') {
     body.appendChild(node('ul', { class: 'ss-gov' },
@@ -776,31 +1077,18 @@ function inspector(client, commands) {
       pair('Dataset owner', governance.dataset_owner), pair('Domain', governance.dataset_domain),
       pair('Grain', (governance.dataset_grain || []).join(', ')),
       pair('Section', said.section)));
+    body.appendChild(node('div', { style: 'margin-top: 10px' },
+      button('Where it comes from', () => commands.openAsset(own.dataset), { disabled: !own.dataset,
+        title: 'The dbt model behind this dataset, its columns and its tests — on the Data Modeling screen' })));
     body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
       'Who may open the dashboard this becomes is decided from these: the roles granted every dataset it '
-      + 'uses, and the row-level rules that follow them.' }));
-  }
-  if (which === 'data') {
-    const lineage = state.lineage[own.dataset];
-    body.appendChild(node('ul', { class: 'ss-gov' },
-      pair('Dataset', own.dataset), pair('Owner', governance.dataset_owner),
-      pair('Grain', (governance.dataset_grain || []).join(', '))));
-    if (lineage === undefined) {
-      body.appendChild(node('div', { style: 'margin-top: 10px' },
-        button('Read its lineage', () => commands.lineage(own.dataset),
-          { disabled: !own.dataset, title: 'The dbt model it is built from, and what that model is built from' })));
-    } else if (lineage === null) {
-      body.appendChild(node('p', { class: 'ss-note', text: 'the engine has no lineage for this dataset' }));
-    } else {
-      body.appendChild(node('div', { class: 'ss-code', text: JSON.stringify(lineage, null, 2).slice(0, 1800) }));
-    }
-    body.appendChild(node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
-      'No sample of the data is shown here, on purpose: a developer’s Superset account is given no '
-      + 'database in SQL Lab, and this page is not a way round that.' }));
+      + 'uses, and the row-level rules that follow them. No sample of the data is shown anywhere in this '
+      + 'workspace, on purpose.' }));
   }
 
   return node('section', { class: 'ss-card' },
-    node('header', {}, node('span', { text: `Inspector — ${slot}` })),
+    node('header', {}, node('span', { text: 'Chart Properties' }),
+      node('span', { class: 'ss-faint', text: slot })),
     node('div', { style: 'padding: 8px 10px 0' }, node('div', { class: 'ss-tabs' },
       Object.entries(tabs).map(([key, label]) => node('button', { type: 'button', text: label,
         'aria-selected': which === key, on: { click: () => { state.inspector = key; commands.redraw(); } } })))),
@@ -950,26 +1238,427 @@ function proposal(commands) {
 }
 
 /* ── the drawer (§47.7) ──────────────────────────────────────────────────────────────────────────────────── */
-function drawer(commands) {
-  const problems = (state.payload.problems || []).length;
-  const failures = state.validation ? state.validation.summary.failures : 0;
-  const tabs = [
-    ['validation', 'Validation', failures + problems, failures + problems ? 'bad' : null],
-    ['changes', 'Changes', (state.payload.diff || []).length, null],
-    ['report', 'Last run', null, null],
-    ['releases', 'Releases', (state.payload.versions || []).length, null],
-    ['deployments', 'Deployments', (state.deployments || []).length || null, null],
-    ['about', 'What this is', null, null],
-  ];
+/* ── the assistant's own screen (§47.6, and the owner's layout 2) ─────────────────────────────────────────
+ * The same copilot as the pane, given the room to be read: what was asked, the plan it answers with, and —
+ * beside it — the dashboard that plan would make. It proposes and never applies; « Apply » is in the tab
+ * row above, and it is an ordinary draft save going through the same checks as any other.
+ */
+function aiScreen(client, commands) {
+  return node('div', { class: 'ss-ai' }, assistant(commands), proposed(client, commands));
+}
+
+function assistant(commands) {
+  const made = state.proposal;
   const body = node('div', { class: 'ss-body' });
-  ({ validation: validationTab, changes: changesTab, report: reportTab, releases: releasesTab,
-    deployments: deploymentsTab, about: aboutTab }[state.tab] || validationTab)(body, commands);
-  return node('section', { class: 'ss-card ss-drawer' },
-    node('header', {}, node('div', { class: 'ss-tabs' }, tabs.map(([key, label, count, kind]) =>
-      node('button', { type: 'button', 'aria-selected': state.tab === key,
-        on: { click: () => { state.tab = key; commands.redraw(); } } }, label,
-        count ? node('span', { class: 'ss-count', 'data-kind': kind, text: String(count) }) : null)))),
+  if (!state.said.length) {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'Ask for a dashboard, or for a change to this one, in your own words. What comes back is a PROPOSAL: '
+      + 'what it would change, what it touches, and whether it would pass validation.' }));
+  }
+  state.said.forEach(said => body.appendChild(node('div', { class: 'ss-said', 'data-who': said.who },
+    said.who === 'ai' ? icon('ai', { class: 'ss-said-mark' }) : null,
+    node('span', { text: said.text }))));
+  if (made) {
+    if (made.understood) {
+      body.appendChild(node('div', { class: 'ss-said', 'data-who': 'ai' },
+        icon('ai', { class: 'ss-said-mark' }),
+        node('span', { text: `Here is the plan: ${made.understood}` })));
+    }
+    if ((made.changes || []).length) {
+      body.appendChild(node('ol', { class: 'ss-plan' }, made.changes.map(change =>
+        node('li', { 'data-done': 'true' }, node('span', { class: 'ss-plan-mark', text: '✓' }),
+          node('span', { text: change.says })))));
+    }
+    body.appendChild(proposal(commands));
+  }
+  if (!made) {
+    body.appendChild(node('div', { class: 'ss-chips' }, (state.payload.ask || []).map(example =>
+      node('button', { class: 'ss-chip', type: 'button', text: example,
+        on: { click: () => commands.propose(example) } }))));
+  }
+  const box = node('textarea', { class: 'ss-search', rows: 2, id: 'ss-ask-screen',
+    placeholder: 'Ask for changes, explanations or new visualizations…',
+    disabled: !act.editable() || state.thinking,
+    on: { keydown: event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); commands.propose(box.value); }
+    } } });
+  body.appendChild(box);
+  body.appendChild(node('div', { style: 'display: flex; gap: 8px; margin-top: 8px; align-items: center' },
+    button(state.thinking ? 'Reading…' : 'Propose', () => commands.propose(box.value),
+      { 'data-weight': 'primary', disabled: !act.editable() || state.thinking }),
+    node('span', { class: 'ss-faint', text: 'Enter to ask' })));
+  body.appendChild(node('div', { class: 'ss-callout', 'data-kind': 'info', style: 'margin-top: 12px', text:
+    'This copilot is deterministic: no language model has been chosen for this kit, which calls nobody '
+    + '(aibi/llm.py is the seam). It reads the same governed vocabulary the planner reads, it proposes and '
+    + 'never changes anything by itself, and what it does not understand it says it does not understand.' }));
+  return node('section', { class: 'ss-card ss-chatpane' },
+    node('header', {}, icon('ai', { class: 'ss-kind-icon' }), node('span', { text: 'AI Copilot' }),
+      node('span', { class: 'ss-spacer' }),
+      button('+ New Chat', () => { state.said = []; state.proposal = null; commands.redraw(); },
+        { 'data-weight': 'quiet', disabled: !state.said.length && !state.proposal })),
     body);
+}
+
+/* The dashboard the proposal would make, drawn the way the canvas draws this one: real tiles where a chart
+ * already exists (a photograph of what Superset drew), and a named placeholder where it would be new. */
+function proposed(client, commands) {
+  const made = state.proposal;
+  const spec = made && made.spec ? made.spec : state.spec;
+  const rows = act.rowsOf(spec);
+  const taken = state.payload.pictures;
+  const inner = node('div', { class: 'ss-canvas' });
+  inner.appendChild(node('div', { class: 'ss-sheet' },
+    node('h2', { text: (spec.dashboard || {}).title || '' }),
+    node('span', { class: 'ss-faint', text: (spec.dashboard || {}).description || '' })));
+  rows.forEach(row => {
+    const line = node('div', { class: 'ss-row', 'data-row': row.row, style: `--h: ${row.height}` });
+    row.slots.forEach(place => {
+      const component = (spec.components || []).find(one => one.slot === place.id) || {};
+      const had = (state.spec.components || []).some(one => one.slot === place.id);
+      const shot = had && taken && !(taken.missing || []).includes(place.id)
+        ? client.picture(place.id, taken.taken_at) : null;
+      line.appendChild(node('div', { class: 'ss-tile', 'data-slot': place.id, 'data-new': !had,
+        style: `--w: ${place.width}` },
+      node('div', { class: 'ss-tile-head' }, node('span', { text: component.title || place.id }),
+        !had ? node('span', { class: 'ss-tag', 'data-kind': 'good', text: 'new' }) : null),
+      shot ? node('img', { class: 'ss-shot', src: shot, alt: '' })
+        : node('div', { class: 'ss-tile-empty' }, icon(component.type || 'other', { class: 'ss-kind-icon' }),
+          node('span', { class: 'ss-faint', text: component.metric || '—' }))));
+    });
+    inner.appendChild(line);
+  });
+  return node('section', { class: 'ss-card' },
+    node('header', {}, node('span', { text: (spec.dashboard || {}).title || 'The dashboard' }),
+      made && made.spec ? node('span', { class: 'ss-tag', 'data-kind': 'good',
+        text: '✦ proposed by SharpSight AI' }) : node('span', { class: 'ss-faint', text: 'as it is now' }),
+      node('span', { class: 'ss-spacer' }),
+      button('Open in Superset', () => window.open(state.payload.project.dashboard, '_blank', 'noopener'),
+        { 'data-weight': 'quiet', disabled: !state.payload.project.dashboard })),
+    node('div', { class: 'ss-body', style: 'padding: 10px' }, inner));
+}
+
+/* ── the governed data (the owner's layout 3) ─────────────────────────────────────────────────────────────
+ * Datasets, metrics and the dbt behind them — read-only, because every one of them is the registry's. What
+ * is NOT here is a row of data: the engine can sample a dataset for a tool call, and this page is given no
+ * way to ask (ADR 0013). What a column IS — its name, type, role, classification — is metadata, and is here.
+ */
+function modelScreen(client, commands) {
+  const chosen = state.modelAsset
+    || (state.spec.components || []).map(one => one.dataset).find(Boolean)
+    || (state.datasets[0] || {}).id;
+  return node('div', { class: 'ss-panes', 'data-explorer': 'open', 'data-copilot': 'open' },
+    modelTree(chosen, commands), modelMiddle(chosen, commands), modelDetails(chosen, commands));
+}
+
+function modelTree(chosen, commands) {
+  const body = node('div', { class: 'ss-body' });
+  body.appendChild(node('input', { class: 'ss-search', id: 'ss-search-models', type: 'search',
+    placeholder: 'Search models…', value: state.search, 'aria-label': 'Search models',
+    on: { input: event => { state.search = event.target.value; commands.redraw(); } } }));
+  const byDomain = {};
+  state.datasets.filter(one => matches(one.id) || matches(one.name) || matches(one.domain))
+    .forEach(dataset => {
+      const domain = dataset.domain || 'other';
+      byDomain[domain] = byDomain[domain] || [];
+      byDomain[domain].push(dataset);
+    });
+  const tree = node('ul', { class: 'ss-tree' });
+  Object.entries(byDomain).forEach(([domain, datasets]) => {
+    tree.appendChild(node('li', { class: 'ss-section-head' }, domain));
+    datasets.forEach(dataset => tree.appendChild(node('li', { class: 'ss-sub',
+      'aria-selected': chosen === dataset.id, title: dataset.description || '' },
+    node('button', { class: 'ss-name', type: 'button', text: dataset.id,
+      on: { click: () => commands.openAsset(dataset.id) } }),
+    node('span', { class: 'ss-cert', 'data-certified': Boolean(dataset.certified),
+      text: dataset.certified ? '✓' : '○' }))));
+  });
+  if (!state.datasets.length) {
+    tree.appendChild(node('li', { class: 'ss-sub' }, node('span', { class: 'ss-faint',
+      text: 'no governed dataset you may read' })));
+  }
+  body.appendChild(tree);
+  return node('section', { class: 'ss-card ss-pane' },
+    node('header', {}, node('span', { text: 'Models' }),
+      node('span', { class: 'ss-faint', text: String(state.datasets.length) })), body);
+}
+
+function modelMiddle(chosen, commands) {
+  const dataset = (state.datasets || []).find(one => one.id === chosen) || { id: chosen };
+  const schema = state.schema[chosen];
+  const lineage = state.lineage[chosen];
+  const model = lineage && (lineage.nodes || []).find(one => one.name === lineage.model);
+  const tab = state.modelTab;
+  const body = node('div', { class: 'ss-body' });
+
+  if (tab === 'metrics') {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'Every governed metric you may use. A metric is defined once, by its owner, and every chart that '
+      + 'shows it shows the same number — which is the whole point of a semantic layer.' }));
+    body.appendChild(node('table', { class: 'ss-table' },
+      node('tr', {}, ['Metric', 'Owner', 'Version', 'Certified', 'What it is'].map(h => node('th', { text: h }))),
+      state.metrics.filter(one => matches(one.id) || matches(one.name)).map(metric => node('tr', {},
+        node('td', { text: metric.id }), node('td', { text: metric.owner || '—' }),
+        node('td', { text: metric.version || '—' }),
+        node('td', {}, node('span', { class: 'ss-cert', 'data-certified': Boolean(metric.certified),
+          text: metric.certified ? '✓' : '○' })),
+        node('td', { class: 'ss-faint', text: (metric.documentation || '').slice(0, 90) })))));
+    return node('section', { class: 'ss-card' },
+      node('header', {}, node('span', { text: 'Metrics' }),
+        node('span', { class: 'ss-faint', text: `${state.metrics.length} you may use` })), body);
+  }
+  if (tab === 'datasets') {
+    body.appendChild(node('table', { class: 'ss-table' },
+      node('tr', {}, ['Dataset', 'Domain', 'Owner', 'Grain', 'Certified'].map(h => node('th', { text: h }))),
+      state.datasets.filter(one => matches(one.id) || matches(one.name)).map(one => node('tr', {},
+        node('td', {}, node('button', { class: 'ss-name', type: 'button', text: one.id,
+          on: { click: () => commands.openAsset(one.id) } })),
+        node('td', { text: one.domain || '—' }), node('td', { text: one.owner || '—' }),
+        node('td', { text: (one.grain || []).join(', ') || '—' }),
+        node('td', {}, node('span', { class: 'ss-cert', 'data-certified': Boolean(one.certified),
+          text: one.certified ? '✓' : '○' }))))));
+    return node('section', { class: 'ss-card' },
+      node('header', {}, node('span', { text: 'Datasets' }),
+        node('span', { class: 'ss-faint', text: `${state.datasets.length} you may read` })), body);
+  }
+
+  const tabs = [['columns', 'Columns'], ['lineage', 'Lineage'], ['tests', 'Tests'],
+    ['documentation', 'Documentation']];
+  const inner = tab === 'lineage' ? 'lineage' : tab === 'tests' ? 'tests'
+    : state.modelInner || 'columns';
+  if (inner === 'columns') {
+    if (!schema) {
+      body.appendChild(node('p', { class: 'ss-note', text: 'reading its columns…' }));
+    } else {
+      const columns = Object.entries(schema.columns || {});
+      body.appendChild(node('table', { class: 'ss-table' },
+        node('tr', {}, ['Column', 'Type', 'Role', 'Classification', 'You may read it']
+          .map(h => node('th', { text: h }))),
+        columns.filter(([name]) => matches(name)).map(([name, column]) => node('tr', {},
+          node('td', { text: name }),
+          node('td', { text: column.physical_type || column.type || '—' }),
+          node('td', { text: column.role || '—' }),
+          node('td', { text: column.classification || '—' }),
+          node('td', {}, node('span', { class: 'ss-cert', 'data-certified': column.readable !== false,
+            text: column.readable === false ? '○' : '✓' }))))));
+      body.appendChild(node('div', { class: 'ss-callout', 'data-kind': 'info', style: 'margin-top: 12px',
+        text: 'These are the columns, not the data. No sample is shown anywhere in this workspace: a '
+          + 'developer’s Superset account is given no database in SQL Lab, and this page is not a way round '
+          + 'that. A column you may not read is marked, and a chart that asked for it would be refused.' }));
+    }
+  }
+  if (inner === 'lineage') {
+    if (lineage === undefined) {
+      body.appendChild(node('p', { class: 'ss-note', text: 'reading its lineage…' }));
+    } else if (!lineage) {
+      body.appendChild(node('p', { class: 'ss-note', text: 'the engine has no lineage for this dataset' }));
+    } else {
+      body.appendChild(node('p', { class: 'ss-note', text:
+        `${dataset.id} is built by the dbt model ${lineage.model}, which is built from what is under it. `
+        + 'This is dbt’s own graph, as it was built — not a guess from the SQL.' }));
+      body.appendChild(node('ul', { class: 'ss-lineage' }, (lineage.nodes || []).map(one =>
+        node('li', { 'data-kind': one.resource_type },
+          node('span', { class: 'ss-name', text: one.name }),
+          node('span', { class: 'ss-faint',
+            text: `${one.resource_type} · ${one.materialized || '—'} · ${one.relation || ''}` }),
+          (one.depends_on || []).length
+            ? node('div', { class: 'ss-faint', text: `from ${(one.depends_on || [])
+              .map(parent => parent.name).join(', ')}` }) : null))));
+    }
+  }
+  if (inner === 'tests') {
+    const tests = lineage ? (lineage.nodes || []).flatMap(one =>
+      (one.tests || []).map(test => ({ model: one.name, test }))) : [];
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'The tests dbt runs on these models when the governed project is built. A model whose tests do not '
+      + 'pass does not become a governed dataset.' }));
+    body.appendChild(tests.length
+      ? node('ul', { class: 'ss-checks' }, tests.map(({ model: on, test }) =>
+        node('li', { 'data-status': 'pass' }, node('b', { text: 'test' }),
+          node('span', {}, node('span', { text: typeof test === 'string' ? test : (test.name || '') }),
+            node('div', { class: 'ss-faint', text: on })))))
+      : node('p', { class: 'ss-note', text: lineage ? 'this model declares no test' : 'reading…' }));
+  }
+  if (inner === 'documentation') {
+    body.appendChild(node('ul', { class: 'ss-gov' },
+      pair('What it is', dataset.description), pair('Owner', dataset.owner),
+      pair('Domain', dataset.domain), pair('Grain', (dataset.grain || []).join(', ')),
+      pair('Kind', dataset.kind), pair('dbt model', lineage ? lineage.model : '—'),
+      pair('Where its source is', model ? model.path : '—')));
+    body.appendChild(node('div', { class: 'ss-callout', 'data-kind': 'info', text:
+      'The model’s SQL is in the governed dbt project (dbt/), not here: it is read-only to this workspace '
+      + 'and to the engine’s own account, and it is built before any dashboard asks for it. « Open dbt docs »'
+      + ' above opens dbt’s own documentation, with the compiled SQL and the graph.' }));
+  }
+
+  return node('section', { class: 'ss-card' },
+    node('header', {}, node('span', { text: dataset.id }),
+      node('span', { class: 'ss-tag', text: lineage ? lineage.model : 'dataset' }),
+      node('span', { class: 'ss-spacer' }),
+      node('span', { class: 'ss-cert', 'data-certified': Boolean(dataset.certified),
+        text: dataset.certified ? '✓ certified' : '○ not certified' })),
+    node('div', { style: 'padding: 8px 10px 0' }, node('div', { class: 'ss-tabs' },
+      tabs.map(([key, label]) => node('button', { type: 'button', text: label,
+        'aria-selected': inner === key,
+        on: { click: () => {
+          state.modelInner = key;
+          if (key === 'lineage' || key === 'tests') state.modelTab = key;
+          else if (state.modelTab === 'lineage' || state.modelTab === 'tests') state.modelTab = 'overview';
+          commands.openAsset(chosen);
+        } } })))),
+    body);
+}
+
+function modelDetails(chosen, commands) {
+  const dataset = (state.datasets || []).find(one => one.id === chosen) || { id: chosen };
+  const lineage = state.lineage[chosen];
+  const model = lineage && (lineage.nodes || []).find(one => one.name === lineage.model);
+  const used = (state.spec.components || []).filter(one => one.dataset === chosen);
+  return node('div', { class: 'ss-pane ss-stack' },
+    node('section', { class: 'ss-card' }, node('header', {}, 'Model Details'),
+      node('div', { class: 'ss-body' },
+        node('ul', { class: 'ss-gov' },
+          pair('Type', model ? model.resource_type : dataset.kind),
+          pair('Materialization', model ? model.materialized : '—'),
+          pair('Relation', model ? model.relation : '—'),
+          pair('Owner', dataset.owner),
+          pair('Domain', dataset.domain),
+          pair('Grain', (dataset.grain || []).join(', '))),
+        node('div', { class: 'ss-chipbar', style: 'margin-top: 8px' },
+          [dataset.domain, dataset.kind, dataset.certified ? 'certified' : 'not certified']
+            .filter(Boolean).map(what => node('span', { class: 'ss-filterchip', text: what }))))),
+    node('section', { class: 'ss-card' }, node('header', {}, 'Description'),
+      node('div', { class: 'ss-body' },
+        node('p', { class: 'ss-note', text: dataset.description || 'no description in the registry' }))),
+    node('section', { class: 'ss-card' }, node('header', {}, 'Used by this dashboard'),
+      node('div', { class: 'ss-body' }, used.length
+        ? node('ul', { class: 'ss-gov' }, used.map(one => pair(one.title || one.slot, one.metric)))
+        : node('p', { class: 'ss-note', text: 'no chart of this dashboard reads it' }))),
+    node('section', { class: 'ss-card' }, node('header', {}, 'Metrics on it'),
+      node('div', { class: 'ss-body' },
+        (lineage && (lineage.metrics || []).length)
+          ? node('ul', { class: 'ss-gov' }, lineage.metrics.map(id => pair(id,
+            ((state.metrics || []).find(one => one.id === id) || {}).certified ? 'certified' : '')))
+          : node('p', { class: 'ss-note', text: 'read its lineage to see which metrics are valid on it' }))));
+}
+
+/* ── the releases (the owner's layout 4) ───────────────────────────────────────────────────────────────────
+ * Versions, what each one's validation found, where each has been deployed — and the pipeline, which is a
+ * PICTURE of where this project stands, not a set of buttons: DEV is this kit, and UAT and PROD are gates a
+ * second person approves on the command line (ADR 0010, ADR 0017).
+ */
+function releaseScreen(client, commands) {
+  const body = node('div', { class: 'ss-body' });
+  ({ versions: versionsPanel, validation: validationPanel, environments: deploymentsTab,
+    releases: releasesPanel }[state.releaseTab] || versionsPanel)(body, commands);
+  const titles = { versions: 'Versions', validation: 'Validation', environments: 'Environments',
+    releases: 'Releases' };
+  return node('div', { class: 'ss-panes', 'data-explorer': 'closed', 'data-copilot': 'open' },
+    node('section', { class: 'ss-card' },
+      node('header', {}, node('span', { text: titles[state.releaseTab] || 'Versions' })), body),
+    node('div', { class: 'ss-pane ss-stack' }, pipeline(commands), validationResults(commands)));
+}
+
+function versionsPanel(body, commands) {
+  const versions = [...(state.payload.versions || [])].reverse();
+  if (!versions.length) {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'This project has no version yet. A version is cut from the draft, through the engine’s ten gates — '
+      + '« + New Release » above.' }));
+    return;
+  }
+  body.appendChild(node('ul', { class: 'ss-versions' }, versions.map(version => {
+    const kind = { PROD: 'good', UAT: 'good', APPROVED_FOR_UAT: 'good', APPROVED_FOR_PROD: 'good',
+      READY_FOR_REVIEW: 'warn', VALIDATION_FAILED: 'bad', UAT_FAILED: 'bad' }[version.status];
+    return node('li', {},
+      node('span', { class: 'ss-avatar', title: version.created_by || '',
+        text: initials(version.created_by || '?') }),
+      node('div', { class: 'ss-version-body' },
+        node('strong', { text: `v${version.version}` }),
+        node('span', { class: 'ss-faint', text: `  ${new Date(version.created_at).toLocaleString()}` }),
+        node('div', { class: 'ss-faint', text: version.title || version.package || '' })),
+      tag(version.state || version.status, kind),
+      node('button', { class: 'ss-btn', 'data-weight': 'quiet', type: 'button', text: '⋯',
+        title: version.package ? 'Export this version’s package' : 'this version has no package',
+        disabled: !version.package,
+        on: { click: () => commands.export_(version.version) } }));
+  })));
+  body.appendChild(node('div', { class: 'ss-callout', style: 'margin-top: 12px', text:
+    'Promoting is not here, on purpose: UAT and PROD are approved on the command line, by someone other than '
+    + 'the person who asked for the version — the one rule that could not be enforced if this page could do '
+    + 'it. bash ai-bi.sh approve <project> UAT.' }));
+}
+
+function releasesPanel(body, commands) {
+  releasesTab(body);
+  reportTab(body, commands);
+}
+
+function pipeline(commands) {
+  const versions = state.payload.versions || [];
+  const newest = status => [...versions].reverse()
+    .find(version => (Array.isArray(status) ? status : [status]).includes(version.status));
+  const latest = versions[versions.length - 1];
+  const uat = newest(['APPROVED_FOR_UAT', 'UAT', 'APPROVED_FOR_PROD', 'PROD']);
+  const prod = newest(['APPROVED_FOR_PROD', 'PROD']);
+  const deployed = (state.deployments || []).filter(one => one.status === 'succeeded');
+  const stage = (name, version, what, kind) => node('div', { class: 'ss-stage', 'data-kind': kind },
+    node('strong', { text: name }),
+    node('span', { class: 'ss-stage-state', text: what }),
+    node('span', { class: 'ss-stage-version', text: version ? `v${version.version}` : '–' }));
+  return node('section', { class: 'ss-card' }, node('header', {}, 'Release Pipeline'),
+    node('div', { class: 'ss-body' },
+      node('div', { class: 'ss-pipeline' },
+        stage('DEV', latest, latest ? 'Current' : 'nothing yet', 'now'),
+        node('span', { class: 'ss-arrow', text: '→' }),
+        stage('UAT', uat, uat ? 'Approved' : 'Pending', uat ? 'done' : 'waiting'),
+        node('span', { class: 'ss-arrow', text: '→' }),
+        stage('PROD', prod, prod ? 'Approved' : 'Not deployed', prod ? 'done' : 'none')),
+      deployed.length
+        ? node('ul', { class: 'ss-gov', style: 'margin-top: 10px' }, deployed.slice(-3).map(one =>
+          pair(one.target, `v${one.version} — ${new Date(one.started_at).toLocaleDateString()}`)))
+        : node('p', { class: 'ss-note', style: 'margin-top: 10px', text:
+          'Nothing has been deployed anywhere else yet. Environments says where it may go.' }),
+      node('p', { class: 'ss-note', text:
+        'A gate is a decision about a version, not a place: this kit has one BI engine. A deployment '
+        + 'CARRIES a decision somebody else made — it never makes one.' })));
+}
+
+function validationResults(commands) {
+  const body = node('div', { class: 'ss-body' });
+  const report = state.validation;
+  if (!report) {
+    body.appendChild(node('p', { class: 'ss-note', text:
+      'Level 1 of the brief’s validation, against the registry and the template — the slots, the '
+      + 'visualizations, the metrics, the datasets, and your clearance for each. It touches nothing in '
+      + 'Superset.' }));
+  } else {
+    const by = {};
+    (report.checks || []).forEach(check => {
+      const group_ = check.category || check.name;
+      by[group_] = by[group_] || { status: 'pass', detail: '' };
+      if (check.status === 'fail') by[group_] = { status: 'fail', detail: check.detail || check.name };
+      else if (check.status === 'warn' && by[group_].status !== 'fail') {
+        by[group_] = { status: 'warn', detail: check.detail || check.name };
+      }
+    });
+    body.appendChild(node('ul', { class: 'ss-checks' }, Object.entries(by).map(([name, found]) =>
+      node('li', { 'data-status': found.status },
+        node('b', { text: found.status === 'pass' ? 'Passed' : found.status === 'warn' ? 'Warning' : 'Failed' }),
+        node('span', {}, node('span', { text: name }),
+          found.detail ? node('div', { class: 'ss-note', text: found.detail }) : null)))));
+  }
+  return node('section', { class: 'ss-card' },
+    node('header', {}, node('span', { text: 'Validation Results' }), node('span', { class: 'ss-spacer' }),
+      button('Run Validation', commands.validate, { 'data-weight': 'quiet' })),
+    body);
+}
+
+/* What the Validation tab of the release screen shows: the draft read against the registry, and then what
+ * SUPERSET itself holds against what was validated — the two questions a reviewer asks. */
+function validationPanel(body, commands) {
+  validationTab(body, commands);
+  body.appendChild(node('h4', { style: 'margin-top: 16px', text: 'What Superset holds now' }));
+  changesTab(body, commands);
 }
 
 function validationTab(body, commands) {
@@ -1161,19 +1850,6 @@ function deploymentsTab(body, commands) {
     one.dashboard && one.dashboard.url
       ? node('p', { style: 'margin-top: 8px' }, node('a', { href: one.dashboard.url, target: '_blank',
         rel: 'noopener', text: one.dashboard.url })) : null)));
-}
-
-function aboutTab(body) {
-  body.appendChild(node('div', { class: 'ss-note' },
-    node('p', {}, 'This workspace edits a SPECIFICATION, not a dashboard. Superset draws every chart and '
-      + 'every dashboard; the Studio says what they should be, and the engine decides whether that may '
-      + 'become a version.'),
-    node('p', {}, 'So: no second renderer, no second chart editor, no second SQL Lab — the brief’s own '
-      + 'first rules. What the canvas may change is the layout, within what the template allows, and the '
-      + 'fields a specification carries. A tile is a photograph of the real chart; Preview opens the live '
-      + 'dashboard.'),
-    node('p', {}, 'Nothing here approves and nothing here promotes. A commit goes through the engine’s '
-      + 'ten quality gates like every other commit.')));
 }
 
 /* ── deploying (§55): a sheet, because a native confirm box says nothing about what is going to happen ────

@@ -335,6 +335,29 @@ Proof after the third sitting: **231 engine tests** (nineteen more: the deployme
 link a person can open, and the run-target overlay's handover to `config.targets`), and
 `python studio/preview.py --check` — **sixty-nine promises**, no console error.
 
+### The fourth sitting, 2026-10-20 — the owner's four layouts, applied
+
+The owner drew four screens and asked for them as they are. They are now the workspace
+([ADR 0025](adr/0025-four-screens-on-one-page.md)), switched from the rail and by `1` `2` `3` `4`:
+
+| | |
+|---|---|
+| ① Dashboard Builder | the left pane in three tabs — **Components** (charts, KPIs, the governed columns that may become filters, the template's rows, and what a specification does not carry, said rather than hidden), **Templates**, **Outline** — the canvas, and **Chart Properties** (Data · Style · Interactions · Governance) |
+| ② AI Copilot | the conversation with room to be read, the plan it answers with, and beside it the dashboard that plan would make, what is new marked. *Apply* is the tab row's button, and is still an ordinary draft save through the same checks |
+| ③ Data Modeling & Assets | the governed models by domain; the **columns** of the one being read, with type, role, classification and whether this person may read it; dbt's own lineage as it was built; the tests it declares; the metrics valid on it; its documentation |
+| ④ Release & Deployment | Version History · Validation · Environments · Releases, beside a **release pipeline** — DEV → UAT → PROD, where each version stands |
+| the bar | split in two: identity, search and the quiet icons on top; the screen's tabs and its own actions below. **« + New Release » is the commit**, **« Run Validation » is the validation**, and the drawer is gone — its six tabs are the release screen's four |
+| the engine | one route added to the gateway's allowlist: `GET /datasets/{id}`, which carries a dataset's columns. The extension is 0.7.0 |
+
+**Three things in the layouts are not drawn as drawn**, each for a reason already written down: the preview
+of rows under a model is a table of **columns** (ADR 0013 — the engine can sample a dataset; the Studio is
+given no way to ask); Run / Test / Build on a dbt model is **Open dbt docs** (a governed model is built
+before a dashboard asks for it); and the release pipeline is a **picture**, because promoting needs a second
+person on the command line (ADR 0010, ADR 0017). Each says so on the page itself.
+
+Proof after the fourth sitting: **231 engine tests**, and `python studio/preview.py --check` —
+**eighty-two promises**, no console error, including that no row of data appears on any of the four screens.
+
 ### What is owed before this can be called done
 
 - **Run it — and now there is one command for it.** `bash ai-bi.sh e2e` walks everything below that a

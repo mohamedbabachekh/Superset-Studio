@@ -141,8 +141,32 @@ The visual builder of the brief's sections 46 to 60, as a page of Superset's own
   approved version deploys, every step done, every chart read back, and the link it leaves behind answers ·
   Superset's token opens the Studio's routes and nothing of the audit trail or the approvals · and both
   suites run. One broken promise does not hide the twenty behind it, and the exit code is the tally.
-- Proof: 231 engine tests (2 skipped), and `python studio/preview.py --check` driving the workspace in a browser against
-  a stand-in engine — sixty-nine promises, no console error.
+- **Four screens, drawn from the owner's own layouts** ([ADR 0025](docs/adr/0025-four-screens-on-one-page.md)).
+  One page still — the project being edited is the same on all four — switched from the rail and by `1` `2`
+  `3` `4`:
+  **① Dashboard Builder** — a left pane of components grouped as a builder groups them (charts, KPIs, the
+  governed columns that may become filters, the template's rows, and what a specification does not carry,
+  said rather than hidden), beside Templates and Outline; the canvas; and **Chart Properties** on the right:
+  Data, Style, Interactions, Governance.
+  **② AI Copilot** — the conversation given room, the plan it answers with, and beside it the dashboard that
+  plan would make, with what is new marked; *Apply* is the tab row's own button and is still an ordinary
+  draft save.
+  **③ Data Modeling & Assets** — the governed models by domain, the **columns** of the one being read (name,
+  type, role, classification, and whether you may read it), dbt's own lineage graph as it was built, the
+  tests it declares, the metrics valid on it, and its documentation. No row of the data anywhere, and the
+  page says why ([ADR 0013](docs/adr/0013-no-data-preview-in-the-studio.md)).
+  **④ Release & Deployment** — Version History, Validation, Environments and Releases beside a **release
+  pipeline** (DEV → UAT → PROD) that shows where each version stands. The pipeline is a picture, not a set
+  of buttons: *« + New Release »* is the commit, *« Run Validation »* is the validation, and promoting still
+  needs a second person on the command line.
+  The bar splits in two — identity, search and the quiet icons on top, the screen's tabs and actions below —
+  and the drawer is gone, its six tabs now the release screen's four. Nothing that could be done before was
+  dropped; what left the bar is on the screen it belongs to, or one keystroke away in ⌘K.
+- **Typing works properly now**: a redraw puts focus and the caret back where they were, so the search box
+  in the bar can actually be typed in.
+- Proof: 231 engine tests (2 skipped), and `python studio/preview.py --check` driving the workspace in a
+  browser against a stand-in engine — **eighty-two promises**, no console error, including that no row of
+  data appears on any of the four screens.
 - Not run against a kit yet: this was built where no Superset could be started. What that leaves owed is in
   [docs/superset-studio.md](docs/superset-studio.md) §11 — and `bash ai-bi.sh e2e` is now the one command
   that answers it on a machine that has one.
