@@ -219,3 +219,41 @@ def test_changing_nothing_proposes_nothing(copilot, spec, template, dev):
 def test_a_slot_with_no_chart_has_nothing_to_alter(copilot, spec, template, dev):
     proposal = copilot.alter("map_1", {"type": "table"}, spec, template, dev)
     assert not proposal.changes and "holds no chart" in proposal.unresolved[0]
+
+
+def test_the_form_s_empty_choices_are_not_set_rather_refused():
+    """The Studio's form sends an empty choice as "" — for a time grain a Literal would refuse it with a 422."""
+    from aibi.main import Compose
+    body = Compose(slot="distribution_1", metric="cem.qoe_score", type="", dimension="", time_grain="")
+    assert body.type is None and body.dimension is None and body.time_grain is None
+    assert Compose(slot="trend_1", metric="cem.qoe_score", time_grain="P1W").time_grain == "P1W"
+
+
+def test_the_inspector_s_none_clears_a_dimension_and_an_absent_one_does_not(copilot, spec, template, dev):
+    cleared = copilot.alter("ranking_1", {"dimension": ""}, spec, template, dev)
+    assert cleared.changes and "no longer broken down by region" in cleared.changes[0].says
+    assert DashboardSpec(**cleared.spec).component("ranking_1").dimension is None
+    # the Superset side sends every key, so None is "not asked about" and changes nothing of the dimension
+    kept = copilot.alter("ranking_1", {"metric": "cem.active_users", "dimension": None}, spec, template, dev)
+    assert DashboardSpec(**kept.spec).component("ranking_1").dimension == "region"
+
+
+def test_a_chart_on_a_row_the_layout_dropped_gets_that_row_back(copilot, template, dev):
+    """A layout keeps only the rows that hold a chart, so a chart added to an empty row's slot finds no row:
+    the row is put back where the template has it, and the chart is drawn."""
+    own = DashboardSpec(**{**SPEC, "components": [c for c in SPEC["components"] if c["slot"] != "ranking_1"],
+                           "layout": [
+                               {"row": "kpis", "height": 16, "slots": [{"id": "kpi_1", "width": 6},
+                                                                        {"id": "kpi_2", "width": 6}]},
+                               {"row": "trend", "height": 44, "slots": [{"id": "trend_1", "width": 12}]}]})
+    proposal = copilot.compose("ranking_1", "cem.qoe_score", None, "region", None, own, template, dev)
+    assert proposal.changes and proposal.problems == [], proposal.problems
+    after = DashboardSpec(**proposal.spec)
+    assert [row.row for row in after.layout] == ["kpis", "trend", "breakdown"]
+    assert [p.id for p in after.layout[2].slots] == ["ranking_1"] and after.layout[2].height == 52
+    # and a row before the others in the template goes before them, not at the end
+    no_kpis = DashboardSpec(**{**SPEC, "components": [c for c in SPEC["components"] if c["slot"] == "trend_1"],
+                               "layout": [{"row": "trend", "height": 44,
+                                           "slots": [{"id": "trend_1", "width": 12}]}]})
+    proposal = copilot.compose("kpi_2", "cem.active_users", None, None, None, no_kpis, template, dev)
+    assert [row["row"] for row in proposal.spec["layout"]] == ["kpis", "trend"]

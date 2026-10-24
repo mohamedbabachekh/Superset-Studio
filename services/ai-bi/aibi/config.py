@@ -134,6 +134,8 @@ def targets() -> dict[str, Any]:
                                    PostgreSQL the catalog is the database (docs/lessons.md)
         AIBI_TARGET_RUN_DB_URI     that environment's warehouse
         AIBI_TARGET_RUN_FROM_STUDIO=false   to make it the command line's alone
+        AIBI_TARGET_RUN_GATE=UAT    the approval a version needs to go there; PROD when it is not said, so a
+                                    target nobody described is held to the release manager's approval
         AIBI_TARGET_RUN_PUBLIC_URL  where a PERSON reaches it, when that is not _URL (a container name, a
                                     private address): the link a deployment leaves behind is for somebody
                                     to open
@@ -155,5 +157,6 @@ def targets() -> dict[str, Any]:
                              password=read("PASSWORD"), database_name=read("DB_NAME", "SharpSight BI"),
                              database_uri=read("DB_URI"),
                              from_studio=read("FROM_STUDIO", "true").lower() != "false",
+                             gate="UAT" if read("GATE", "PROD").strip().upper() == "UAT" else "PROD",
                              public_url=read("PUBLIC_URL").strip())
     return found

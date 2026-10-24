@@ -28,7 +28,9 @@ from .dashboard_agent import DashboardAgent
 from .layout import materialise as layout_as_drawn
 from .layout import problems as layout_problems
 from .layout import resolve as layout_in_force
-from .models import ComponentOptions, ComponentSpec, DashboardSpec, SectionSpec, Strict, TemplateDef
+from .layout import section_of_row
+from .models import (ComponentOptions, ComponentSpec, DashboardSpec, LayoutRow, SectionSpec, Strict,
+                     TemplateDef)
 from .planner import match_vocabulary
 from .policy_engine import Identity, PolicyEngine
 from .registry import Registry
@@ -243,6 +245,14 @@ class Copilot:
                                   says=f"{slot} is broken down by {asked['dimension']}"))
             component.dimension = asked["dimension"]
             component.dataset = None
+        elif wanted.get("dimension") == "" and component.dimension is not None:
+            # the inspector's « — none — » is an empty string, and it means "by nothing", not "unchanged":
+            # an absent field arrives as None from the Superset side (sharpsight/bi/api.py sends every key),
+            # so only the empty string can say it
+            changes.append(Change(kind="option", slot=slot,
+                                  says=f"{slot} is no longer broken down by {component.dimension}"))
+            component.dimension = None
+            component.dataset = None
         if "dataset" in asked and asked["dataset"] != component.dataset:
             dataset = self.registry.datasets.get(asked["dataset"])
             if dataset is None or not self.policy.can_read(identity, dataset):
@@ -346,7 +356,12 @@ class Copilot:
         # on the layout it is given the template's own place for that slot, so a canvas never has to guess
         if spec.layout:
             place = next((p for row in template.layout for p in row.slots if p.id == slot), None)
-            row = next((r for r in spec.layout if r.row == _row_of(template, slot)), None)
+            name = _row_of(template, slot)
+            row = next((r for r in spec.layout if r.row == name), None)
+            if place and name and row is None:
+                # a layout keeps only the rows that hold a chart (materialise, the Studio, a park), so the
+                # slot's row may not be there at all: it is put back where the template has it
+                row = _restore_row(spec, template, name)
             if place and row:
                 row.slots.append(place.model_copy())
         changes.append(Change(kind="add", slot=slot,
@@ -511,3 +526,37 @@ class Copilot:
 
 def _row_of(template: TemplateDef, slot: str) -> Optional[str]:
     return next((row.row for row in template.layout for p in row.slots if p.id == slot), None)
+
+
+def _restore_row(spec: DashboardSpec, template: TemplateDef, name: str) -> LayoutRow:
+    """Put a template row the layout dropped back on it, empty, and return it.
+
+    It goes next to the nearest row the template puts before it (or, failing that, after it), looked for
+    first among the rows of its own section: a section is announced by one header above its first row, so
+    its rows stay together. A row of a section with no row left goes beside another section's rows, never
+    between two of them."""
+    order = {row.row: at for at, row in enumerate(template.layout)}
+    declared = next(row for row in template.layout if row.row == name)
+    section = section_of_row(template, name)
+    same = [at for at, row in enumerate(spec.layout) if section and section_of_row(template, row.row) == section]
+    near = same or [at for at, row in enumerate(spec.layout) if row.row in order]
+    before = [at for at in near if order[spec.layout[at].row] < order[name]]
+    after = [at for at in near if order[spec.layout[at].row] > order[name]]
+    if before:
+        at = max(before, key=lambda i: order[spec.layout[i].row]) + 1
+        if not same:
+            # past the end of that row's section, so the new row does not cut it in two
+            held = section_of_row(template, spec.layout[at - 1].row)
+            while held and at < len(spec.layout) and section_of_row(template, spec.layout[at].row) == held:
+                at += 1
+    elif after:
+        at = min(after, key=lambda i: order[spec.layout[i].row])
+        if not same:
+            held = section_of_row(template, spec.layout[at].row)
+            while held and at > 0 and section_of_row(template, spec.layout[at - 1].row) == held:
+                at -= 1
+    else:
+        at = len(spec.layout)
+    row = LayoutRow(row=name, height=declared.height, slots=[])
+    spec.layout.insert(at, row)
+    return row

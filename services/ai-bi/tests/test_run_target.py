@@ -43,7 +43,8 @@ def test_the_overlay_adds_a_superset_of_its_own_and_touches_nothing_of_the_kit_s
 def test_the_variables_it_hands_the_engine_are_the_ones_the_engine_reads(monkeypatch):
     given = _overlay()["services"]["sharpsight-ai-bi"]["environment"]
     assert set(given) == {f"AIBI_TARGET_RUN_{part}" for part in
-                          ("URL", "USER", "PASSWORD", "DB_NAME", "DB_URI", "FROM_STUDIO", "PUBLIC_URL")}
+                          ("URL", "USER", "PASSWORD", "DB_NAME", "DB_URI", "FROM_STUDIO", "PUBLIC_URL",
+                           "GATE")}
     for name in list(os.environ):
         if name.startswith("AIBI_TARGET_"):
             monkeypatch.delenv(name)
@@ -54,13 +55,27 @@ def test_the_variables_it_hands_the_engine_are_the_ones_the_engine_reads(monkeyp
     monkeypatch.setenv("AIBI_TARGET_RUN_DB_URI", "postgresql+psycopg2://bi_reader:x@devkit-db:5432/devkit")
     monkeypatch.setenv("AIBI_TARGET_RUN_FROM_STUDIO", "true")
     monkeypatch.setenv("AIBI_TARGET_RUN_PUBLIC_URL", "http://127.0.0.1:3004")
+    monkeypatch.setenv("AIBI_TARGET_RUN_GATE", "UAT")
     found = targets()
     assert set(found) == {"run"}
     target: Target = found["run"]
     assert target.url == "http://run-superset:8088" and target.from_studio is True
     assert target.database_name == "SharpSight BI (read-only)"
+    # the run environment takes what one reviewer approved; it says so, because a target that does not is PROD
+    assert target.gate == "UAT"
     # the engine goes to the container; the link it leaves behind is for a person
     assert target.where == "http://127.0.0.1:3004"
+
+
+def test_a_target_that_does_not_say_its_gate_is_a_prod_one(monkeypatch):
+    for name in list(os.environ):
+        if name.startswith("AIBI_TARGET_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("AIBI_TARGET_PROD_URL", "https://bi.example.com")
+    monkeypatch.setenv("AIBI_TARGET_PROD_DB_URI", "postgresql+psycopg2://bi_reader:x@warehouse:5432/prod")
+    assert targets()["prod"].gate == "PROD"
+    monkeypatch.setenv("AIBI_TARGET_PROD_GATE", "uat")
+    assert targets()["prod"].gate == "UAT"
 
 
 def test_a_target_without_its_warehouse_is_not_a_target(monkeypatch):

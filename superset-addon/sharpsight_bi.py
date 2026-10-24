@@ -218,9 +218,12 @@ def install(app) -> None:  # noqa: ANN001  (the Flask application Superset built
     @pages.route("/studio-assets/<name>")
     def studio_assets(name: str):  # noqa: ANN202
         """The Studio's own stylesheet and script. No build step: they are read as they are in the repository
-        (studio/), which is why the kit needs no Node to ship a workspace."""
+        (studio/), which is why the kit needs no Node to ship a workspace.
+
+        Somebody not signed in is sent to the login, as the three pages above send them: a 403 says « you may
+        not », which is not true of a person who has not said who they are yet."""
         if not current_user.is_authenticated:
-            abort(403)
+            return redirect(f"{appbuilder.get_url_for_login}?next={request.path}")
         if name not in STUDIO_FILES:
             abort(404)
         if not (studio_dir / name).is_file():

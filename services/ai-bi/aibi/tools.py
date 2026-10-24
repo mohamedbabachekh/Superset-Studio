@@ -49,6 +49,131 @@ class ToolError(Exception):
     pass
 
 
+class AccessError(RuntimeError):
+    """The BI engine does not hold the access SharpSight decided, and the dashboard was not left granted
+    without it. Everything it says is meant to be read by a person."""
+
+
+RULE_PREFIX = "sharpsight:"
+
+
+def engine_role(role: str) -> str:
+    """The BI engine's name for a SharpSight role."""
+    return f"sharpsight_{role}"
+
+
+def rule_name(role: str, dataset_id: str) -> str:
+    return f"{RULE_PREFIX}{role}:{dataset_id}"
+
+
+def apply_access(superset: SupersetAdapter, policy: PolicyEngine, dashboard_id: int, datasets: list,
+                 metrics: list, tables: dict[str, int]) -> dict[str, Any]:
+    """Who may open one dashboard, and which rows they see there, written to a Superset and read back.
+
+    The ONE place this is done: the kit's own Superset (Toolbox.apply_superset_access) and a run environment
+    (deploy.Deployer) both come here, so a rule is named, written, kept and withdrawn the same way in both,
+    and is found and updated in place the next time instead of being written twice. `tables` is where each
+    dataset is in THAT Superset: SharpSight dataset id → the engine's dataset id.
+
+    The order is the point. Every rule is written and read back BEFORE the dashboard is granted, so the
+    audience never holds a dashboard whose rows are not yet filtered; if granting it fails, or the grant read
+    back is not the one decided, the previous grant is put back. Rules the policy has withdrawn are deleted
+    only AFTER the grant: a role leaving the audience loses the dashboard before it loses its rule, never the
+    other way round. That holds for every dashboard, not this one only: a withdrawn rule is KEPT while another
+    dashboard over its dataset is still granted to its role (that dashboard was not re-applied, and its
+    audience would see every row), and is withdrawn by the run that finds no such dashboard left. A failed
+    deletion after that leaves a rule that restricts more than the policy does, and the grant stands — nothing
+    about it is wider than decided."""
+    audience = policy.audience(datasets, metrics)
+    wanted = {rule_name(r["role"], r["dataset"]): r for r in policy.row_rules(datasets, metrics)}
+    unplaced = sorted({r["dataset"] for r in wanted.values() if r["dataset"] not in tables})
+    if unplaced:
+        raise AccessError(f"{', '.join(unplaced)} is not in the BI engine: its row-level rule has nothing to "
+                          "hang from, and the dashboard is not granted without it")
+    mine = {d.id: d for d in datasets}
+
+    def ours(rule: dict[str, Any]) -> Optional[tuple[str, str]]:
+        """(role, dataset) of a SharpSight rule on one of this dashboard's datasets; None for any other."""
+        parts = rule["name"].split(":", 2)
+        return (parts[1], parts[2]) if len(parts) == 3 and parts[2] in mine else None
+
+    def withdrawn(rule: dict[str, Any]) -> bool:
+        # a rule another dashboard over the same dataset still needs is NOT withdrawn because this
+        # dashboard's audience does not include its role: only the policy can withdraw it
+        found = ours(rule)
+        return found is not None and rule["name"] not in wanted and not policy.declares_rule(found[0], mine[found[1]])
+
+    # 1 · the roles, then every rule, then what the engine holds of them
+    role_ids = {role: superset.ensure_role(engine_role(role)) for role in audience}
+    assets: list[dict[str, Any]] = []
+    for name, rule in wanted.items():
+        rule_id, action = superset.upsert_row_rule(
+            name, tables[rule["dataset"]], role_ids[rule["role"]], rule["clause"], group_key=rule["dataset"],
+            description=f"SharpSight row-level policy of role {rule['role']} on {rule['dataset']}. "
+                        "Written by the AI BI service from registry/security/rbac.yaml; edit it there.")
+        assets.append({"type": "row_level_rule", "id": rule_id, "name": name, "action": action})
+    held = {r["name"]: r for r in superset.row_rules(RULE_PREFIX) if ours(r)}
+    problems = []
+    for name, rule in wanted.items():
+        have = held.get(name)
+        if have is None:
+            problems.append(f"row-level rule {name} is missing")
+        elif (have.get("clause") != rule["clause"]
+              or [t["id"] for t in have.get("tables") or []] != [tables[rule["dataset"]]]
+              or [r["id"] for r in have.get("roles") or []] != [role_ids[rule["role"]]]):
+            problems.append(f"row-level rule {name} is not what the policy says")
+    if problems:
+        raise AccessError("the BI engine does not hold the row-level rules SharpSight decided, and the dashboard "
+                          "was not granted: " + "; ".join(problems))
+
+    # 2 · the grant, last — and taken back if it is not what was decided
+    previous = superset.dashboard_role_ids(dashboard_id)
+    decided = sorted(engine_role(r) for r in audience)
+    try:
+        superset.update_dashboard(dashboard_id, {"roles": sorted(role_ids.values())})
+        granted = sorted(superset.dashboard_roles(dashboard_id))
+        if granted != decided:
+            raise AccessError(f"the dashboard is granted to {', '.join(granted) or 'no role'}; SharpSight grants "
+                              f"it to {', '.join(decided) or 'no role'}")
+    except Exception as exc:
+        try:
+            superset.update_dashboard(dashboard_id, {"roles": previous})
+            undone = "the previous grant was put back"
+        except Exception as again:                     # noqa: BLE001 — said, not hidden
+            undone = f"AND PUTTING THE PREVIOUS GRANT BACK FAILED ({again}): check the dashboard's roles by hand"
+        raise AccessError(f"granting the dashboard failed ({exc}); {undone}") from exc
+    assets.insert(0, {"type": "dashboard", "id": dashboard_id, "action": "granted", "roles": granted})
+
+    # 3 · what the policy has withdrawn, withdrawn — after the grant that no longer needs it, and only once no
+    # other dashboard over its dataset still holds its role: that grant was decided under the old policy and
+    # stands until its own dashboard is applied again, and until then the rule is what filters its rows
+    def still_granted_by(rule: dict[str, Any]) -> list[str]:
+        role = engine_role(rule["name"].split(":", 2)[1])
+        try:
+            others = sorted({d for t in rule.get("tables") or [] for d in superset.dataset_dashboards(t["id"])}
+                            - {dashboard_id})
+            return [f"dashboard #{d}" for d in others if role in superset.dashboard_roles(d)]
+        except Exception as exc:                       # noqa: BLE001 — not known to be free: kept, and said
+            return [f"a dashboard that could not be checked ({str(exc)[:120]})"]
+
+    kept: dict[str, list[str]] = {}
+    for rule in [r for r in superset.row_rules(RULE_PREFIX) if withdrawn(r)]:
+        holders = still_granted_by(rule)
+        if holders:
+            kept[rule["name"]] = holders
+            assets.append({"type": "row_level_rule", "id": rule["id"], "name": rule["name"], "action": "kept",
+                           "still_granted_by": holders})
+            continue
+        superset.delete_row_rule(rule["id"])
+        assets.append({"type": "row_level_rule", "id": rule["id"], "name": rule["name"], "action": "deleted"})
+    left = sorted(r["name"] for r in superset.row_rules(RULE_PREFIX) if withdrawn(r) and r["name"] not in kept)
+    if left:
+        raise AccessError("the grant and the rules are as decided, but rules the policy withdrew are still "
+                          "there (they restrict, they do not open): " + ", ".join(left))
+    return {"audience": audience, "granted": granted, "rules": sorted(wanted), "assets": assets,
+            "kept": {name: holders for name, holders in sorted(kept.items())}}
+
+
 @dataclass
 class ToolContext:
     identity: Identity
@@ -656,11 +781,11 @@ class Toolbox:
     @staticmethod
     def engine_role(role: str) -> str:
         """The BI engine's name for a SharpSight role."""
-        return f"sharpsight_{role}"
+        return engine_role(role)
 
     @staticmethod
     def rule_name(role: str, dataset_id: str) -> str:
-        return f"sharpsight:{role}:{dataset_id}"
+        return rule_name(role, dataset_id)
 
     @tool("apply_superset_access", "Grant the dashboard, in the BI engine, to the SharpSight roles that may read "
           "every one of its datasets, and give the BI engine each role's row-level policy as a rule. Nothing "
@@ -672,29 +797,15 @@ class Toolbox:
             raise ToolError("the dashboard must exist in the BI engine first")
         datasets = [self.registry.dataset(ds) for ds in spec.datasets()]
         metrics = [self.registry.metric(m) for m in spec.metrics()]
-        role_ids = {role: self.superset.ensure_role(self.engine_role(role))
-                    for role in self.policy.audience(datasets, metrics)}
-        self.superset.update_dashboard(engine["dashboard"]["id"], {"roles": sorted(role_ids.values())})
-
-        wanted = {self.rule_name(r["role"], r["dataset"]): r for r in self.policy.row_rules(datasets, metrics)}
-        assets = [{"type": "dashboard", "id": engine["dashboard"]["id"], "action": "granted",
-                   "roles": [self.engine_role(r) for r in role_ids]}]
-        for name, rule in wanted.items():
-            rule_id, action = self.superset.upsert_row_rule(
-                name, engine["datasets"][rule["dataset"]], role_ids[rule["role"]], rule["clause"],
-                group_key=rule["dataset"],
-                description=f"SharpSight row-level policy of role {rule['role']} on {rule['dataset']}. "
-                            "Written by the AI BI service from registry/security/rbac.yaml; edit it there.")
-            assets.append({"type": "row_level_rule", "id": rule_id, "name": name, "action": action})
-        # a policy withdrawn in SharpSight is withdrawn in the BI engine
-        mine = {d.id for d in datasets}
-        for rule in self.superset.row_rules("sharpsight:"):
-            if rule["name"].split(":", 2)[-1] in mine and rule["name"] not in wanted:
-                self.superset.delete_row_rule(rule["id"])
-                assets.append({"type": "row_level_rule", "id": rule["id"], "name": rule["name"], "action": "deleted"})
-        engine["access"] = {"roles": sorted(role_ids), "row_rules": sorted(wanted)}
+        # the same helper a deployment to a run environment uses: one way to write, grant and withdraw
+        try:
+            done = apply_access(self.superset, self.policy, engine["dashboard"]["id"], datasets, metrics,
+                                engine.get("datasets", {}))
+        except AccessError as exc:
+            raise ToolError(str(exc)) from exc
+        engine["access"] = {"roles": done["audience"], "row_rules": done["rules"]}
         self.save_project(body)
-        note.update(datasets=[d.id for d in datasets], metrics=[m.id for m in metrics], superset_assets=assets)
+        note.update(datasets=[d.id for d in datasets], metrics=[m.id for m in metrics], superset_assets=done["assets"])
         return engine["access"]
 
     _DATA_DEPENDENT = ("show_labels_threshold", "y_axis_format", "datasource")
@@ -800,7 +911,13 @@ class Toolbox:
                 differences.append(f"row-level rule {name} is not on the dataset it is for")
             if [r["name"] for r in have["roles"]] != [self.engine_role(rule["role"])]:
                 differences.append(f"row-level rule {name} is not for the role it is for")
-        differences += [f"row-level rule {name} is not one SharpSight declares" for name in sorted(set(found) - set(wanted))]
+        # A rule for a role outside THIS audience may be one another dashboard over the same dataset needs:
+        # it is a difference only when the policy no longer declares it at all (apply_access withdraws those).
+        by_id = {d.id: d for d in datasets}
+        for name in sorted(set(found) - set(wanted)):
+            parts = name.split(":", 2)
+            if len(parts) != 3 or not self.policy.declares_rule(parts[1], by_id[parts[2]]):
+                differences.append(f"row-level rule {name} is not one SharpSight declares")
         return differences
 
     def probe_access(self, body: dict[str, Any], role: Optional[str]) -> dict[str, Any]:

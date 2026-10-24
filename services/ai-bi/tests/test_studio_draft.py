@@ -176,3 +176,43 @@ def test_the_token_changes_with_the_draft_and_not_otherwise(service, dev):
     assert again == first
     changed = main.save_draft("cem-qoe", main.Draft(spec=SPEC, token=again), dev)["token"]
     assert changed != first and changed != "none"
+
+
+def _commit_while(service, dev, monkeypatch, during) -> None:
+    """Commit the draft through a pipeline that only calls `during` — what a person does while it runs —
+    and wait for the commit's own thread to finish."""
+    import threading
+    monkeypatch.setattr(service, "busy", threading.Lock(), raising=False)
+    monkeypatch.setattr(service, "parser", SimpleNamespace(name="deterministic"), raising=False)
+
+    def execute(run, identity, edited):  # noqa: ANN001
+        during()
+        return SimpleNamespace(status="succeeded")
+    monkeypatch.setattr(service, "pipeline", SimpleNamespace(execute=execute), raising=False)
+    answer = main.commit_draft("cem-qoe", main.Commit(), main.Response(), dev)
+    worker = next(t for t in threading.enumerate() if t.name == f"run-{answer['run_id']}")
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+
+
+def test_a_commit_throws_away_the_draft_it_committed(service, dev, monkeypatch):
+    main.save_draft("cem-qoe", main.Draft(spec=_layout(SPEC), token="none"), dev)
+    _commit_while(service, dev, monkeypatch, lambda: None)
+    assert "draft" not in service.store.get_project("cem-qoe")
+    assert main.studio("cem-qoe", dev)["editing"] == "version"
+
+
+def test_a_draft_saved_while_the_commit_runs_is_kept(service, dev, monkeypatch):
+    """The commit is of the draft as it was when it was asked for. One saved while the pipeline runs is
+    newer work, and the end of the commit must not throw it away."""
+    first = main.save_draft("cem-qoe", main.Draft(spec=_layout(SPEC), token="none"), dev)
+    newer = {**_layout(SPEC), "layout": [
+        {"row": "kpis", "height": 24, "slots": [{"id": "kpi_1", "width": 4}]},
+        {"row": "trend", "height": 40, "slots": [{"id": "trend_1", "width": 12}]}]}
+
+    def save_newer() -> None:
+        main.save_draft("cem-qoe", main.Draft(spec=newer, token=first["token"]), dev)
+    _commit_while(service, dev, monkeypatch, save_newer)
+    kept = service.store.get_project("cem-qoe").get("draft")
+    assert kept is not None and kept["spec"]["layout"][0]["height"] == 24
+    assert main.studio("cem-qoe", dev)["editing"] == "draft"

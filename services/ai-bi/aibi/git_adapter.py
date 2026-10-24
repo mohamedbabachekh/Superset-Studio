@@ -72,7 +72,10 @@ class GitRepo:
         return [dict(zip(("commit", "date", "subject"), line.split("\x1f"))) for line in out.splitlines() if line]
 
 
-_IGNORED = {".git", "target", "logs", "dbt_packages", ".user.yml", "__pycache__"}
+# cem_to_mart.py sits in the checkout's dbt/ folder because it lands the source this project reads, but it is
+# the kit's own script (run in Superset's image), not part of the governed project: mirroring it would put it in
+# every project's workspace and every package.
+_IGNORED = {".git", "target", "logs", "dbt_packages", ".user.yml", "__pycache__", "cem_to_mart.py"}
 
 
 class GitAdapter:

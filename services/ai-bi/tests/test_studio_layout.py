@@ -154,3 +154,11 @@ def test_validation_refuses_a_layout_the_template_does_not_allow(registry, dashb
     failed = [c for c in report.failures if c.name == named]
     assert failed and "a kpi needs 2" in failed[0].detail
     assert not report.passed
+
+
+def test_a_layout_without_a_row_for_a_chart_says_it_would_not_be_drawn(registry, spec):
+    """What the copilot's `_place` must never leave behind: a chart whose row the layout does not carry."""
+    template = registry.template("executive")
+    spec.layout = [_row("kpis", 16, [("kpi_1", 3), ("kpi_2", 3), ("kpi_3", 3)]),
+                   _row("trend", 44, [("trend_1", 8), ("distribution_1", 4)])]
+    assert any("ranking_1 has a chart and no place on the layout" in p for p in problems(spec, template))

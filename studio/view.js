@@ -705,8 +705,10 @@ function inspector(client, commands) {
       value => commands.alter({ slot, metric: value }), { disabled: !act.editable() })));
     const dimensions = [...new Set([own.dimension, ...(((state.metrics || [])
       .find(metric => metric.id === own.metric) || {}).dimensions || [])])].filter(Boolean);
+    // "none" is asked as an empty string: the extension forwards a key the Studio left out as a null, so the
+    // engine reads a null as "not said" and an empty dimension as the one taken away
     body.appendChild(field('Broken down by', select(own.dimension || '',
-      [['', '— none —'], ...dimensions], value => commands.alter({ slot, dimension: value }),
+      [['', '— none —'], ...dimensions], value => commands.alter({ slot, dimension: value || '' }),
       { disabled: !act.editable() || ['big_number', 'histogram'].includes(own.type) })));
     const datasets = (state.datasets || []).map(dataset => [dataset.id,
       `${dataset.id}${dataset.certified ? '' : '  (not certified)'}`]);
@@ -1088,29 +1090,46 @@ function deploymentsTab(body, commands) {
   }
   const versions = (state.payload.versions || []).filter(version => version.package);
   const latest = versions[versions.length - 1];
-  const gate = { APPROVED_FOR_UAT: 'UAT', UAT: 'UAT', APPROVED_FOR_PROD: 'PROD', PROD: 'PROD' }[
+  // the gate the version was approved for — not yet the gate a deployment goes as: that also depends on the
+  // target, which holds a version to its own gate (deploy.py, Deployer.refusal)
+  const approved = { APPROVED_FOR_UAT: 'UAT', UAT: 'UAT', APPROVED_FOR_PROD: 'PROD', PROD: 'PROD' }[
     latest && latest.status];
+  // a target that names no gate is held to PROD by the engine: a missing setting asks for the second person
+  const needs = target => (target.gate === 'UAT' ? 'UAT' : 'PROD');
+  // the stricter of the two, the same rule the engine applies — so the button never offers what it refuses
+  const gateFor = target => (approved === 'PROD' || needs(target) === 'PROD' ? 'PROD' : 'UAT');
+  const why = target => (!latest ? 'no version has a package yet'
+    : !approved ? `${latest.version} is ${latest.status}: a deployment carries a version already approved `
+      + 'for its gate, by someone other than whoever asked for it'
+      : approved === 'UAT' && needs(target) === 'PROD'
+        ? `${target.name} is a PROD target and ${latest.version} is approved for UAT only: approve it for `
+          + `PROD first — bash ai-bi.sh approve ${state.payload.project.project_id} PROD`
+        : null);
   if (!state.targets.length) {
     body.appendChild(node('div', { class: 'ss-callout', text:
       'No target is configured. A target is a Superset somewhere else, named in the engine\u2019s own '
-      + 'environment (AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI) and written down nowhere '
-      + 'in the repository.' }));
+      + 'environment (AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI, and _GATE=UAT for one '
+      + 'that takes versions approved for UAT — without it a target is held to PROD) and written down '
+      + 'nowhere in the repository.' }));
   } else {
     body.appendChild(node('table', { class: 'ss-table' },
-      node('tr', {}, ['Target', 'Where', 'Its connection', ''].map(head => node('th', { text: head }))),
-      state.targets.map(target => node('tr', {},
-        node('td', { text: target.name }), node('td', { text: target.url }),
-        node('td', { text: target.database }),
-        node('td', {}, target.from_studio
-          ? button(`Deploy ${latest ? latest.version : ''} →`,
-            () => deployment({ version: latest.version, target: target.name, gate,
-              database: target.database }, commands),
-            { 'data-weight': 'primary', disabled: !latest || !gate || state.deploying,
-              title: !latest ? 'no version has a package yet'
-                : !gate ? `${latest.version} is ${latest.status}: a deployment carries a version already `
-                  + 'approved for its gate, by someone other than whoever asked for it'
-                  : `Take ${latest.version} to ${target.name} as ${gate}` })
-          : node('span', { class: 'ss-faint', text: 'the command line only' }))))));
+      node('tr', {}, ['Target', 'Where', 'Its connection', 'Needs', ''].map(head => node('th', { text: head }))),
+      state.targets.map(target => {
+        const refused = why(target);
+        return node('tr', {},
+          node('td', { text: target.name }), node('td', { text: target.url }),
+          node('td', { text: target.database }),
+          node('td', { text: `approved for ${needs(target)}` }),
+          node('td', {}, !target.from_studio
+            ? node('span', { class: 'ss-faint', text: 'the command line only' })
+            : [button(`Deploy ${latest ? latest.version : ''} →`,
+              () => deployment({ version: latest.version, target: target.name, gate: gateFor(target),
+                database: target.database }, commands),
+              { 'data-weight': 'primary', disabled: Boolean(refused) || state.deploying,
+                title: refused || `Take ${latest.version} to ${target.name} as ${gateFor(target)}` }),
+            // a disabled button says nothing to a finger or a screen reader: the reason is written beside it
+            refused ? node('div', { class: 'ss-note', text: refused }) : null]));
+      })));
   }
   const done = state.deployments || [];
   body.appendChild(node('h4', { style: 'margin-top: 14px', text: 'What has been deployed' }));
@@ -1198,8 +1217,9 @@ export function gallery(wanted, kind, commands) {
     toast('Every slot of this template already holds a chart.', { kind: 'bad' });
     return;
   }
-  const chosen = { slot: (free.find(f => f.slot === wanted) || free[0]).slot, metric: null, type: kind || null,
-    dimension: '', time_grain: '' };
+  // a dimension and a grain are sent only when one was given: the engine checks what it is sent, and an
+  // empty string is not a grain it knows
+  const chosen = { slot: (free.find(f => f.slot === wanted) || free[0]).slot, metric: null, type: kind || null };
   const body = node('div', {});
   const draw_ = () => {
     body.textContent = '';
@@ -1220,7 +1240,11 @@ export function gallery(wanted, kind, commands) {
       field('Drawn as', select(chosen.type, [['', 'let the registry choose'], ...(slot.accepts || [])],
         value => { chosen.type = value || null; })),
       field('Broken down by (optional)', node('input', { placeholder: 'region, rat…',
-        on: { change: event => { chosen.dimension = event.target.value; } } }))));
+        on: { change: event => {
+          const given = event.target.value.trim();
+          if (given) chosen.dimension = given;
+          else delete chosen.dimension;
+        } } }))));
     body.appendChild(node('p', { class: 'ss-note', text:
       'The slot decides what may be drawn there; the registry decides whether this metric can be drawn that '
       + 'way, and which governed dataset it comes from. What you get back is a proposal — nothing is saved '

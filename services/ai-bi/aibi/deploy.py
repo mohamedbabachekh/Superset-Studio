@@ -31,13 +31,14 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 import yaml
 
 from .compatibility import covers
 from .models import ProjectVersion, Strict, utcnow
 from .superset_adapter import SupersetAdapter, SupersetError
+from .tools import AccessError, apply_access
 
 
 class DeployError(RuntimeError):
@@ -56,6 +57,10 @@ class Target(Strict):
     database_uri: str
     # a target may be read-only to the Studio: then it is the command line's alone
     from_studio: bool = True
+    # the approval a version needs to go THERE. It is the target's, not the caller's: a version signed off
+    # for UAT by one reviewer must not reach a production Superset because a request said « UAT ». A target
+    # nobody said is UAT is held to PROD — a missing setting asks for the second person, not for fewer.
+    gate: Literal["UAT", "PROD"] = "PROD"
     # where a PERSON reaches it, when that is not where the engine does — a container name resolves inside
     # the network and nowhere else, and the link a deployment leaves behind is for somebody to open
     public_url: str = ""
@@ -123,9 +128,11 @@ class Deployer:
         """Why this version may not go to that target — in the words a person needs. None: it may."""
         if record is None:
             return "there is no such version"
-        allowed = self.APPROVED_FOR.get(gate)
-        if allowed is None:
+        if gate not in self.APPROVED_FOR:
             return f"{gate} is not a gate a deployment can be for"
+        # the stricter of what was asked and what the target demands: asking for less changes nothing
+        gate = "PROD" if "PROD" in (gate, target.gate) else "UAT"
+        allowed = self.APPROVED_FOR[gate]
         if record.status not in allowed:
             return (f"{record.project_id} {record.version} is {record.status}: a deployment to {gate} carries "
                     f"a version already approved for it, by someone other than whoever asked for it. "
@@ -181,6 +188,7 @@ class Deployer:
                 raise DeployError("this package carries no Superset export: it was built before exports were "
                                   "kept, and cannot be deployed")
             bundle = package.read("superset/dashboard_export.zip")
+            schemas = _exported_schemas(bundle)
             manifest = yaml.safe_load(package.read("manifest.yaml").decode("utf-8")) or {}
         step.status, step.detail = "done", f"{Path(path).name}, {len(names)} files, sha256 {got[:12]}…"
 
@@ -199,11 +207,24 @@ class Deployer:
         database_id = superset.ensure_database(target.database_name, target.database_uri, sql_lab=False)
         step.status, step.detail = "done", f"{target.database_name} (#{database_id})"
 
-        # 4 · the import itself
+        # 4 · the import itself — over a dashboard taken from its audience first. An overwrite KEEPS the existing
+        # dashboard's roles (they are not in an export), so the previous version's audience would hold the new
+        # charts before their row-level rules exist, and would keep them if any later step failed. Withdrawn
+        # and read back before anything is imported: the access step grants it again once its rules are there.
         step = made.step("import_assets")
+        spec = self.lifecycle.specification_at(record.project_id, record.version)
+        existing = superset.get_dashboard(spec.dashboard.id)
+        withdrawn = ""
+        if existing is not None and existing.get("roles"):
+            superset.update_dashboard(existing["id"], {"roles": []})
+            still = superset.dashboard_roles(existing["id"])
+            if still:
+                raise DeployError(f"the dashboard {spec.dashboard.id} in {target.name} is still granted to "
+                                  f"{', '.join(still)} after its audience was withdrawn: nothing was imported")
+            withdrawn = f"; its previous audience ({len(existing['roles'])} roles) was withdrawn first"
         superset.import_dashboard(bundle, overwrite=True,
                                   passwords={f"databases/{target.database_name}.yaml": target.database_uri})
-        step.status, step.detail = "done", "the export was accepted"
+        step.status, step.detail = "done", f"the export was accepted{withdrawn}"
 
         # 5 · an import KEEPS an existing connection's URI (docs/lessons.md): repoint it, every time
         step = made.step("repoint_connection")
@@ -212,20 +233,28 @@ class Deployer:
 
         # 6 · who may open it, and which rows they see — never in an export
         step = made.step("apply_access")
-        spec = self.lifecycle.specification_at(record.project_id, record.version)
-        datasets = [self.registry.datasets[d] for d in spec.datasets() if d in self.registry.datasets]
-        metrics = [self.registry.metrics[m] for m in spec.metrics() if m in self.registry.metrics]
-        audience = self.policy.audience(datasets, metrics)
-        rules = self.policy.row_rules(datasets, metrics)
+        # Resolved strictly. A dataset or metric this registry no longer knows, quietly left out, is a
+        # dashboard whose audience is decided over less than it shows — wider, and then read back as right.
+        unknown = ([f"dataset {d}" for d in spec.datasets() if d not in self.registry.datasets]
+                   + [f"metric {m}" for m in spec.metrics() if m not in self.registry.metrics])
+        if unknown:
+            raise DeployError(f"{record.project_id} {record.version} uses {', '.join(unknown)}, which the "
+                              "registry no longer has: its audience cannot be decided, and nothing is granted")
+        datasets = [self.registry.datasets[d] for d in spec.datasets()]
+        metrics = [self.registry.metrics[m] for m in spec.metrics()]
         dashboard = superset.get_dashboard(spec.dashboard.id)
         if dashboard is None:
             raise DeployError(f"the dashboard {spec.dashboard.id} is not in {target.name} after the import")
         made.dashboard = {"id": dashboard["id"], "slug": spec.dashboard.id,
                           "url": f"{target.where}/superset/dashboard/{spec.dashboard.id}/"}
-        role_ids = [superset.ensure_role(f"sharpsight_{name}") for name in audience]
-        superset.update_dashboard(dashboard["id"], {"roles": role_ids})
-        step.status, step.detail = "done", (f"{len(audience)} roles, {len(rules)} row-level rules"
+        access = self._apply_access(superset, target, dashboard["id"], datasets, metrics, database_id, schemas)
+        audience, rules = access["audience"], access["rules"]
+        step.status, step.detail = "done", (f"{len(audience)} roles ({', '.join(audience)}), {len(rules)} "
+                                            f"row-level rules read back from {target.name}"
                                             if audience else "no role: nobody but an administrator")
+        if access.get("kept"):
+            step.detail += (f"; {len(access['kept'])} withdrawn rules kept while other dashboards are still "
+                            f"granted to their role: {', '.join(access['kept'])}")
 
         # 7 · what arrived, read back
         step = made.step("verify_assets")
@@ -233,10 +262,11 @@ class Deployer:
         wanted = len(spec.components)
         if len(charts) < wanted:
             raise DeployError(f"{len(charts)} of {wanted} charts arrived in {target.name}")
-        granted = sorted(superset.dashboard_roles(dashboard["id"]))
+        # the grant was read back by the access step, which fails unless it is the one decided: what it read
+        # is recorded here, rather than asked for a second time to the same answer
+        granted = access["granted"]
         made.checks.append({"check": "charts arrived", "status": "pass", "detail": f"{len(charts)} of {wanted}"})
-        made.checks.append({"check": "audience as SharpSight decided",
-                            "status": "pass" if granted == sorted(f"sharpsight_{r}" for r in audience) else "warn",
+        made.checks.append({"check": "audience as SharpSight decided", "status": "pass",
                             "detail": ", ".join(granted) or "none"})
         step.status, step.detail = "done", f"{len(charts)} charts, {len(granted)} roles"
 
@@ -263,6 +293,34 @@ class Deployer:
         step = made.step("record")
         step.status, step.detail = "done", made.dashboard.get("url", "")
 
+    def _apply_access(self, superset: SupersetAdapter, target: Target, dashboard_id: int, datasets: list,
+                      metrics: list, database_id: int, schemas: dict[str, str]) -> dict[str, Any]:
+        """The audience and the row-level rules, written to the target by the very helper that writes them to
+        the kit's own Superset (tools.apply_access): the same role names, the same rule names, the same order —
+        every rule read back before the dashboard is granted, the grant taken back if it fails. What is the
+        target's own is only where each dataset is there."""
+        try:
+            # a rule hangs from the target's OWN dataset, which the import created there: found by the table
+            # it reads, on the governed connection, in the schema the export recorded for it
+            tables: dict[str, int] = {}
+            for dataset in datasets:
+                if not any(rule["dataset"] == dataset.id for rule in self.policy.row_rules(datasets, metrics)):
+                    continue
+                schema = schemas.get(dataset.source_model) or dataset.db_schema
+                found = superset.find_dataset(database_id, schema, dataset.source_model)
+                if found is None:
+                    raise DeployError(f"the dataset {dataset.id} ({schema}.{dataset.source_model}) is not in "
+                                      f"{target.name} after the import: its row-level rule has nothing to "
+                                      "hang from, and a dashboard is not left without it")
+                tables[dataset.id] = found["id"]
+            return apply_access(superset, self.policy, dashboard_id, datasets, metrics, tables)
+        except AccessError as exc:
+            raise DeployError(f"{target.name} does not hold the access SharpSight decided: {exc}") from exc
+        except SupersetError as exc:
+            raise DeployError(f"{target.name} refused the audience or the row-level rules ({exc}): its service "
+                              "account must be allowed to manage roles and row-level security, and the "
+                              "dashboard is not left open without them") from exc
+
     def _record(self, made: Deployment, request_id: str, outcome: str) -> None:
         body = self.store.get_project(made.project_id) or {}
         history = body.setdefault("deployments", [])
@@ -275,6 +333,18 @@ class Deployer:
                                       "status": made.status},
                           detail={"error": made.error, "dashboard": made.dashboard,
                                   "steps": [f"{s.key}:{s.status}" for s in made.steps]})
+
+
+def _exported_schemas(bundle: bytes) -> dict[str, str]:
+    """The schema of each dataset in Superset's own export, by table name — where the import put it."""
+    found: dict[str, str] = {}
+    with zipfile.ZipFile(io.BytesIO(bundle)) as export:
+        for name in export.namelist():
+            if "/datasets/" in name and name.endswith((".yaml", ".yml")):
+                body = yaml.safe_load(export.read(name).decode("utf-8")) or {}
+                if body.get("table_name") and body.get("schema"):
+                    found[body["table_name"]] = body["schema"]
+    return found
 
 
 def _query_of(chart: dict[str, Any]) -> dict[str, Any]:

@@ -226,10 +226,13 @@ def main() -> int:
         found = call("GET", "/targets", args.user)
         if not found:
             print("no deployment target is configured. A target is a Superset somewhere else, named in this\n"
-                  "service's environment: AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI.")
+                  "service's environment: AIBI_TARGET_<NAME>_URL, _USER, _PASSWORD, _DB_NAME, _DB_URI, and\n"
+                  "_GATE=UAT for one that takes versions approved for UAT (without it, a target is held to PROD).")
             return 1
         for target in found:
-            print(f"{target['name']:<12} {target['url']}  ({target['database']})"
+            # the gate is the target's: a version reaches it only once approved for that gate, whatever was asked
+            print(f"{target['name']:<12} needs {target.get('gate', 'PROD'):<4}  {target['url']}  "
+                  f"({target['database']})"
                   + ("" if target["from_studio"] else "  — the command line only"))
     elif args.command == "deployments":
         for one in call("GET", f"/projects/{args.project_id}/deployments", args.user):

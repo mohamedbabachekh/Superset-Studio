@@ -104,33 +104,58 @@ export function undo(which) {
 }
 
 let pending = null;
+let inflight = null;
 export function autosave() {
   clearTimeout(pending);
   pending = setTimeout(save, 1200);
 }
 
-export async function save() {
-  if (!state.dirty || state.saving || !editable()) return;
+/** Save the draft. Resolves to whether what is on the page is now what the engine holds: false when the
+ *  save was refused, so that a caller about to ask the engine something about the draft can refuse too. */
+export function save() {
+  if (state.saving) return inflight;
+  if (!state.dirty || !editable()) return Promise.resolve(!state.dirty);
+  clearTimeout(pending);
   state.saving = true;
   redraw();
-  try {
-    const said = await api.save(state.spec, state.token);
-    state.token = said.token;
-    state.savedAt = said.saved_at;
-    state.dirty = false;
-    state.payload.problems = said.problems;
-    state.payload.layout_of = said.layout_of;
-  } catch (problem) {
-    if (problem.status === 409) {
-      toast('Someone else saved this draft since you opened it. Nothing of yours was saved.',
-        { kind: 'bad', action: () => window.location.reload(), label: 'Reload', seconds: 0 });
-    } else {
-      toast(`Not saved: ${problem.message}`, { kind: 'bad', seconds: 0 });
+  // what is sent, so that a move made while the save is on its way is not marked as saved with it
+  const sent = JSON.stringify(state.spec);
+  inflight = (async () => {
+    try {
+      const said = await api.save(JSON.parse(sent), state.token);
+      state.token = said.token;
+      state.savedAt = said.saved_at;
+      state.dirty = JSON.stringify(state.spec) !== sent;
+      state.payload.problems = said.problems;
+      state.payload.layout_of = said.layout_of;
+      if (state.dirty) autosave();
+      return true;
+    } catch (problem) {
+      if (problem.status === 409) {
+        toast('Someone else saved this draft since you opened it. Nothing of yours was saved.',
+          { kind: 'bad', action: () => window.location.reload(), label: 'Reload', seconds: 0 });
+      } else {
+        toast(`Not saved: ${problem.message}`, { kind: 'bad', seconds: 0 });
+      }
+      return false;
+    } finally {
+      state.saving = false;
+      inflight = null;
+      redraw();
     }
-  } finally {
-    state.saving = false;
-    redraw();
-  }
+  })();
+  return inflight;
+}
+
+/** Make the engine hold what the page holds before asking it anything about the draft. The copilot, the
+ *  gallery and the inspector's proposals are all made on the SAVED draft: asked with edits still unsaved,
+ *  the engine would answer about a draft the person has already changed, and applying its answer would
+ *  throw those edits away. Resolves to false when the draft could not be saved — and then nothing is asked. */
+export async function settle() {
+  clearTimeout(pending);
+  if (state.saving && !(await inflight)) return false;
+  if (!state.dirty) return true;
+  return save();
 }
 
 /* ── the moves ───────────────────────────────────────────────────────────────────────────────────────────── */

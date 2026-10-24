@@ -39,6 +39,21 @@ while [ $# -gt 0 ]; do
 done
 
 # ── the plumbing ────────────────────────────────────────────────────────────────────────────────────────────
+# One Python, found once and used everywhere below. On Windows, Git Bash's `python3` is the Store's stub: it
+# opens a prompt to install Python and runs nothing, so a name on PATH is not proof of an interpreter. Each
+# candidate is asked to print something; the first that does is the one.
+PY=()
+for candidate in "python3" "python" "py -3"; do
+  # shellcheck disable=SC2086  (« py -3 » is a command and its argument, split on purpose)
+  if [ "$($candidate -c 'import json, sys; print(sys.version_info[0])' 2>/dev/null)" = 3 ]; then
+    read -r -a PY <<< "$candidate"; break
+  fi
+done
+if [ ${#PY[@]} -eq 0 ]; then
+  echo "no Python 3 that runs: tried python3, python and py -3 (the walk reads the engine's answers with it)" >&2
+  exit 2
+fi
+
 PASSED=0; FAILED=0; SKIPPED=0
 BOLD=''; DIM=''; GREEN=''; RED=''; YELLOW=''; OFF=''
 if [ -t 1 ]; then BOLD=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'; OFF=$'\033[0m'; fi
@@ -90,7 +105,7 @@ as_superset() {
   return 0
 }
 # read one thing out of the last answer:  of .project.version   ·   of .0.name   ·   of .checks len
-of() { python3 - "$BODY" "$1" "${2:-}" <<'PY'
+of() { "${PY[@]}" - "$BODY" "$1" "${2:-}" <<'PY'
 import json, sys
 try:
     body = json.load(open(sys.argv[1]))
@@ -115,7 +130,7 @@ else:
 PY
 }
 # is the body's JSON true for this little expression? `where '.status == "succeeded"'`
-where() { python3 - "$BODY" "$1" <<'PY'
+where() { "${PY[@]}" - "$BODY" "$1" <<'PY'
 import json, sys
 try:
     b = json.load(open(sys.argv[1]))
@@ -158,8 +173,9 @@ if section 0 "the machine: the kit, the engine, and the versions they were built
     || no "the engine's own token is in .env" "AIBI_API_TOKEN is empty — run bash ai-bi.sh once"
   ask GET /health
   holds "the engine answers, and says what it can reach" "$([ "$CODE" = 200 ] && echo 0 || echo 1)"
-  where '.get("checks", {}).get("bi_engine", {}).get("ok") is True' && ok "and it can reach Superset" \
-    || no "and it can reach Superset" "$(of .checks.bi_engine)"
+  # /health says it at the top level (« "bi_engine": true »); an older engine nested it under checks
+  where '.get("bi_engine") is True or get("checks.bi_engine.ok") is True' && ok "and it can reach Superset" \
+    || no "and it can reach Superset" "bi_engine: $(of .bi_engine)$(of .checks.bi_engine)"
   CODE=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$BI/health" 2>/dev/null) || CODE=000
   holds "Superset itself answers" "$([ "$CODE" = 200 ] && echo 0 || echo 1)" "$BI/health answered $CODE"
   ask GET /compatibility
@@ -191,12 +207,17 @@ if section 1 "what is governed: the datasets, the metrics, the templates"; then
 fi
 
 # ── 2 · a project, from a request in words ─────────────────────────────────────────────────────────────────
-PROMPT="Create an end-to-end test dashboard using the executive overview template, with the certified \
-telecom quality metrics by region and by day, for the CEM domain."
+# The request names metrics the registry knows (the QoE score, degraded users), in words its synonyms list:
+# a request that names none is refused, as designed, and everything after it would have nothing to work on.
+# The subject carries the time of the run, so each run is a project of its own: the one before was approved
+# for UAT below, and a held version is not regenerated in place.
+STAMP="$(date +%Y%m%d-%H%M%S)"
+PROMPT="Create an end-to-end check $STAMP dashboard using the executive template, for the CEM domain. \
+Show the daily trend of the QoE score, and a ranking of degraded users by region."
 if section 2 "a project: a request in words, the pipeline's gates, a first version"; then
   printf '      %sgenerating — the pipeline runs its twenty-two steps and ten gates; this takes a while%s\n' \
     "$DIM" "$OFF"
-  ask POST /projects/generate "$(python3 -c 'import json,sys; print(json.dumps({"prompt": sys.argv[1], "wait": True}))' "$PROMPT")"
+  ask POST /projects/generate "$("${PY[@]}" -c 'import json,sys; print(json.dumps({"prompt": sys.argv[1], "wait": True}))' "$PROMPT")"
   holds "the request is answered by a run" "$([ "$CODE" = 200 ] && echo 0 || echo 1)"
   PROJECT="$(of .project_id)"
   where '.get("status") == "succeeded"' && ok "which went all the way through" \
@@ -204,7 +225,7 @@ if section 2 "a project: a request in words, the pipeline's gates, a first versi
   where 'all(s.get("status") in ("done", "skipped") for s in b.get("steps", []))' \
     && ok "with every step done or deliberately skipped" \
     || no "with every step done or deliberately skipped" \
-       "$(python3 -c 'import json,sys;b=json.load(open(sys.argv[1]));print([ (s.get("key"),s.get("status"),s.get("detail","")[:80]) for s in b.get("steps",[]) if s.get("status") not in ("done","skipped")])' "$BODY" 2>/dev/null)"
+       "$("${PY[@]}" -c 'import json,sys;b=json.load(open(sys.argv[1]));print([ (s.get("key"),s.get("status"),s.get("detail","")[:80]) for s in b.get("steps",[]) if s.get("status") not in ("done","skipped")])' "$BODY" 2>/dev/null)"
   where '.get("quality_gate") in ("READY_FOR_REVIEW", "APPROVED_FOR_UAT", "UAT", None)' \
     && ok "and left its project at a gate a review can start from" \
     || no "and left its project at a gate a review can start from" "$(of .quality_gate) $(of .error)"
@@ -239,13 +260,13 @@ if section 3 "the Studio: what it draws, the draft it keeps, the proposals it as
   holds "the workspace draws from one call" "$([ "$CODE" = 200 ] && echo 0 || echo 1)"
   where 'all(k in b for k in ("project", "template", "layout", "components", "free_slots", "security"))' \
     && ok "which carries the project, the template, the layout, the charts, the free slots and the security" \
-    || no "which carries all of it" "$(python3 -c 'import json,sys;print(sorted(json.load(open(sys.argv[1])).keys()))' "$BODY")"
+    || no "which carries all of it" "$("${PY[@]}" -c 'import json,sys;print(sorted(json.load(open(sys.argv[1])).keys()))' "$BODY")"
   where '.get("layout_of") in ("specification", "template")' \
     && ok "and says who laid it out: the specification or the template" \
     || no "and says who laid it out" "$(of .layout_of)"
   cp "$BODY" "$TMP/studio.json"
   # a real edit: the first row's first slot made one column wider, saved as a draft
-  python3 - "$TMP/studio.json" "$TMP/draft.json" <<'PY'
+  "${PY[@]}" - "$TMP/studio.json" "$TMP/draft.json" <<'PY'
 import json, sys
 payload = json.load(open(sys.argv[1]))
 spec = payload["spec"]
@@ -283,17 +304,17 @@ PY
     ask POST "/projects/$PROJECT/propose" '{"request": "add a chart of the same metric by region"}'
     where 'isinstance(b.get("changes"), list) and b.get("summary") is not None' && ok "the copilot answers a sentence with a proposal" \
       || no "the copilot answers a sentence with a proposal" "$(head -c 300 "$BODY")"
-    SLOT="$(python3 -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("free_slots") or [{}])[0].get("slot",""))' "$TMP/studio.json")"
-    METRIC="$(python3 -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("components") or [{}])[0].get("metric",""))' "$TMP/studio.json")"
+    SLOT="$("${PY[@]}" -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("free_slots") or [{}])[0].get("slot",""))' "$TMP/studio.json")"
+    METRIC="$("${PY[@]}" -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("components") or [{}])[0].get("metric",""))' "$TMP/studio.json")"
     if [ -n "$SLOT" ] && [ -n "$METRIC" ]; then
-      ask POST "/projects/$PROJECT/compose" "$(python3 -c 'import json,sys;print(json.dumps({"slot":sys.argv[1],"metric":sys.argv[2]}))' "$SLOT" "$METRIC")"
+      ask POST "/projects/$PROJECT/compose" "$("${PY[@]}" -c 'import json,sys;print(json.dumps({"slot":sys.argv[1],"metric":sys.argv[2]}))' "$SLOT" "$METRIC")"
       where 'isinstance(b.get("changes"), list) and b.get("summary") is not None' && ok "the gallery's form answers with the same kind of proposal" \
         || no "the gallery's form answers with a proposal" "$(head -c 300 "$BODY")"
     else
       skip "the gallery's form answers with a proposal" "this template has no free slot left"
     fi
-    FILLED="$(python3 -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("components") or [{}])[0].get("slot",""))' "$TMP/studio.json")"
-    ask POST "/projects/$PROJECT/alter" "$(python3 -c 'import json,sys;print(json.dumps({"slot":sys.argv[1],"type":"table"}))' "$FILLED")"
+    FILLED="$("${PY[@]}" -c 'import json,sys;b=json.load(open(sys.argv[1]));print((b.get("components") or [{}])[0].get("slot",""))' "$TMP/studio.json")"
+    ask POST "/projects/$PROJECT/alter" "$("${PY[@]}" -c 'import json,sys;print(json.dumps({"slot":sys.argv[1],"type":"table"}))' "$FILLED")"
     where 'isinstance(b.get("changes"), list) and b.get("summary") is not None' && ok "and the inspector's own controls do too" \
       || no "and the inspector's own controls do too" "$(head -c 300 "$BODY")"
     ask GET "/projects/$PROJECT/studio"
@@ -316,7 +337,7 @@ if section 4 "modify it: a draft, committed, becomes the next version"; then
   if [ -z "$PROJECT" ]; then skip "modify it" "there is no project"; else
   ask GET "/projects/$PROJECT/studio"
   cp "$BODY" "$TMP/studio2.json"
-  python3 - "$TMP/studio2.json" "$TMP/draft2.json" <<'PY'
+  "${PY[@]}" - "$TMP/studio2.json" "$TMP/draft2.json" <<'PY'
 import json, sys
 payload = json.load(open(sys.argv[1]))
 spec = payload["spec"]
@@ -396,7 +417,7 @@ if section 6 "export: the .ssbi package, and what is inside it"; then
   holds "the version exports as one file" "$([ "$CODE" = 200 ] && [ -s "$TMP/package.ssbi" ] && echo 0 || echo 1)" \
     "answered $CODE"
   if [ -s "$TMP/package.ssbi" ]; then
-    python3 - "$TMP/package.ssbi" "$TMP/inside.txt" 2>"$TMP/zip.err" <<'PY'
+    "${PY[@]}" - "$TMP/package.ssbi" "$TMP/inside.txt" 2>"$TMP/zip.err" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
     open(sys.argv[2], "w").write("\n".join(sorted(z.namelist())))
@@ -404,11 +425,15 @@ PY
     if [ ! -s "$TMP/inside.txt" ]; then
       no "the package is a file a person can open" "$(tail -2 "$TMP/zip.err" | tr '\n' ' ')"
     else
-    for wanted in manifest.json specification.json superset/dashboard_export.zip; do
-      if grep -qx "$wanted" "$TMP/inside.txt" || grep -q "^$wanted$" "$TMP/inside.txt"; then
-        ok "it carries $wanted"
+    # The names are the ones lifecycle.build_package writes: the manifest is YAML, and the specification is
+    # the dashboard's own dashboards/<id>.spec.yaml, so it is matched by its shape rather than one fixed name.
+    for wanted in "manifest.yaml|^manifest\.yaml$" \
+                  "the dashboard's specification|^dashboards/[^/]+\.spec\.yaml$" \
+                  "superset/dashboard_export.zip|^superset/dashboard_export\.zip$"; do
+      if grep -qE "${wanted#*|}" "$TMP/inside.txt"; then
+        ok "it carries ${wanted%%|*}"
       else
-        no "it carries $wanted" "$(head -c 300 "$TMP/inside.txt" | tr '\n' ' ')"
+        no "it carries ${wanted%%|*}" "$(head -c 300 "$TMP/inside.txt" | tr '\n' ' ')"
       fi
     done
     grep -qE "registry/|datasets|metrics" "$TMP/inside.txt" \
@@ -417,9 +442,11 @@ PY
     grep -qE "validation" "$TMP/inside.txt" && ok "and the validation that passed" \
       || no "and the validation that passed"
     ask GET "/projects/$PROJECT/versions/$VERSION"
-    SUM="$(of .package.checksum)"
+    # The version records the whole file's digest as package.sha256 (lifecycle.build_package), and the
+    # download serves that same stored file, so the two must agree byte for byte.
+    SUM="$(of .package.sha256)"
     if [ -n "$SUM" ]; then
-      HERE_SUM="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$TMP/package.ssbi")"
+      HERE_SUM="$("${PY[@]}" -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$TMP/package.ssbi")"
       [ "$SUM" = "$HERE_SUM" ] && ok "and the file is the one the version was recorded as (sha256)" \
         || no "the package is not the file the version recorded" "recorded $SUM, got $HERE_SUM"
     else
@@ -451,7 +478,7 @@ if section 7 "deploy: the run environment, and what was read back"; then
     FIRST="$(ask GET "/projects/$PROJECT"; of .versions.0.version)"
     if [ -n "$FIRST" ] && [ "$FIRST" != "$VERSION" ]; then
       ask POST "/projects/$PROJECT/versions/$FIRST/deploy" \
-        "$(python3 -c 'import json,sys;print(json.dumps({"target":sys.argv[1],"gate":"UAT","comment":"a version nobody approved"}))' "$TARGET")" \
+        "$("${PY[@]}" -c 'import json,sys;print(json.dumps({"target":sys.argv[1],"gate":"UAT","comment":"a version nobody approved"}))' "$TARGET")" \
         release.manager
       holds "a version nobody approved is refused, in words a person can act on" \
         "$([ "$CODE" != 200 ] && echo 0 || echo 1)" "answered $CODE"
@@ -461,7 +488,7 @@ if section 7 "deploy: the run environment, and what was read back"; then
     printf '      %sdeploying %s to %s — import, repoint, grant, and then read every chart back%s\n' \
       "$DIM" "$VERSION" "$TARGET" "$OFF"
     ask POST "/projects/$PROJECT/versions/$VERSION/deploy" \
-      "$(python3 -c 'import json,sys;print(json.dumps({"target":sys.argv[1],"gate":"UAT","comment":"end-to-end check"}))' "$TARGET")" \
+      "$("${PY[@]}" -c 'import json,sys;print(json.dumps({"target":sys.argv[1],"gate":"UAT","comment":"end-to-end check"}))' "$TARGET")" \
       release.manager
     holds "the approved version is deployed" "$([ "$CODE" = 200 ] && echo 0 || echo 1)"
     where '.get("status") == "succeeded"' && ok "and the deployment says it succeeded" \
@@ -469,7 +496,7 @@ if section 7 "deploy: the run environment, and what was read back"; then
     where 'all(s.get("status") in ("done", "skipped") for s in b.get("steps", []))' \
       && ok "every step of the plan is done: checksum, compatibility, connection, import, repoint, audience, read-back" \
       || no "every step of the plan is done" \
-        "$(python3 -c 'import json,sys;b=json.load(open(sys.argv[1]));print([(s["key"],s["status"],s.get("detail","")[:60]) for s in b.get("steps",[]) if s["status"] not in ("done","skipped")])' "$BODY" 2>/dev/null)"
+        "$("${PY[@]}" -c 'import json,sys;b=json.load(open(sys.argv[1]));print([(s["key"],s["status"],s.get("detail","")[:60]) for s in b.get("steps",[]) if s["status"] not in ("done","skipped")])' "$BODY" 2>/dev/null)"
     where 'any(c.get("check") == "charts arrived" and c.get("status") == "pass" for c in b.get("checks", []))' \
       && ok "every chart arrived there" || no "every chart arrived there" "$(of .checks)"
     where 'any("returns data" in c.get("check", "") for c in b.get("checks", []))' \
@@ -506,7 +533,7 @@ if section 8 "import: what is in the package is what Superset itself imports"; t
   if [ ! -s "$TMP/package.ssbi" ]; then
     skip "the package can be imported by hand too" "no package was exported in this run (--only 6 first)"
   else
-    python3 - "$TMP/package.ssbi" "$TMP/export.txt" <<'PY'
+    "${PY[@]}" - "$TMP/package.ssbi" "$TMP/export.txt" <<'PY'
 import io, sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as outer:
     inner = io.BytesIO(outer.read("superset/dashboard_export.zip"))
@@ -547,6 +574,8 @@ if section 9 "the gateway: what Superset's token opens, and what it does not"; t
   case "$CODE" in
     200) ok "Superset serves the Studio's own files" ;;
     302|401) ok "Superset serves the Studio's own files to somebody signed in (it answered $CODE)" ;;
+    403) no "Superset serves the Studio's own files to somebody signed in" \
+           "an anonymous caller got 403, where the Studio's pages send them to the login (302)" ;;
     *) no "Superset serves the Studio's own files" "answered $CODE" ;;
   esac
   if [ -n "$PROJECT" ]; then
@@ -563,7 +592,7 @@ fi
 if section 10 "the suites: the engine's own tests, and the Studio's in a browser"; then
   if command -v docker >/dev/null 2>&1; then
     if docker compose -p sharpsight-superset-devkit -f docker-compose.yaml -f docker-compose.ai-bi.yaml \
-         exec -T sharpsight-ai-bi sh -c 'cd /app && python -m pytest -q' > "$TMP/pytest.txt" 2>&1; then
+         exec -T sharpsight-ai-bi sh -c 'cd /app && python -m pytest' > "$TMP/pytest.txt" 2>&1; then
       ok "the engine's own tests pass inside its container ($(grep -oE '[0-9]+ passed[^"]*' "$TMP/pytest.txt" | tail -1))"
     else
       no "the engine's own tests pass inside its container" "$(tail -5 "$TMP/pytest.txt" | tr '\n' ' ')"
@@ -571,8 +600,8 @@ if section 10 "the suites: the engine's own tests, and the Studio's in a browser
   else
     skip "the engine's own tests" "docker is not on PATH"
   fi
-  if python3 -c 'import playwright' >/dev/null 2>&1; then
-    if python3 studio/preview.py --check > "$TMP/studio.txt" 2>&1; then
+  if "${PY[@]}" -c 'import playwright' >/dev/null 2>&1; then
+    if "${PY[@]}" studio/preview.py --check > "$TMP/studio.txt" 2>&1; then
       ok "the Studio keeps its $(grep -c '✓' "$TMP/studio.txt") promises in a real browser"
     else
       no "the Studio keeps its promises in a browser" "$(grep '✗' "$TMP/studio.txt" | head -3 | tr '\n' ' ')"

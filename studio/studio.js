@@ -28,6 +28,14 @@ import * as view from './view.js';
 const el = document.getElementById('sharpsight-studio');
 const api = client(el);
 
+// what is said when a proposal is not asked for because the draft it would be made on could not be saved
+const NOT_ASKED = 'Nothing was asked: your unsaved changes could not be saved first, and a proposal is made '
+  + 'on the saved draft.';
+// …and when a validation is not run for the same reason: it checks the SAVED draft, so a pass on it would
+// be a pass for a layout the person has already changed
+const NOT_VALIDATED = 'Nothing was validated: your unsaved changes could not be saved first, and a '
+  + 'validation is made on the saved draft.';
+
 const commands = {
   redraw: () => view.draw(el, api, commands),
   reload: () => load(),
@@ -42,9 +50,16 @@ const commands = {
 
   async validate() {
     state.tab = 'validation';
-    if (state.dirty) await act.save();
     try {
-      state.validation = await api.check();
+      if (await act.settle()) {
+        state.validation = await api.check();
+      } else {
+        // an earlier result left on the tab would read as this draft's: it is taken away, and the reason said
+        state.validation = null;
+        toast(NOT_VALIDATED, { kind: 'bad' });
+        commands.redraw();
+        return;
+      }
       const summary = state.validation.summary;
       toast(summary.passed ? `Validation passed — ${summary.checks} checks.`
         : `Validation failed — ${summary.failures} of ${summary.checks} checks.`,
@@ -90,6 +105,11 @@ const commands = {
     state.proposal = null;
     commands.redraw();
     try {
+      // the copilot reads the SAVED draft: what has not been saved yet is saved first, or nothing is asked
+      if (!(await act.settle())) {
+        state.said.push({ who: 'studio', text: NOT_ASKED });
+        return;
+      }
       const made = await api.propose(asked);
       state.proposal = made;
       state.said.push({ who: 'studio', text: made.answer || made.summary
@@ -107,6 +127,10 @@ const commands = {
     state.thinking = true;
     commands.redraw();
     try {
+      if (!(await act.settle())) {
+        toast(NOT_ASKED, { kind: 'bad' });
+        return;
+      }
       const made = await api.compose(wanted);
       state.proposal = made;
       state.said.push({ who: 'person', text: `add ${wanted.metric} on ${wanted.slot}` });
@@ -128,10 +152,16 @@ const commands = {
     state.copilot = true;
     commands.redraw();
     try {
+      if (!(await act.settle())) {
+        toast(NOT_ASKED, { kind: 'bad' });
+        return;
+      }
       const made = await api.alter(wanted);
       state.proposal = made;
+      // an empty field is one taken away — "broken down by: none" — and is said so, not as a blank
       state.said.push({ who: 'person', text: Object.entries(wanted)
-        .filter(([name]) => name !== 'slot').map(([name, value]) => `${name} → ${value}`).join(', ')
+        .filter(([name]) => name !== 'slot')
+        .map(([name, value]) => `${name} → ${value === '' ? 'none' : value}`).join(', ')
         + ` on ${wanted.slot}` });
       state.said.push({ who: 'studio', text: made.summary || (made.unresolved || []).join(' ') });
       if (!made.spec) toast((made.unresolved || []).join(' '), { kind: 'bad', seconds: 9 });

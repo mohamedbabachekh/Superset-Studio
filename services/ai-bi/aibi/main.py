@@ -27,7 +27,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import __version__, compatibility
 from .audit import AuditLog
@@ -529,6 +529,34 @@ def _security(spec: DashboardSpec, identity: Identity) -> dict[str, Any]:
                                   | {d.id for d in datasets if not d.certified})}
 
 
+def _sees_the_picture(project: dict[str, Any], identity: Identity) -> bool:
+    """Whether this person may be shown the project's tiles. A tile is cut from a render made by the engine's
+    service account, which reads every row of every dataset, so it is shown only to someone who would see
+    exactly that in Superset: a role in the dashboard's audience, and no row-level rule on any dataset it
+    reads. Everyone else opens the real dashboard, which Superset draws under their own rules."""
+    spec = DashboardSpec(**project["spec"]) if project.get("spec") else None
+    built = (project.get("engine") or {}).get("datasets") or {}
+    # what the committed specification reads, and what the dashboard in Superset was last built over
+    dataset_ids = set(spec.datasets() if spec else []) | set(built)
+    datasets = [service.registry.datasets.get(d) for d in sorted(dataset_ids)]
+    if not datasets or None in datasets:
+        return False                                  # a dataset the registry does not know is not cleared
+    metrics = [service.registry.metrics.get(m) for m in (spec.metrics() if spec else [])]
+    if None in metrics:
+        return False
+    audience = service.policy.audience(datasets, metrics)
+    return (any(role in audience for role in identity.roles)
+            and all(service.policy.can_read(identity, d) and service.policy.row_policy(identity, d) is None
+                    for d in datasets))
+
+
+def _require_the_picture(project: dict[str, Any], identity: Identity) -> None:
+    if not _sees_the_picture(project, identity):
+        raise PolicyError(f"{identity.user} may not see these tiles: they are drawn as the engine's service "
+                          "account sees the dashboard, every row of it. Superset draws the dashboard itself "
+                          f"under {identity.user}'s own access.", "picture_denied")
+
+
 def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, Any]:
     spec, from_draft = _studio_spec(project)
     template = service.registry.template(spec.dashboard.template)
@@ -592,7 +620,8 @@ def _studio_payload(project: dict[str, Any], identity: Identity) -> dict[str, An
         "draft": {k: project["draft"][k] for k in ("saved_at", "saved_by")} if project.get("draft") else None,
         "token": _token(project.get("draft")),
         "problems": layout_problems(spec, template),
-        "pictures": service.pictures.taken(project["project_id"]),
+        # none for someone the service account's render would show more than Superset shows them
+        "pictures": service.pictures.taken(project["project_id"]) if _sees_the_picture(project, identity) else None,
         # what the draft changes about the committed specification — the brief's review panel (§21)
         "diff": spec_diff(DashboardSpec(**project["spec"]), spec, template) if from_draft else [],
         # the versions this project has, and where each stands: the release panel (§22). Promotion is not
@@ -704,6 +733,9 @@ def commit_draft(project_id: str, body: Commit, response: Response, identity: Id
     if not project.get("draft"):
         raise LifecycleError(f"{project_id} has no draft to commit")
     spec = DashboardSpec(**project["draft"]["spec"])
+    # what this commit is OF: the draft as it is now. One saved while the pipeline runs is newer work, and
+    # the commit's end must not throw it away
+    committed = (_token(project["draft"]), project["draft"].get("saved_at"))
     template = service.registry.template(spec.dashboard.template)
     placing = layout_problems(spec, template)
     if placing:
@@ -729,9 +761,12 @@ def commit_draft(project_id: str, body: Commit, response: Response, identity: Id
         try:
             done = service.pipeline.execute(run, identity, edited=(project_id, spec))
             if done.status == "succeeded":
-                # the draft became the version: what is left to edit is the version itself
+                # the draft became the version: what is left to edit is the version itself — unless a newer
+                # draft was saved meanwhile, which is kept, to be committed or thrown away on its own
                 body_now = service.store.get_project(project_id) or {}
-                if body_now.pop("draft", None) is not None:
+                held = body_now.get("draft")
+                if held is not None and (_token(held), held.get("saved_at")) == committed:
+                    body_now.pop("draft")
                     service.store.save_project(project_id, body_now, utcnow())
         finally:
             service.busy.release()
@@ -741,7 +776,7 @@ def commit_draft(project_id: str, body: Commit, response: Response, identity: Id
     return {"run_id": run.id, "request_id": run.request_id, "status": "running", "layout_of": layout_source(spec)}
 
 
-class Request(BaseModel):
+class ProposeRequest(BaseModel):
     request: str = Field(default="", max_length=500)
 
 
@@ -751,6 +786,12 @@ class Compose(BaseModel):
     type: Optional[str] = Field(default=None, max_length=40)
     dimension: Optional[str] = Field(default=None, max_length=120)
     time_grain: Optional[Literal["P1D", "P1W", "P1M"]] = None
+
+    @field_validator("type", "dimension", "time_grain", mode="before")
+    @classmethod
+    def _unset(cls, value: Any) -> Any:
+        # the Studio's form sends an empty choice as "", which means "not set" — and which a Literal refuses
+        return None if value == "" else value
 
 
 def _proposal(project: dict[str, Any], identity: Identity, make) -> Any:  # noqa: ANN001
@@ -768,7 +809,7 @@ def _proposal(project: dict[str, Any], identity: Identity, make) -> Any:  # noqa
 
 
 @app.post("/projects/{project_id}/propose")
-def propose(project_id: str, body: Request, identity: Identity = Depends(caller)) -> Any:
+def propose(project_id: str, body: ProposeRequest, identity: Identity = Depends(caller)) -> Any:
     """A request in words, answered with a proposal: what it would change, what it touches, whether it would
     pass validation — and the specification as it would be. Nothing is saved. Applying it is the Studio
     sending that specification back as a draft, through the same route as any other change (§47.6)."""
@@ -817,7 +858,7 @@ def deployment_targets(identity: Identity = Depends(reader)) -> Any:
     """Where a version may be deployed from here. A target is a Superset somewhere else, named in this
     service's environment and written down nowhere in the repository."""
     return [{"name": name, "url": target.where, "database": target.database_name,
-             "from_studio": target.from_studio}
+             "from_studio": target.from_studio, "gate": target.gate}
             for name, target in sorted(service.targets.items())]
 
 
@@ -873,10 +914,13 @@ def last_report(project_id: str, identity: Identity = Depends(reader)) -> Any:
 
 
 @app.post("/projects/{project_id}/pictures")
-def take_pictures(project_id: str, identity: Identity = Depends(reader)) -> Any:
+def take_pictures(project_id: str, identity: Identity = Depends(caller)) -> Any:
     """Cut this project's tiles out of one picture of its dashboard (aibi/picture.py). Expensive on purpose:
-    it is a browser, a page load and every chart's own query."""
+    it is a browser, a page load and every chart's own query — so it is a developer's to ask for, like every
+    other thing the Studio changes, and only of a dashboard whose every row they may see."""
+    service.policy.require(identity, "bi.generate")
     project = _project(project_id, identity)
+    _require_the_picture(project, identity)
     engine = project.get("engine") or {}
     dashboard = (engine.get("dashboard") or {}).get("id")
     charts = {slot: chart for slot, chart in (engine.get("charts") or {}).items() if chart.get("id")}
@@ -891,7 +935,7 @@ def take_pictures(project_id: str, identity: Identity = Depends(reader)) -> Any:
 @app.get("/projects/{project_id}/picture/{slot}")
 def picture(project_id: str, slot: str, identity: Identity = Depends(reader)) -> Any:
     """One tile: the chart as the dashboard drew it when the pictures were last taken."""
-    _project(project_id, identity)
+    _require_the_picture(_project(project_id, identity), identity)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slot):
         raise HTTPException(status_code=404, detail="no such slot")
     path = service.pictures.tile(project_id, slot)

@@ -377,9 +377,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/targets" or path.endswith("/targets"):
             return self._json(200, {"result": [
                 {"name": "run", "url": "https://bi.example.com", "database": "SharpSight BI",
-                 "from_studio": True},
+                 "from_studio": True, "gate": "UAT"},
                 {"name": "prod", "url": "https://bi-prod.example.com", "database": "SharpSight BI",
-                 "from_studio": False}]})
+                 "from_studio": False, "gate": "PROD"}]})
         if path.endswith("/deployments"):
             return self._json(200, {"result": state.get("deployments", [])})
         if path.endswith("/report"):
@@ -474,13 +474,20 @@ class Handler(BaseHTTPRequestHandler):
             spec = copy.deepcopy((state["draft"] or {}).get("spec") or SPEC)
             slot = body.get("slot")
             asked = {k: v for k, v in body.items() if k != "slot" and v}
+            # an empty dimension is the one taken away — the inspector's "none" — as the engine reads it;
+            # a null is a field not said
+            cleared = [k for k, v in body.items() if k == "dimension" and v == ""]
             for component in spec["components"]:
                 if component["slot"] == slot:
                     component.update(asked)
-            said = ", ".join(f"{name} → {value}" for name, value in asked.items())
+                    for name in cleared:
+                        component.pop(name, None)
+            said = ", ".join([f"{name} → {value}" for name, value in asked.items()]
+                             + [f"{name} → none" for name in cleared])
             return self._json(200, {"result": {
                 "request": f"change {slot}", "read_by": "the Studio's own controls",
-                "understood": f"{slot}: {', '.join(asked)}", "summary": f"~ {slot}: {said}", "spec": spec,
+                "understood": f"{slot}: {', '.join([*asked, *cleared])}", "summary": f"~ {slot}: {said}",
+                "spec": spec,
                 "changes": [{"kind": "option", "slot": slot, "says": f"{slot}: {said}"}],
                 "touches": {"metrics": [], "datasets": [], "slots": [slot]},
                 "validation": {"passed": True, "checks": 42, "failures": [], "warnings": []},

@@ -291,6 +291,15 @@ class PolicyEngine:
                 for role in self.audience(datasets, metrics) for dataset in datasets
                 if (clause := self.role_row_policy(role, dataset)) is not None]
 
+    def declares_rule(self, role_name: str, dataset: DatasetDef) -> bool:
+        """Whether the policy still has a row-level rule for this role on this dataset, WHICHEVER dashboard
+        grants it. One dashboard's audience is not the question: several dashboards read one dataset, a role
+        may be the audience of another, and the rule it needs there must not go because this one is not for it.
+        Only a role that no longer exists, is no longer granted the dataset, or no longer has a predicate on it
+        has a rule the policy has withdrawn."""
+        return (role_name in self.registry.rbac.roles and self.grants(role_name, dataset)
+                and self.role_row_policy(role_name, dataset) is not None)
+
     # ── generated dbt models ────────────────────────────────────────────────────────────────────────────────
     _REF = re.compile(r"\{\{\s*ref\(\s*['\"]([A-Za-z0-9_]+)['\"]\s*\)\s*\}\}")
     _CONFIG = re.compile(r"\{\{\s*config\((.*?)\)\s*\}\}", re.S)

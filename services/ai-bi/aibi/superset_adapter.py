@@ -111,11 +111,34 @@ class SupersetAdapter:
                 return json.dumps(body["message"], ensure_ascii=False)[:600]
         return json.dumps(body, ensure_ascii=False)[:600]
 
+    # Superset answers a list at most 100 entries at a time (FAB_API_MAX_PAGE_SIZE), whatever is asked for.
+    PAGE_SIZE = 100
+    # A bound on the pages read, so a server that ignores `page` is an error and not an endless loop.
+    MAX_PAGES = 200
+    # The column each list is read in order of. Without one, Superset pages a query that has no ORDER BY, and
+    # PostgreSQL may give page 1 rows page 0 already gave and skip others: a read-back would call a rule
+    # missing that exists, and a clean-up would never see a stale one. Each of these is one the resource's API
+    # accepts (`id` is refused for row-level rules), and Superset adds the primary key as the tie-breaker.
+    ORDER_BY = {"rowlevelsecurity": "name", "dataset": "table_name", "database": "database_name",
+                "dashboard": "dashboard_title", "security/roles": "name", "security/users": "username"}
+
     def _list(self, resource: str, filters: list[dict[str, Any]], columns: Optional[list[str]] = None) -> list[dict]:
-        query: dict[str, Any] = {"filters": filters, "page_size": 100}
-        if columns:
-            query["columns"] = columns
-        return self._request("GET", f"/api/v1/{resource}/", params={"q": prison.dumps(query)}).get("result", [])
+        """EVERY entry that matches, page after page. A first page only is a silent truncation: a read-back
+        over 150 row-level rules would call fifty of them missing, and a clean-up would never see them."""
+        found: list[dict] = []
+        for page in range(self.MAX_PAGES):
+            query: dict[str, Any] = {"filters": filters, "page_size": self.PAGE_SIZE, "page": page,
+                                     "order_column": self.ORDER_BY[resource], "order_direction": "asc"}
+            if columns:
+                query["columns"] = columns
+            answer = self._request("GET", f"/api/v1/{resource}/", params={"q": prison.dumps(query)})
+            batch = answer.get("result", [])
+            found.extend(batch)
+            count = answer.get("count")
+            if len(batch) < self.PAGE_SIZE or (count is not None and len(found) >= int(count)):
+                return found
+        raise SupersetError(f"GET /api/v1/{resource}/ → more than {self.MAX_PAGES} pages: the list was not read "
+                            "to its end, and a partial list is not taken for the whole")
 
     def health(self) -> bool:
         try:
@@ -229,6 +252,13 @@ class SupersetAdapter:
     def dashboard_datasets(self, dashboard_id: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/api/v1/dashboard/{dashboard_id}/datasets").get("result", [])
 
+    def dataset_dashboards(self, dataset_id: int) -> list[int]:
+        """The dashboards a dataset is drawn on, by id — those a row-level rule on it still filters."""
+        answer = self._request("GET", f"/api/v1/dataset/{dataset_id}/related_objects", expect=(200, 404), raw=True)
+        if answer.status_code == 404:
+            return []
+        return sorted(one["id"] for one in (answer.json().get("dashboards") or {}).get("result", []))
+
     def export_dashboard(self, dashboard_id: int) -> bytes:
         """The dashboard as Superset itself exports it: a zip of YAML — dashboard, charts, datasets, connection
         (its password masked by Superset)."""
@@ -288,6 +318,10 @@ class SupersetAdapter:
 
     def dashboard_roles(self, dashboard_id: int) -> list[str]:
         return sorted(role["name"] for role in (self.get_dashboard(dashboard_id) or {}).get("roles", []))
+
+    def dashboard_role_ids(self, dashboard_id: int) -> list[int]:
+        """The ids a dashboard is granted to — what an update takes, and what is put back when one fails."""
+        return sorted(role["id"] for role in (self.get_dashboard(dashboard_id) or {}).get("roles", []))
 
     def row_rules(self, prefix: str) -> list[dict[str, Any]]:
         return self._list("rowlevelsecurity", [{"col": "name", "opr": "sw", "value": prefix}])
